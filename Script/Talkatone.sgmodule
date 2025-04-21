@@ -5,6 +5,7 @@
 [Script]
 𝗔𝗱𝗕𝗹𝗼𝗰𝗸_𝗧𝗮𝗹𝗸𝗮𝘁𝗼𝗻𝗲 = type=http-response, pattern=^https:\/\/.*\/ads\/(topbanner|middlebanner|bottombanner), requires-body=1, max-size=0, script-path=https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/Talkatone.js
 [Rule]
+DOMAIN-SUFFIX,spadsync.com,REJECT-DROP
 DOMAIN-SUFFIX,ads.inmobi.com,REJECT-DROP
 DOMAIN-SUFFIX,tappx.com,REJECT-DROP
 DOMAIN-SUFFIX,criteo.com,REJECT-DROP
@@ -26,7 +27,6 @@ DOMAIN-SUFFIX,doubleclick.net,REJECT-DROP
 DOMAIN-SUFFIX,googlesyndication.com,REJECT-DROP
 DOMAIN-SUFFIX,inner-active.mobi,REJECT-DROP
 DOMAIN-SUFFIX,mobilefuse.com,REJECT-DROP
-DOMAIN-KEYWORD,googleads,REJECT-DROP
 DOMAIN-SUFFIX,tktn.be,{{{PROXY}}}
 DOMAIN-SUFFIX,talkatone.com,{{{DIRECT}}}
 IP-CIDR,205.164.56.0/24,{{{DIRECT}}},no-resolve
