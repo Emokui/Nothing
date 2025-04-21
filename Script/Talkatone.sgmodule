@@ -2,6 +2,11 @@
 #!desc= 𝗥𝗲𝗺𝗼𝘃𝗲 𝗔𝗱 𝗔𝗻𝗱 𝗣𝗥𝗢𝗫𝗬 𝗢𝗥 𝗗𝗜𝗥𝗘𝗖𝗧 𝗖𝗼𝗻𝗻𝗲𝗰𝘁𝗶𝗼𝗻
 #!arguments=PROXY:PROXY,DIRECT:DIRECT
 #!arguments-desc=修改PROXY与DIRECT参数即可自定义直连或代理策略
+[URL Rewrite]
+^https?:\/\/.*\.talkatone\.com\/ad.*$ reject
+^https?:\/\/.*\.googleusercontent\.com\/talkatone_ads.*$ - reject
+^https?:\/\/.*\.firebaseio\.com\/ad_requests.*$ - reject
+^https?:\/\/.*\.doubleclick\.net\/pagead\/ads.*$ - reject
 [Rule]
 DOMAIN-SUFFIX,ads.inmobi.com,REJECT-DROP
 DOMAIN-SUFFIX,tappx.com,REJECT-DROP
