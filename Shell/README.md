@@ -1,4 +1,4 @@
-### ssh tools###
+### ssh tools ###
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Sukuna/main/SH/ssh.sh)
 ```
