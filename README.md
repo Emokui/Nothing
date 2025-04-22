@@ -1,12 +1,12 @@
 # ssh工具 #
 
 
-**集成以下功能**
+**Integrate the following functions**
 
 
 ![ssh](https://cover.zone.id/raw/Picture/Others/SSH.jpg "SSH")
 
-## 安装使用 ##
+## Install and use ##
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
@@ -16,11 +16,11 @@ bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.
 https://snell.zone.id
 
 
-## R2网盘 ##
+## R2 Cloud ##
 https://cover.zone.id
 
 
-## 分流库 ##
+## Rule ##
 
 https://github.com/Emokui/Rule
 
