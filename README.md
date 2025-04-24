@@ -10,7 +10,7 @@
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
-**OR CDN URL**
+**OR**
 ```
 bash <(curl -sL https://csnm.zone.id/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
