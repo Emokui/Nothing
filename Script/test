@@ -34,7 +34,9 @@ DOMAIN-SUFFIX,doubleclick.net,REJECT-DROP
 DOMAIN-SUFFIX,googlesyndication.com,REJECT-DROP
 DOMAIN-SUFFIX,inner-active.mobi,REJECT-DROP
 DOMAIN-SUFFIX,mobilefuse.com,REJECT-DROP
-DOMAIN-SUFFIX,tktn.be,{{{PROXY}}}
+DOMAIN-SUFFIX,tktn.pages.dev,{{{PROXY}}}
+DOMAIN-SUFFIX,xmpp4.pages.dev,{{{PROXY}}}
+DOMAIN-SUFFIX,dtktn.pages.dev,{{{PROXY}}}
 DOMAIN-SUFFIX,talkatone.com,{{{DIRECT}}}
 IP-CIDR,205.164.56.0/24,{{{DIRECT}}},no-resolve
 IP-CIDR,50.117.27.0/24,{{{DIRECT}}},no-resolve
