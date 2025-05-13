@@ -1,19 +1,14 @@
-# ssh tools #
+## install  ##
 
-
-**Integrate the following functions**
-
-
-![ssh](https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Mine/SSH.jpg "SSH")
-
-## Install and use ##
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
 **OR**
 ```
-bash <(curl -sL https://csnm.zone.id/Emokui/Nothing/Zero/Shell/ssh.sh)
+bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
+
+![ssh](https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Mine/SSH.jpg "SSH")
 
 
 ## Blog ##
