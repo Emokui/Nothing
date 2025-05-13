@@ -3,8 +3,8 @@
 #!arguments= PROXY:DIRECT,DIRECT:DIRECT
 #!arguments-desc= Customize PROXY or DIRECT
 [Host]
-a1.tktn.be = tktn.pages.dev:8443
-xmpp4.tktn.be = xmpp4.pages.dev:5222
+a1.tktn.be:8443 = tktn.pages.dev:8443
+xmpp4.tktn.be:5222 = xmpp4.pages.dev:5222
 d.tktn.be = dtktn.pages.dev
 [Script]
 rewrite-host-a1 = type=http-request,pattern=^https:\/\/a1\.tktn\.be:8443\/,requires-body=0,script-path=https://raw.githubusercontent.com/Emokui/Nothing/refs/heads/Zero/Script/test.js,argument=host=tktn.pages.dev
