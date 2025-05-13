@@ -12,11 +12,11 @@ bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/ssh.sh)
 
 
 ## Blog ##
-https://snell.zone.id
+https://snell.pages.dev
 
 
 ## R2 Cloud ##
-https://cover.zone.id
+https://noho.pages.dev
 
 
 ## Rule ##
