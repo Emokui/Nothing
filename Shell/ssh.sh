@@ -223,49 +223,49 @@ install_base_tools() {
 install_acme() {
     send_stats "安装Acme"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/acme.sh)
     set -e
     press_any_key_to_continue
 }
 install_snell() {
     send_stats "安装Snell"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell.sh)
     set -e
     press_any_key_to_continue
 }
 install_mihomo() {
     send_stats "安装Mihomo"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/mihomo.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/mihomo.sh)
     set -e
     press_any_key_to_continue
 }
 install_trojan() {
     send_stats "安装Trojan"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/trojan.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/trojan.sh)
     set -e
     press_any_key_to_continue
 }
 install_hysteria() {
     send_stats "安装Hysteria"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/hysteria.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/hysteria.sh)
     set -e
     press_any_key_to_continue
 }
 install_substore() {
     send_stats "安装SubStore"
     set +e
-    bash <(curl -fsSL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/substore.sh)
+    bash <(curl -fsSL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/substore.sh)
     set -e
     press_any_key_to_continue
 }
 install_install() {
     send_stats "一键DDSystem"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/chiakge/installNET/master/Install.sh)
+    bash <(curl -sL https://csnm.pages.dev/chiakge/installNET/master/Install.sh)
     set -e
     press_any_key_to_continue
 }
@@ -279,7 +279,7 @@ install_nginx() {
 install_snell-pro() {
     send_stats "超级Snell"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell-pro.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell-pro.sh)
     set -e
     press_any_key_to_continue
 }
