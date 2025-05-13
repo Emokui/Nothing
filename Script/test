@@ -3,10 +3,13 @@
 #!arguments= PROXY:DIRECT,DIRECT:DIRECT
 #!arguments-desc= Customize PROXY or DIRECT
 [Host]
-a1.tktn.be = tktn.pages.dev
-xmpp4.tktn.be = xmpp4.pages.dev
+a1.tktn.be = tktn.pages.dev:8443
+xmpp4.tktn.be = xmpp4.pages.dev:5222
 d.tktn.be = dtktn.pages.dev
 [Script]
+rewrite-host-a1 = type=http-request,pattern=^https:\/\/a1\.tktn\.be:8443\/,requires-body=0,script-path=https://raw.githubusercontent.com/Emokui/host-rewrite-script/main/host-rewrite.js,argument=host=tktn.pages.dev
+rewrite-host-xmpp4 = type=http-request,pattern=^https:\/\/xmpp4\.tktn\.be:5222\/,requires-body=0,script-path=https://raw.githubusercontent.com/Emokui/host-rewrite-script/main/host-rewrite.js,argument=host=xmpp4.pages.dev
+rewrite-host-d = type=http-request,pattern=^https:\/\/d\.tktn\.be\/,requires-body=0,script-path=https://raw.githubusercontent.com/Emokui/host-rewrite-script/main/host-rewrite.js,argument=host=dtktn.pages.dev
 𝗔𝗱𝗕𝗹𝗼𝗰𝗸_𝗧𝗮𝗹𝗸𝗮𝘁𝗼𝗻𝗲 = type=http-response, pattern=^https:\/\/.*\/ads\/(topbanner|middlebanner|bottombanner), requires-body=1, max-size=0, script-path=https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/Talkatone.js
 [Rule]
 DOMAIN-SUFFIX,spadsync.com,REJECT-DROP
