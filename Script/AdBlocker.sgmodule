@@ -2,7 +2,7 @@
 #!desc= 𝗨𝗻𝗹𝗼𝗰𝗸 𝗽𝗿𝗼, 𝗠𝗮𝗰 𝘃𝗲𝗿𝘀𝗶𝗼𝗻 𝗶𝘀 𝗮𝗹𝘀𝗼 𝗮𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲
 
 [Script]
-𝗔𝗱𝗯𝗹𝗼𝗰𝗸𝗽𝗿𝗼 = type=http-response, pattern=^https:\/\/api\.adblockpro\.app\/verify, script-path=https://csnm.zone.id/Emokui/Nothing/Zero/Script/Adblockpro.js, requires-body=true, max-size=-1, timeout=60
+𝗔𝗱𝗯𝗹𝗼𝗰𝗸𝗽𝗿𝗼 = type=http-response, pattern=^https:\/\/api\.adblockpro\.app\/verify, script-path=https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Adblockpro.js, requires-body=true, max-size=-1, timeout=60
 
 [MITM]
 hostname = %APPEND% api.adblockpro.app
