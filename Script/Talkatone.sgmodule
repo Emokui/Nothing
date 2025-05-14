@@ -5,8 +5,19 @@
 [Script]
 𝗔𝗱𝗕𝗹𝗼𝗰𝗸_𝗧𝗮𝗹𝗸𝗮𝘁𝗼𝗻𝗲 = type=http-response, pattern=^https:\/\/.*\/ads\/(topbanner|middlebanner|bottombanner), requires-body=1, max-size=0, script-path=https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Talkatone.js
 [Rule]
+URL-REGEX,"^http:\/\/itunes\.apple\.com\/lookup\?bundleId=im\.talkme\.talkmeim.*",REJECT-DROP
+DOMAIN,amp-api-edge.apps.apple.com,REJECT-DROP
+DOMAIN,ocsp2.apple.com,REJECT-DROP
+DOMAIN,wps.apple.com,REJECT-DROP
+DOMAIN,googleads.g.doubleclick.net,REJECT-DROP
+DOMAIN,wv.inner-active.mobi,REJECT-DROP
+DOMAIN,ads.pubmatic.com,REJECT-DROP
+DOMAIN,app-analytics-services.com,REJECT-DROP
+DOMAIN-SUFFIX,inmobi.com,REJECT-DROP
+DOMAIN,ads.inmobi.com,REJECT-DROP
+DOMAIN-SUFFIX,firebase-settings.crashlytics.com,REJECT-DROP
+DOMAIN-SUFFIX,skadnetworks.fyber.com,REJECT-DROP
 DOMAIN-SUFFIX,spadsync.com,REJECT-DROP
-DOMAIN-SUFFIX,ads.inmobi.com,REJECT-DROP
 DOMAIN-SUFFIX,tappx.com,REJECT-DROP
 DOMAIN-SUFFIX,criteo.com,REJECT-DROP
 DOMAIN-SUFFIX,pubmatic.com,REJECT-DROP
