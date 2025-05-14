@@ -1,7 +1,4 @@
-**CDN URL:**
+**URL**
 
 
-***https://cn.hk.dedyn.io/raw/icon.json***
-
-
-***https://csnm.pages.dev/Emokui/Nothing/Zero/icon/Fatalevel.json***
+***https://noho.pages.dev/neko/Picture/icon/icon.json***
