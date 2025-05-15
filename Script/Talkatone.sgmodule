@@ -5,8 +5,8 @@
 [Script]
 𝗔𝗱𝗕𝗹𝗼𝗰𝗸_𝗧𝗮𝗹𝗸𝗮𝘁𝗼𝗻𝗲 = type=http-response, pattern=^https:\/\/.*\/ads\/(topbanner|middlebanner|bottombanner), requires-body=1, max-size=0, script-path=https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Talkatone.js
 [Rule]
-DOMAIN-SUFFIX,tktn.be,{{{PROXY}}},no-resolve
-DOMAIN-SUFFIX,talkatone.com,{{{DIRECT}}},no-resolve
+DOMAIN-SUFFIX,tktn.be,{{{PROXY}}}
+DOMAIN-SUFFIX,talkatone.com,{{{DIRECT}}}
 IP-CIDR,205.164.56.0/24,{{{DIRECT}}},no-resolve
 IP-CIDR,50.117.27.0/24,{{{DIRECT}}},no-resolve
 IP-CIDR,69.46.75.0/24,{{{DIRECT}}},no-resolve
