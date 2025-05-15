@@ -591,11 +591,11 @@ main_menu() {
         echo -e "${gl_kjlan}==== Steins Gate - 凤凰院凶真 Ver.1.0 ==== ${gl_bai}"
         echo -e "${gl_lv}01.${gl_bai} 系统更新"
         echo -e "${gl_lv}02.${gl_bai} 系统清理"
-        echo -e "${gl_lv}03.${gl_bai} 开启root 登录"
-        echo -e "${gl_lv}04.${gl_bai} 修改root 密码"
-        echo -e "${gl_lv}05.${gl_bai} 修改SSH 端口"
-        echo -e "${gl_lv}06.${gl_bai} 更改时区"
-        echo -e "${gl_lv}07.${gl_bai} 设置防火墙"
+        echo -e "${gl_lv}03.${gl_bai} 更改时区"
+        echo -e "${gl_lv}04.${gl_bai} 开启 root登录"
+        echo -e "${gl_lv}05.${gl_bai} 修改 root密码"
+        echo -e "${gl_lv}06.${gl_bai} 修改 SSH端口"
+        echo -e "${gl_lv}07.${gl_bai} 配置 防火墙"
         echo -e "${gl_lv}08.${gl_bai} 配置 DNS"
         echo -e "${gl_lv}09.${gl_bai} 管理 BBR"
         echo -e "${gl_lv}10.${gl_bai} 管理 WARP"
@@ -617,10 +617,10 @@ main_menu() {
         case "$choice" in
             1) linux_update;;
             2) linux_clean;;
-            3) enable_root_login;;
-            4) change_root_password;;
-            5) change_ssh_port;;
-            6) change_timezone;;
+            3) change_timezone;;
+            4) enable_root_login;;
+            5) change_root_password;;
+            6) change_ssh_port;;
             7) configure_firewall;;
             8) dns_config_menu;;
             9) bbr_menu;;
