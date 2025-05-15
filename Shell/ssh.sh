@@ -603,14 +603,14 @@ main_menu() {
         echo -e "${gl_lv}12.${gl_bai} 安装 wget/unzip"
         echo -e "${gl_lv}13.${gl_bai} 配置 Acme"
         echo -e "${gl_lv}14.${gl_bai} 配置 Snell"
-        echo -e "${gl_lv}15.${gl_bai} 配置 Mihomo"
-        echo -e "${gl_lv}16.${gl_bai} 配置 Trojan"
-        echo -e "${gl_lv}17.${gl_bai} 配置 Hysteria"
-        echo -e "${gl_lv}18.${gl_bai} 配置 SubStore"
-        echo -e "${gl_lv}19.${gl_bai} 一键 DDSystem"
-        echo -e "${gl_lv}20.${gl_bai} 一键 Debian12"
-        echo -e "${gl_lv}21.${gl_bai} 反代 Nginx"
-        echo -e "${gl_lv}22.${gl_bai} 超级 Snell"
+        echo -e "${gl_lv}15.${gl_bai} 超级 Snell"
+        echo -e "${gl_lv}16.${gl_bai} 配置 Mihomo"
+        echo -e "${gl_lv}17.${gl_bai} 配置 Trojan"
+        echo -e "${gl_lv}18.${gl_bai} 配置 Hysteria"
+        echo -e "${gl_lv}19.${gl_bai} 配置 SubStore"
+        echo -e "${gl_lv}20.${gl_bai} 一键 DDSystem"
+        echo -e "${gl_lv}21.${gl_bai} 一键 Debian12"
+        echo -e "${gl_lv}22.${gl_bai} 反代 Nginx"
         echo -e "${gl_lv} 0.${gl_bai} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
@@ -629,14 +629,14 @@ main_menu() {
             12) install_base_tools;;
             13) install_acme;;
             14) install_snell;;
-            15) install_mihomo;;
-            16) install_trojan;;
-            17) install_hysteria;;
-            18) install_substore;;
-            19) install_install;;
-            20) install_debian12;;
-            21) install_nginx;;
-            22) install_snell-pro;;
+            15) install_snell-pro;;
+            16) install_mihomo;;
+            17) install_trojan;;
+            18) install_hysteria;;
+            19) install_substore;;
+            20) install_install;;
+            21) install_debian12;;
+            22) install_nginx;;
             0) clear; echo -e "${gl_zi}「运命石之扉の选择,El Psy Kongroo」${gl_bai}"; sleep 1; clear; break;;
             *) clear; echo -e "${gl_hong}[!] 无效选项，请重新选择${gl_bai}"; sleep 2;;
         esac
