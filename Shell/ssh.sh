@@ -272,14 +272,14 @@ install_install() {
 install_debian12() {
     send_stats "一键Debian12"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh) debian 12
+    bash <(curl -sL https://csnm.pages.dev/bin456789/reinstall/main/reinstall.sh) debian 12
     set -e
     press_any_key_to_continue
 }
 install_nginx() {
     send_stats "反代Nginx"
     set +e
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/nginx.sh)
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/nginx.sh)
     set -e
     press_any_key_to_continue
 }
