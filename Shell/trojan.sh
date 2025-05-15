@@ -79,6 +79,13 @@ modify_trojan_config() {
     old_cert=$(grep -oP '"cert":\s*"\K[^"]+' "$CONFIG")
     old_key=$(grep -oP '"key":\s*"\K[^"]+' "$CONFIG")
 
+    # forward_proxy 旧值提取
+    old_fp_enabled=$(grep -oP '"forward_proxy":\s*\{[^\}]*"enabled":\s*\K(true|false)' "$CONFIG")
+    old_fp_addr=$(grep -oP '"proxy_addr":\s*"\K[^"]+' "$CONFIG")
+    old_fp_port=$(grep -oP '"proxy_port":\s*\K[0-9]+' "$CONFIG")
+    old_fp_username=$(grep -oP '"username":\s*"\K[^"]*' "$CONFIG")
+    old_fp_password=$(grep -oP '"password":\s*"\K[^"]*' "$CONFIG")
+
     read -p "$(echo -e "${CYAN}請輸入本地監聽端口 (節點端口) [預設: $old_local_port]: ${PLAIN}")" local_port
     local_port=${local_port:-$old_local_port}
 
@@ -90,8 +97,11 @@ modify_trojan_config() {
 
     read -p "$(echo -e "${CYAN}請輸入密碼 (回車隨機8位數字字母) [預設: $old_password]: ${PLAIN}")" password
     if [ -z "$password" ]; then
-        password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
-        echo -e "${GREEN}已自動生成密碼: $password${PLAIN}"
+        password=$old_password
+        if [ -z "$password" ]; then
+            password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
+            echo -e "${GREEN}已自動生成密碼: $password${PLAIN}"
+        fi
     fi
 
     read -p "$(echo -e "${CYAN}請輸入路徑 [預設: $old_ws_path]: ${PLAIN}")" ws_path
@@ -135,6 +145,33 @@ modify_trojan_config() {
     read -p "$(echo -e "${CYAN}請輸入 WebSocket Host（默認與證書域名相同） [預設: $domain]: ${PLAIN}")" ws_host
     ws_host=${ws_host:-$domain}
 
+    # forward_proxy 交互
+    default_fp_text="n"
+    if [[ "$old_fp_enabled" == "true" ]]; then
+        default_fp_text="y"
+    fi
+    read -p "$(echo -e "${CYAN}是否启用 forward_proxy 转发代理？(y/n) [默认: $default_fp_text]: ${PLAIN}")" enable_fp
+    if [[ -z "$enable_fp" ]]; then
+        enable_fp=$default_fp_text
+    fi
+    if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
+        fp_enabled="true"
+        read -p "$(echo -e "${CYAN}请输入代理地址 [默认: ${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
+        proxy_addr=${proxy_addr:-${old_fp_addr:-127.0.0.1}}
+        read -p "$(echo -e "${CYAN}请输入代理端口 [默认: ${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
+        proxy_port=${proxy_port:-${old_fp_port:-18443}}
+        read -p "$(echo -e "${CYAN}请输入代理用户名（可留空） [默认: $old_fp_username]: ${PLAIN}")" fp_username
+        fp_username=${fp_username:-$old_fp_username}
+        read -p "$(echo -e "${CYAN}请输入代理密码（可留空） [默认: $old_fp_password]: ${PLAIN}")" fp_password
+        fp_password=${fp_password:-$old_fp_password}
+    else
+        fp_enabled="false"
+        proxy_addr="127.0.0.1"
+        proxy_port="18443"
+        fp_username=""
+        fp_password=""
+    fi
+
     cat > "$CONFIG" <<EOF
 {
     "run_type": "server",
@@ -159,6 +196,13 @@ modify_trojan_config() {
         "enabled": true,
         "concurrency": 8,
         "idle_timeout": 60
+    },
+    "forward_proxy": {
+        "enabled": $fp_enabled,
+        "proxy_addr": "$proxy_addr",
+        "proxy_port": $proxy_port,
+        "username": "$fp_username",
+        "password": "$fp_password"
     }
 }
 EOF
@@ -353,6 +397,24 @@ install_trojan_go() {
     read -p "$(echo -e "${CYAN}請輸入 WebSocket Host（默認與證書域名相同）: ${PLAIN}")" ws_host
     ws_host=${ws_host:-$domain}
 
+    # forward_proxy 交互
+    read -p "$(echo -e "${CYAN}是否启用 forward_proxy 转发代理？(y/n) [默认: n]: ${PLAIN}")" enable_fp
+    if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
+        fp_enabled="true"
+        read -p "$(echo -e "${CYAN}请输入代理地址 [默认: 127.0.0.1]: ${PLAIN}")" proxy_addr
+        proxy_addr=${proxy_addr:-127.0.0.1}
+        read -p "$(echo -e "${CYAN}请输入代理端口 [默认: 18443]: ${PLAIN}")" proxy_port
+        proxy_port=${proxy_port:-18443}
+        read -p "$(echo -e "${CYAN}请输入代理用户名（可留空）: ${PLAIN}")" fp_username
+        read -p "$(echo -e "${CYAN}请输入代理密码（可留空）: ${PLAIN}")" fp_password
+    else
+        fp_enabled="false"
+        proxy_addr="127.0.0.1"
+        proxy_port="18443"
+        fp_username=""
+        fp_password=""
+    fi
+
     cat > /root/trojan/config.json <<EOF
 {
     "run_type": "server",
@@ -377,6 +439,13 @@ install_trojan_go() {
         "enabled": true,
         "concurrency": 8,
         "idle_timeout": 60
+    },
+    "forward_proxy": {
+        "enabled": $fp_enabled,
+        "proxy_addr": "$proxy_addr",
+        "proxy_port": $proxy_port,
+        "username": "$fp_username",
+        "password": "$fp_password"
     }
 }
 EOF
