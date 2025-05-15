@@ -85,6 +85,11 @@ modify_mihomo_config() {
     # 读取配置
     tun_enable=$(awk '/^tun:/ {f=1} f && /enable:/ {print $2;f=0}' "$CONFIG_PATH")
     socks_port=$(awk '/^socks-port:/ {print $2}' "$CONFIG_PATH")
+    bind_address=$(awk '/^bind-address:/ {print $2}' "$CONFIG_PATH" | tr -d '"')
+    has_auth=$(awk '/^authentication:/ {print "yes"}' "$CONFIG_PATH")
+    auth_user_pass=$(awk '/^  - / {print $2}' "$CONFIG_PATH" | head -n 1)
+    auth_user=$(echo "$auth_user_pass" | cut -d: -f1)
+    auth_pass=$(echo "$auth_user_pass" | cut -d: -f2)
     private_key=$(awk '/- name: "warp"/, /mtu:/ {if($1=="private-key:")print $2}' "$CONFIG_PATH")
     server=$(awk '/- name: "warp"/, /mtu:/ {if($1=="server:")print $2}' "$CONFIG_PATH")
     port=$(awk '/- name: "warp"/, /mtu:/ {if($1=="port:")print $2}' "$CONFIG_PATH")
@@ -98,15 +103,17 @@ modify_mihomo_config() {
         echo -e "${CYAN}当前配置:${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} tun.enable:      ${YELLOW}$tun_enable${PLAIN}"
         echo -e "${GREEN}2.${PLAIN} socks-port:      ${YELLOW}${socks_port:-无}${PLAIN}"
-        echo -e "${GREEN}3.${PLAIN} WireGuard Private-key: ${YELLOW}$private_key${PLAIN}"
-        echo -e "${GREEN}4.${PLAIN} WireGuard Server:      ${YELLOW}$server${PLAIN}"
-        echo -e "${GREEN}5.${PLAIN} WireGuard Port:        ${YELLOW}$port${PLAIN}"
-        echo -e "${GREEN}6.${PLAIN} WireGuard Public-key:  ${YELLOW}$public_key${PLAIN}"
-        echo -e "${GREEN}7.${PLAIN} WireGuard Reserved:    ${YELLOW}$reserved${PLAIN}"
-        echo -e "${GREEN}8.${PLAIN} WireGuard MTU:         ${YELLOW}$mtu${PLAIN}"
+        echo -e "${GREEN}3.${PLAIN} bind-address:    ${YELLOW}${bind_address:-127.0.0.1}${PLAIN}"
+        echo -e "${GREEN}4.${PLAIN} SOCKS5认证:      ${YELLOW}${has_auth:-无}${PLAIN}"
+        echo -e "${GREEN}5.${PLAIN} WireGuard Private-key: ${YELLOW}$private_key${PLAIN}"
+        echo -e "${GREEN}6.${PLAIN} WireGuard Server:      ${YELLOW}$server${PLAIN}"
+        echo -e "${GREEN}7.${PLAIN} WireGuard Port:        ${YELLOW}$port${PLAIN}"
+        echo -e "${GREEN}8.${PLAIN} WireGuard Public-key:  ${YELLOW}$public_key${PLAIN}"
+        echo -e "${GREEN}9.${PLAIN} WireGuard Reserved:    ${YELLOW}$reserved${PLAIN}"
+        echo -e "${GREEN}10.${PLAIN} WireGuard MTU:         ${YELLOW}$mtu${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 保存并重启 Mihomo 服务${PLAIN}"
         echo -e "${GREEN}q.${PLAIN} 放弃修改并返回${PLAIN}"
-        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-8/q]: ${PLAIN}")" modchoice
+        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-10/q]: ${PLAIN}")" modchoice
 
         case $modchoice in
             1)
@@ -131,6 +138,49 @@ modify_mihomo_config() {
                 socks_port="$newval"
                 ;;
             3)
+                echo -e "${YELLOW}请选择 bind-address 监听地址:${PLAIN}"
+                echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问, 推荐)"
+                echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡, 允许外部访问)"
+                read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (当前:${bind_address:-127.0.0.1}): ${PLAIN}")" bind_choice
+                case "$bind_choice" in
+                    2) newval="0.0.0.0" ;;
+                    *) newval="127.0.0.1" ;;
+                esac
+                if grep -q "^bind-address:" "$CONFIG_PATH"; then
+                    sed -i "s/^bind-address:.*/bind-address: \"$newval\"/" "$CONFIG_PATH"
+                else
+                    sed -i "/^socks-port:/a bind-address: \"$newval\"" "$CONFIG_PATH"
+                fi
+                bind_address="$newval"
+                ;;
+            4)
+                echo -e "${YELLOW}是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
+                read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (当前: ${has_auth:-n}): ${PLAIN}")" auth_enable
+                auth_enable=${auth_enable:-n}
+                if [[ "$auth_enable" == "y" || "$auth_enable" == "Y" ]]; then
+                    read -e -p "$(echo -e "${BLUE}请输入用户名 (默认admin): ${PLAIN}")" newuser
+                    read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" newpass
+                    newuser=${newuser:-admin}
+                    newpass=${newpass:-admin}
+                    if grep -q "^authentication:" "$CONFIG_PATH"; then
+                        # 替换已有认证
+                        sed -i "/^authentication:/,/^ *[^-]/c\authentication:\n  - \"$newuser:$newpass\"" "$CONFIG_PATH"
+                    else
+                        # 添加新认证
+                        sed -i "/^bind-address:/a authentication:\n  - \"$newuser:$newpass\"" "$CONFIG_PATH"
+                    fi
+                    has_auth="yes"
+                    auth_user="$newuser"
+                    auth_pass="$newpass"
+                else
+                    # 删除认证字段
+                    sed -i '/^authentication:/,/^ *[^-]/d' "$CONFIG_PATH"
+                    has_auth=""
+                    auth_user=""
+                    auth_pass=""
+                fi
+                ;;
+            5)
                 read -e -p "$(echo -e "${BLUE}WireGuard Private-key [当前:$private_key]: ${PLAIN}")" newval
                 newval=${newval:-$private_key}
                 awk '
@@ -140,7 +190,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 private_key="$newval"
                 ;;
-            4)
+            6)
                 read -e -p "$(echo -e "${BLUE}WireGuard Server [当前:$server]: ${PLAIN}")" newval
                 newval=${newval:-$server}
                 awk '
@@ -150,7 +200,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 server="$newval"
                 ;;
-            5)
+            7)
                 read -e -p "$(echo -e "${BLUE}WireGuard Port [当前:$port]: ${PLAIN}")" newval
                 newval=${newval:-$port}
                 awk '
@@ -160,7 +210,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 port="$newval"
                 ;;
-            6)
+            8)
                 read -e -p "$(echo -e "${BLUE}WireGuard Public-key [当前:$public_key]: ${PLAIN}")" newval
                 newval=${newval:-$public_key}
                 awk '
@@ -170,7 +220,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 public_key="$newval"
                 ;;
-            7)
+            9)
                 read -e -p "$(echo -e "${BLUE}WireGuard Reserved [当前:$reserved]: ${PLAIN}")" newval
                 newval=${newval:-$reserved}
                 awk '
@@ -180,7 +230,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 reserved="$newval"
                 ;;
-            8)
+            10)
                 read -e -p "$(echo -e "${BLUE}WireGuard MTU [当前:$mtu]: ${PLAIN}")" newval
                 newval=${newval:-$mtu}
                 awk '
@@ -275,6 +325,30 @@ install_mihomo() {
     socks_port=${socks_port:-18443}
     echo
 
+    # 交互设置 bind-address
+    echo -e "${YELLOW}[*] 请选择 bind-address 监听地址: ${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问, 推荐)"
+    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡, 允许外部访问)"
+    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" bind_choice
+    case "$bind_choice" in
+        2) bind_address="0.0.0.0" ;;
+        *) bind_address="127.0.0.1" ;;
+    esac
+
+    # 交互选择是否添加 authentication
+    echo -e "${YELLOW}[*] 是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
+    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (默认n): ${PLAIN}")" auth_enable
+    auth_enable=${auth_enable:-n}
+    if [[ "$auth_enable" == "y" || "$auth_enable" == "Y" ]]; then
+        read -e -p "$(echo -e "${BLUE}请输入用户名 (默认admin): ${PLAIN}")" auth_user
+        read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" auth_pass
+        auth_user=${auth_user:-admin}
+        auth_pass=${auth_pass:-admin}
+        authentication_config="authentication:\n  - \"$auth_user:$auth_pass\""
+    else
+        authentication_config=""
+    fi
+
     # 写入 config.yaml
     echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
     cat <<EOF > config.yaml
@@ -295,7 +369,8 @@ tcp-concurrent: true
 find-process-mode: off
 allow-lan: true
 socks-port: $socks_port
-bind-address: "127.0.0.1"
+bind-address: "$bind_address"
+$(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
 mode: rule
 log-level: warning
 ipv6: false
