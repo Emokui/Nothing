@@ -344,14 +344,14 @@ rule-providers:
     behavior: classical
     format: text
     path: ./𝗔𝗜
-    url: https://fbi.hk.dedyn.io/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗔𝗜
+    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗔𝗜
     interval: 86400
   YouTube:
     type: http
     behavior: classical
     format: text
     path: ./𝗬𝗼𝘂𝗧𝘂𝗯𝗲
-    url: https://fbi.hk.dedyn.io/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗬𝗼𝘂𝗧𝘂𝗯𝗲
+    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗬𝗼𝘂𝗧𝘂𝗯𝗲
     interval: 86400
 
 rules:
