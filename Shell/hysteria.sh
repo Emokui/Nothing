@@ -298,6 +298,8 @@ EOF
       if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
           read -p "$(echo -e "${YELLOW}请输入socks5端口 (默认18443): ${PLAIN}")" socks5_port
           socks5_port=${socks5_port:-18443}
+          read -p "$(echo -e "${YELLOW}请输入 socks5 用户名（可留空）: ${PLAIN}")" socks5_username
+          read -p "$(echo -e "${YELLOW}请输入 socks5 密码（可留空）: ${PLAIN}")" socks5_password
           OUTBOUNDS_CONFIG=$(cat <<EOF2
 
 outbounds:
@@ -305,6 +307,8 @@ outbounds:
     type: socks5
     socks5:
       addr: 127.0.0.1:${socks5_port}
+      username: ${socks5_username}
+      password: ${socks5_password}
 EOF2
 )
           echo "$OUTBOUNDS_CONFIG" >> "$HY2_DIR/config.yaml"
@@ -482,6 +486,8 @@ EOF
                 if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
                     read -p "$(echo -e "${YELLOW}请输入socks5端口 (默认18443): ${PLAIN}")" socks5_port
                     socks5_port=${socks5_port:-18443}
+                    read -p "$(echo -e "${YELLOW}请输入 socks5 用户名（可留空）: ${PLAIN}")" socks5_username
+                    read -p "$(echo -e "${YELLOW}请输入 socks5 密码（可留空）: ${PLAIN}")" socks5_password
                     OUTBOUNDS_CONFIG=$(cat <<EOF2
 
 outbounds:
@@ -489,6 +495,8 @@ outbounds:
     type: socks5
     socks5:
       addr: 127.0.0.1:${socks5_port}
+      username: ${socks5_username}
+      password: ${socks5_password}
 EOF2
 )
                     echo "$OUTBOUNDS_CONFIG" >> "$CONFIG_PATH"
