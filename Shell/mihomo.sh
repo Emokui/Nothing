@@ -302,7 +302,7 @@ install_mihomo() {
     read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" server
     server=${server:-162.159.193.8}
 
-    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2480,可填:500,1701,2480,4500]${PLAIN}: ")" port
+    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2408,可填:500,1701,2408,4500]${PLAIN}: ")" port
     port=${port:-2408}
     if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
         echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
