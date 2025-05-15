@@ -269,6 +269,13 @@ install_install() {
     set -e
     press_any_key_to_continue
 }
+install_debian12() {
+    send_stats "一键Debian12"
+    set +e
+    bash <(curl -sL https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh) debian 12
+    set -e
+    press_any_key_to_continue
+}
 install_nginx() {
     send_stats "反代Nginx"
     set +e
@@ -601,8 +608,9 @@ main_menu() {
         echo -e "${gl_lv}17.${gl_bai} 配置 Hysteria"
         echo -e "${gl_lv}18.${gl_bai} 配置 SubStore"
         echo -e "${gl_lv}19.${gl_bai} 一键 DDSystem"
-        echo -e "${gl_lv}20.${gl_bai} 反代 Nginx"
-        echo -e "${gl_lv}21.${gl_bai} 超级 Snell"
+        echo -e "${gl_lv}20.${gl_bai} 一键 Debian12"
+        echo -e "${gl_lv}21.${gl_bai} 反代 Nginx"
+        echo -e "${gl_lv}22.${gl_bai} 超级 Snell"
         echo -e "${gl_lv} 0.${gl_bai} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
@@ -626,8 +634,9 @@ main_menu() {
             17) install_hysteria;;
             18) install_substore;;
             19) install_install;;
-            20) install_nginx;;
-            21) install_snell-pro;;
+            20) install_debian12;;
+            21) install_nginx;;
+            22) install_snell-pro;;
             0) clear; echo -e "${gl_zi}「运命石之扉の选择,El Psy Kongroo」${gl_bai}"; sleep 1; clear; break;;
             *) clear; echo -e "${gl_hong}[!] 无效选项，请重新选择${gl_bai}"; sleep 2;;
         esac
