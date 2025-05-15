@@ -294,7 +294,7 @@ install_mihomo() {
     echo
 
     # WireGuard 配置交互
-    echo -e "${YELLOW}[*] 请输入 WireGuard 配置信息（直接回车为默认值）：${PLAIN}"
+    echo -e "${YELLOW}[*] 请配置 WireGuard 参数：${PLAIN}"
 
     read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[回车使用默认值]${PLAIN}: ")" private_key
     private_key=${private_key:-eMCyIN4iJrc9jeot1L+53I1N7whB3AVlMYCF43yJfnQ=}
@@ -302,7 +302,7 @@ install_mihomo() {
     read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" server
     server=${server:-162.159.193.8}
 
-    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2480,可选 500,1701,2480,4500]${PLAIN}: ")" port
+    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2480,可填:500,1701,2480,4500]${PLAIN}: ")" port
     port=${port:-2408}
     if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
         echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
@@ -315,18 +315,18 @@ install_mihomo() {
     read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}${CYAN}[默认值:[20,67,117]]${PLAIN}: ")" reserved
     reserved=${reserved:-[20,67,117]}
 
-    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认值:1280,可选1350]${PLAIN}: ")" mtu
+    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认值:1280,可填:1350]${PLAIN}: ")" mtu
     mtu=${mtu:-1280}
     echo
 
     # socks-port 配置
-    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车为默认18443）：${PLAIN}"
+    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车默认18443）：${PLAIN}"
     read -e -p "$(echo -e "${BLUE}  socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
     socks_port=${socks_port:-18443}
     echo
 
     # 交互设置 bind-address
-    echo -e "${YELLOW}[*] 请选择 bind-address 监听地址: ${PLAIN}"
+    echo -e "${YELLOW}[*] 请配置 bind-address 监听地址: ${PLAIN}"
     echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问, 推荐)"
     echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡, 允许外部访问)"
     read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" bind_choice
