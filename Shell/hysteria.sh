@@ -290,12 +290,14 @@ EOF
       echo -e "${CYAN}配置文件內容如下：${PLAIN}"
       cat "$HY2_DIR/config.yaml"
 
-      # 交互添加 outbounds 配置
+      # 交互添加 outbounds 配置（包含地址、端口、用户名、密码）
       echo -e "${YELLOW}是否添加 SOCKS5 outbounds 配置？${PLAIN}"
       read -p "$(echo -e "${BLUE}添加请输入 y，不添加请输入 n [y/n]: ${PLAIN}")" enable_outbounds
       enable_outbounds=${enable_outbounds:-n}
 
       if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
+          read -p "$(echo -e "${YELLOW}请输入socks5地址 (默认127.0.0.1): ${PLAIN}")" socks5_addr
+          socks5_addr=${socks5_addr:-127.0.0.1}
           read -p "$(echo -e "${YELLOW}请输入socks5端口 (默认18443): ${PLAIN}")" socks5_port
           socks5_port=${socks5_port:-18443}
           read -p "$(echo -e "${YELLOW}请输入 socks5 用户名（可留空）: ${PLAIN}")" socks5_username
@@ -306,7 +308,7 @@ outbounds:
   - name: mihomo
     type: socks5
     socks5:
-      addr: 127.0.0.1:${socks5_port}
+      addr: ${socks5_addr}:${socks5_port}
       username: ${socks5_username}
       password: ${socks5_password}
 EOF2
@@ -478,12 +480,14 @@ masquerade:
     rewriteHost: true
 EOF
 
-                # 交互添加 outbounds 配置
+                # 交互添加 outbounds 配置（包含地址、端口、用户名、密码）
                 echo -e "${YELLOW}是否添加 SOCKS5 outbounds 配置？${PLAIN}"
                 read -p "$(echo -e "${BLUE}添加请输入 y，不添加请输入 n [y/n]: ${PLAIN}")" enable_outbounds
                 enable_outbounds=${enable_outbounds:-n}
 
                 if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
+                    read -p "$(echo -e "${YELLOW}请输入socks5地址 (默认127.0.0.1): ${PLAIN}")" socks5_addr
+                    socks5_addr=${socks5_addr:-127.0.0.1}
                     read -p "$(echo -e "${YELLOW}请输入socks5端口 (默认18443): ${PLAIN}")" socks5_port
                     socks5_port=${socks5_port:-18443}
                     read -p "$(echo -e "${YELLOW}请输入 socks5 用户名（可留空）: ${PLAIN}")" socks5_username
@@ -494,7 +498,7 @@ outbounds:
   - name: mihomo
     type: socks5
     socks5:
-      addr: 127.0.0.1:${socks5_port}
+      addr: ${socks5_addr}:${socks5_port}
       username: ${socks5_username}
       password: ${socks5_password}
 EOF2
