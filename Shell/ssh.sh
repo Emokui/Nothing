@@ -221,42 +221,42 @@ install_base_tools() {
 }
 
 install_acme() {
-    send_stats "安装Acme"
+    send_stats "配置Acme"
     set +e
     bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/acme.sh)
     set -e
     press_any_key_to_continue
 }
 install_snell() {
-    send_stats "安装Snell"
+    send_stats "配置Snell"
     set +e
     bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell.sh)
     set -e
     press_any_key_to_continue
 }
 install_mihomo() {
-    send_stats "安装Mihomo"
+    send_stats "配置Mihomo"
     set +e
     bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/mihomo.sh)
     set -e
     press_any_key_to_continue
 }
 install_trojan() {
-    send_stats "安装Trojan"
+    send_stats "配置Trojan"
     set +e
     bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/trojan.sh)
     set -e
     press_any_key_to_continue
 }
 install_hysteria() {
-    send_stats "安装Hysteria"
+    send_stats "配置Hysteria"
     set +e
     bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/hysteria.sh)
     set -e
     press_any_key_to_continue
 }
 install_substore() {
-    send_stats "安装SubStore"
+    send_stats "配置SubStore"
     set +e
     bash <(curl -fsSL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/substore.sh)
     set -e
@@ -594,12 +594,12 @@ main_menu() {
         echo -e "${gl_lv}10.${gl_bai} 管理 WARP"
         echo -e "${gl_lv}11.${gl_bai} 重启 VPS"
         echo -e "${gl_lv}12.${gl_bai} 安装 wget/unzip"
-        echo -e "${gl_lv}13.${gl_bai} 安装 Acme"
-        echo -e "${gl_lv}14.${gl_bai} 安装 Snell"
-        echo -e "${gl_lv}15.${gl_bai} 安装 Mihomo"
-        echo -e "${gl_lv}16.${gl_bai} 安装 Trojan"
-        echo -e "${gl_lv}17.${gl_bai} 安装 Hysteria"
-        echo -e "${gl_lv}18.${gl_bai} 安装 SubStore"
+        echo -e "${gl_lv}13.${gl_bai} 配置 Acme"
+        echo -e "${gl_lv}14.${gl_bai} 配置 Snell"
+        echo -e "${gl_lv}15.${gl_bai} 配置 Mihomo"
+        echo -e "${gl_lv}16.${gl_bai} 配置 Trojan"
+        echo -e "${gl_lv}17.${gl_bai} 配置 Hysteria"
+        echo -e "${gl_lv}18.${gl_bai} 配置 SubStore"
         echo -e "${gl_lv}19.${gl_bai} 一键 DDSystem"
         echo -e "${gl_lv}20.${gl_bai} 反代 Nginx"
         echo -e "${gl_lv}21.${gl_bai} 超级 Snell"
