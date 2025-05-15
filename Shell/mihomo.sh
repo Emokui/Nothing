@@ -296,31 +296,31 @@ install_mihomo() {
     # WireGuard 配置交互
     echo -e "${YELLOW}[*] 请输入 WireGuard 配置信息（直接回车为默认值）：${PLAIN}"
 
-    read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[默认: 2Nk08dzxAkzubjt19fO2VKEgdBjpHxEluNvTJKDHW1w=]${PLAIN}: ")" private_key
-    private_key=${private_key:-2Nk08dzxAkzubjt19fO2VKEgdBjpHxEluNvTJKDHW1w=}
+    read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[回车使用默认值]${PLAIN}: ")" private_key
+    private_key=${private_key:-eMCyIN4iJrc9jeot1L+53I1N7whB3AVlMYCF43yJfnQ=}
 
-    read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[默认: 162.159.193.10]${PLAIN}: ")" server
-    server=${server:-162.159.193.10}
+    read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" server
+    server=${server:-162.159.193.8}
 
-    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[默认: 2408]${PLAIN}: ")" port
+    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2480,可选 500,1701,2480,4500]${PLAIN}: ")" port
     port=${port:-2408}
     if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
         echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
         exit 1
     fi
 
-    read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}${CYAN}[默认: bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=]${PLAIN}: ")" public_key
+    read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" public_key
     public_key=${public_key:-bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=}
 
-    read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}${CYAN}[默认: [154,242,221]]${PLAIN}: ")" reserved
-    reserved=${reserved:-[154,242,221]}
+    read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}${CYAN}[默认值:[20,67,117]]${PLAIN}: ")" reserved
+    reserved=${reserved:-[20,67,117]}
 
-    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认: 1280]${PLAIN}: ")" mtu
+    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认值:1280,可选1350]${PLAIN}: ")" mtu
     mtu=${mtu:-1280}
     echo
 
     # socks-port 配置
-    echo -e "${YELLOW}[*] 请输入本地 SOCKS 代理端口（直接回车为默认18443）：${PLAIN}"
+    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车为默认18443）：${PLAIN}"
     read -e -p "$(echo -e "${BLUE}  socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
     socks_port=${socks_port:-18443}
     echo
