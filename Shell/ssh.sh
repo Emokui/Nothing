@@ -83,12 +83,12 @@ linux_clean() {
         return 1
     fi
 
-    # 1. 清理系统日志（保留近7天）
-    echo -e "${YELLOW}正在清理日志文件（保留7天）...${WHITE}"
+    # 1. 清理系统日志
+    echo -e "${YELLOW}正在清理所有日志文件...${WHITE}"
     if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=7d
+        journalctl --vacuum-time=1s
     fi
-    find /var/log -type f -name "*.log" -mtime +7 -exec rm -f {} \;
+    find /var/log -type f -name "*.log" -exec rm -f {} \;
 
     # 2. 清理临时目录
     echo -e "${YELLOW}正在清理临时目录...${WHITE}"
