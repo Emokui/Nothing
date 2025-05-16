@@ -165,18 +165,17 @@ change_timezone() {
         return
     fi
 
-    # 获取当前IP对应的时区和国家
+    # 获取当前IP对应的时区
     ipinfo=$(curl -s ipinfo.io)
     current_tz=$(echo "$ipinfo" | grep -oP '"timezone":\s*"\K[^"]+')
-    current_country=$(echo "$ipinfo" | grep -oP '"country":\s*"\K[^"]+')
 
-    # 大洲列表
+    # 只考虑常用洲
     zones=("Africa" "America" "Asia" "Atlantic" "Australia" "Europe" "Indian" "Pacific" "Etc")
     while true; do
         clear
         echo -e "${LIGHTCYAN}========= 更改时区 =========${WHITE}"
         echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
-        [ -n "$current_tz" ] && echo -e "${CYAN}推荐时区 (IP: $current_country): $current_tz${WHITE}"
+        [ -n "$current_tz" ] && echo -e "${CYAN}推荐时区: $current_tz${WHITE}"
         for i in "${!zones[@]}"; do
             echo -e "${GREEN}$((i+1)).${WHITE} ${zones[$i]}"
         done
@@ -188,13 +187,11 @@ change_timezone() {
             echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1; continue
         fi
         zone="${zones[$((zone_choice-1))]}"
-        # 查询所有该大洲时区
         mapfile -t tz_list < <(timedatectl list-timezones | grep "^$zone/")
-        # 只保留每个国家或主城市的第一个时区
         declare -A country_map
         for tz in "${tz_list[@]}"; do
-            city=$(echo "$tz" | cut -d/ -f2 | cut -d_ -f1)
-            [ -z "${country_map[$city]+isset}" ] && country_map[$city]=$tz
+            city=$(echo "$tz" | cut -d'/' -f2)
+            [ -z "${country_map[$city]+isset}" ] && country_map[$city]="$city/$city"
         done
 
         # 排序并显示
@@ -209,9 +206,14 @@ change_timezone() {
             clear
             echo -e "${LIGHTCYAN}========= 请选择国家/城市 =========${WHITE}"
             for i in "${!options[@]}"; do
-                mark=""
-                [ "${options[$i]}" = "$current_tz" ] && mark=" << 推荐"
-                printf "%2d. %s%s\n" $((i+1)) "${options[$i]}" "$mark"
+                show_str="${options[$i]}"
+                city_name=$(echo "$show_str" | cut -d'/' -f1)
+                tz_part="$zone/$city_name"
+                if [ "$tz_part" = "$current_tz" ]; then
+                    printf "${BOLD}${YELLOW}%2d. %s << 推荐${WHITE}\n" $((i+1)) "$show_str"
+                else
+                    printf "${GREEN}%2d.${WHITE} %s\n" $((i+1)) "$show_str"
+                fi
             done
             echo -e "${YELLOW}0.${WHITE} 返回上级"
             read -rp "请选择(数字): " city_choice
@@ -220,10 +222,12 @@ change_timezone() {
             if ! [[ "$city_choice" =~ ^[0-9]+$ ]] || [ "$city_choice" -lt 1 ] || [ "$city_choice" -gt "${#options[@]}" ]; then
                 echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1; continue
             fi
-            city="${options[$((city_choice-1))]}"
-            echo -e "${YELLOW}正在设置时区为 $city...${WHITE}"
-            if timedatectl set-timezone "$city"; then
-                echo -e "${GREEN}时区已成功设为 $city${WHITE}"
+            sel="${options[$((city_choice-1))]}"
+            city_name=$(echo "$sel" | cut -d'/' -f1)
+            tz_set="$zone/$city_name"
+            echo -e "${YELLOW}正在设置时区为 $tz_set...${WHITE}"
+            if timedatectl set-timezone "$tz_set"; then
+                echo -e "${GREEN}时区已成功设为 $tz_set${WHITE}"
             else
                 echo -e "${RED}设置失败，请重试${WHITE}"
             fi
