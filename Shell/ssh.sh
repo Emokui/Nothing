@@ -62,6 +62,7 @@ linux_update() {
 linux_clean() {
     send_stats "系统清理"
     echo -e "${YELLOW}正在清理系统垃圾...${WHITE}"
+    # 包管理器垃圾清理
     if command -v apt &>/dev/null; then
         apt autoremove -y && apt autoclean -y
     elif command -v dnf &>/dev/null; then
@@ -81,6 +82,24 @@ linux_clean() {
         echo -e "${RED}未知的包管理器!${WHITE}"
         return 1
     fi
+
+    # 1. 清理系统日志（保留近7天）
+    echo -e "${YELLOW}正在清理日志文件（保留7天）...${WHITE}"
+    if command -v journalctl &>/dev/null; then
+        journalctl --vacuum-time=7d
+    fi
+    find /var/log -type f -name "*.log" -mtime +7 -exec rm -f {} \;
+
+    # 2. 清理临时目录
+    echo -e "${YELLOW}正在清理临时目录...${WHITE}"
+    rm -rf /tmp/* /var/tmp/*
+
+    # 3. 清理用户缓存
+    echo -e "${YELLOW}正在清理用户缓存...${WHITE}"
+    if [ -d "$HOME/.cache" ]; then
+        rm -rf "$HOME/.cache/"*
+    fi
+
     echo -e "${GREEN}系统清理完成${WHITE}"
     press_any_key_to_continue
 }
