@@ -80,7 +80,6 @@ installCentos(){
 clear
 os="c"
 echo && echo -e " 一键网络重装管理脚本 ${Red_font_prefix}[v${sh_ver}]${Font_color_suffix}
-  -- 就是爱生活 | 94ish.me --
   
 ————————————选择版本————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 CentOS6.8系统
@@ -131,7 +130,6 @@ installDebian(){
 clear
 os="d"
 echo && echo -e " 一键网络重装管理脚本 ${Red_font_prefix}[v${sh_ver}]${Font_color_suffix}
-  -- 就是爱生活 | 94ish.me --
   
 ————————————选择版本————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 Debian9系统
@@ -186,7 +184,6 @@ installUbuntu(){
 clear
 os="u"
 echo && echo -e " 一键网络重装管理脚本 ${Red_font_prefix}[v${sh_ver}]${Font_color_suffix}
-  -- 就是爱生活 | 94ish.me --
   
 ————————————选择版本————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 Ubuntu16系统
@@ -239,7 +236,6 @@ esac
 start_menu(){
 clear
 echo && echo -e " 一键网络重装管理脚本 ${Red_font_prefix}[v${sh_ver}]${Font_color_suffix}
-  -- 就是爱生活 | 94ish.me --
   
 ————————————重装系统————————————
  ${Green_font_prefix}1.${Font_color_suffix} 安装 CentOS系统
