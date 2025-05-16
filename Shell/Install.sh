@@ -45,6 +45,10 @@ first_job(){
     fi
 }
 
+# 清理历史文件
+clean_old_installnet(){
+    [[ -f InstallNET.sh ]] && rm -f InstallNET.sh
+}
 
 # 安装系统
 InstallOS(){
@@ -64,7 +68,7 @@ InstallOS(){
         fi
     fi
     clean_old_installnet
-    wget --no-check-certificate https://${github}/InstallNET.sh && chmod -x InstallNET.sh
+    wget --no-check-certificate https://${github}/InstallNET.sh && chmod +x InstallNET.sh
     if [[ ! -f InstallNET.sh ]]; then
         echo -e "${Error} InstallNET.sh 下载失败，请检查网络连接或手动下载。"
         return 1
