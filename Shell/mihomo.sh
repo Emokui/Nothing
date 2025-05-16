@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 定义颜色
+# 颜色定义
 BLUE="\033[1;34m"
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
@@ -23,9 +23,9 @@ check_status() {
     fi
 }
 
-# systemd service
+# 创建 systemd 服务
 create_systemd_service() {
-    cat <<EOF | sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null
+    sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<EOF
 [Unit]
 Description=User Mihomo Service (Delayed Start)
 After=network.target
@@ -40,9 +40,9 @@ EOF
     sudo chmod 644 /etc/systemd/system/${SERVICE_NAME}.service
 }
 
-# systemd timer (2min after boot)
+# 创建 systemd timer（开机2分钟后启动）
 create_systemd_timer() {
-    cat <<EOF | sudo tee /etc/systemd/system/${TIMER_NAME} > /dev/null
+    sudo tee /etc/systemd/system/${TIMER_NAME} > /dev/null <<EOF
 [Unit]
 Description=Start Mihomo 2 minutes after boot
 
@@ -62,8 +62,8 @@ get_latest_stable_version() {
     local raw_version
     echo -e "${CYAN}[*] 检查最新稳定 Mihomo 版本...${PLAIN}" >&2
     raw_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases | \
-                  grep -oP '(?<=tag_name": "v)\d+\.\d+\.\d+(?=")' | \
-                  grep -v "Prerelease" | head -n 1)
+        grep -oP '(?<=tag_name": "v)\d+\.\d+\.\d+(?=")' | \
+        grep -v "Prerelease" | head -n 1)
     if [ -z "$raw_version" ]; then
         echo -e "${RED}[!] 无法获取最新稳定版本，请检查网络或 GitHub API。${PLAIN}" >&2
         exit 1
@@ -73,7 +73,7 @@ get_latest_stable_version() {
     echo "$latest_version"
 }
 
-# 修改 Mihomo 配置交互式子菜单
+# 修改 Mihomo 配置
 modify_mihomo_config() {
     if [ ! -f "$CONFIG_PATH" ]; then
         echo -e "${RED}[!] 未找到 $CONFIG_PATH 配置文件，请先安装 Mihomo。${PLAIN}"
@@ -82,7 +82,6 @@ modify_mihomo_config() {
         return
     fi
 
-    # 读取配置
     tun_enable=$(awk '/^tun:/ {f=1} f && /enable:/ {print $2;f=0}' "$CONFIG_PATH")
     socks_port=$(awk '/^socks-port:/ {print $2}' "$CONFIG_PATH")
     bind_address=$(awk '/^bind-address:/ {print $2}' "$CONFIG_PATH" | tr -d '"')
@@ -101,16 +100,16 @@ modify_mihomo_config() {
         clear
         echo -e "${BLUE}========== Mihomo 配置修改 ==========${PLAIN}"
         echo -e "${CYAN}当前配置:${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} tun.enable:      ${YELLOW}$tun_enable${PLAIN}"
-        echo -e "${GREEN}2.${PLAIN} socks-port:      ${YELLOW}${socks_port:-无}${PLAIN}"
-        echo -e "${GREEN}3.${PLAIN} bind-address:    ${YELLOW}${bind_address:-127.0.0.1}${PLAIN}"
-        echo -e "${GREEN}4.${PLAIN} SOCKS5认证:      ${YELLOW}${has_auth:-无}${PLAIN}"
-        echo -e "${GREEN}5.${PLAIN} WireGuard Private-key: ${YELLOW}$private_key${PLAIN}"
-        echo -e "${GREEN}6.${PLAIN} WireGuard Server:      ${YELLOW}$server${PLAIN}"
-        echo -e "${GREEN}7.${PLAIN} WireGuard Port:        ${YELLOW}$port${PLAIN}"
-        echo -e "${GREEN}8.${PLAIN} WireGuard Public-key:  ${YELLOW}$public_key${PLAIN}"
-        echo -e "${GREEN}9.${PLAIN} WireGuard Reserved:    ${YELLOW}$reserved${PLAIN}"
-        echo -e "${GREEN}10.${PLAIN} WireGuard MTU:         ${YELLOW}$mtu${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN} tun.enable:           ${YELLOW}$tun_enable${PLAIN}"
+        echo -e "${GREEN}2.${PLAIN} socks-port:           ${YELLOW}${socks_port:-无}${PLAIN}"
+        echo -e "${GREEN}3.${PLAIN} bind-address:         ${YELLOW}${bind_address:-127.0.0.1}${PLAIN}"
+        echo -e "${GREEN}4.${PLAIN} SOCKS5认证:           ${YELLOW}${has_auth:-无}${PLAIN}"
+        echo -e "${GREEN}5.${PLAIN} WireGuard Private-key:${YELLOW}$private_key${PLAIN}"
+        echo -e "${GREEN}6.${PLAIN} WireGuard Server:     ${YELLOW}$server${PLAIN}"
+        echo -e "${GREEN}7.${PLAIN} WireGuard Port:       ${YELLOW}$port${PLAIN}"
+        echo -e "${GREEN}8.${PLAIN} WireGuard Public-key: ${YELLOW}$public_key${PLAIN}"
+        echo -e "${GREEN}9.${PLAIN} WireGuard Reserved:   ${YELLOW}$reserved${PLAIN}"
+        echo -e "${GREEN}10.${PLAIN} WireGuard MTU:        ${YELLOW}$mtu${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 保存并重启 Mihomo 服务${PLAIN}"
         echo -e "${GREEN}q.${PLAIN} 放弃修改并返回${PLAIN}"
         read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-10/q]: ${PLAIN}")" modchoice
@@ -139,8 +138,8 @@ modify_mihomo_config() {
                 ;;
             3)
                 echo -e "${YELLOW}请选择 bind-address 监听地址:${PLAIN}"
-                echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问, 推荐)"
-                echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡, 允许外部访问)"
+                echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问，推荐)"
+                echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡，允许外部访问)"
                 read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (当前:${bind_address:-127.0.0.1}): ${PLAIN}")" bind_choice
                 case "$bind_choice" in
                     2) newval="0.0.0.0" ;;
@@ -163,17 +162,14 @@ modify_mihomo_config() {
                     newuser=${newuser:-admin}
                     newpass=${newpass:-admin}
                     if grep -q "^authentication:" "$CONFIG_PATH"; then
-                        # 替换已有认证
                         sed -i "/^authentication:/,/^ *[^-]/c\authentication:\n  - \"$newuser:$newpass\"" "$CONFIG_PATH"
                     else
-                        # 添加新认证
                         sed -i "/^bind-address:/a authentication:\n  - \"$newuser:$newpass\"" "$CONFIG_PATH"
                     fi
                     has_auth="yes"
                     auth_user="$newuser"
                     auth_pass="$newpass"
                 else
-                    # 删除认证字段
                     sed -i '/^authentication:/,/^ *[^-]/d' "$CONFIG_PATH"
                     has_auth=""
                     auth_user=""
@@ -263,7 +259,7 @@ modify_mihomo_config() {
     done
 }
 
-# 安装并配置 Mihomo
+# 安装 Mihomo
 install_mihomo() {
     echo -e "${CYAN}[*] 开始安装并配置 Mihomo...${PLAIN}"
     mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
@@ -282,7 +278,6 @@ install_mihomo() {
     chmod +x mihomo
     check_status "设置执行权限"
 
-    # tun 模式选择
     echo -e "${YELLOW}[*] 是否启用 tun 模式？${PLAIN}"
     read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n]: ${PLAIN}")" enable_tun
     enable_tun=${enable_tun:-y}
@@ -293,7 +288,6 @@ install_mihomo() {
     fi
     echo
 
-    # WireGuard 配置交互
     echo -e "${YELLOW}[*] 请配置 WireGuard 参数：${PLAIN}"
 
     read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[回车使用默认值]${PLAIN}: ")" private_key
@@ -319,23 +313,20 @@ install_mihomo() {
     mtu=${mtu:-1280}
     echo
 
-    # socks-port 配置
     echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车默认18443）：${PLAIN}"
     read -e -p "$(echo -e "${BLUE}  socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
     socks_port=${socks_port:-18443}
     echo
 
-    # 交互设置 bind-address
     echo -e "${YELLOW}[*] 请配置 bind-address 监听地址: ${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问, 推荐)"
-    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡, 允许外部访问)"
+    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问，推荐)"
+    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡，允许外部访问)"
     read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" bind_choice
     case "$bind_choice" in
         2) bind_address="0.0.0.0" ;;
         *) bind_address="127.0.0.1" ;;
     esac
 
-    # 交互选择是否添加 authentication
     echo -e "${YELLOW}[*] 是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
     read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (默认n): ${PLAIN}")" auth_enable
     auth_enable=${auth_enable:-n}
@@ -349,7 +340,6 @@ install_mihomo() {
         authentication_config=""
     fi
 
-    # 写入 config.yaml
     echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
     cat <<EOF > config.yaml
 tun:
@@ -521,14 +511,14 @@ delete_mihomo() {
 # 管理 Mihomo systemd 服务
 manage_service() {
     while true; do
-        echo -e "${BLUE}选择属于你的命运之门${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 停止 Mihomo${PLAIN}"
-        echo -e "${GREEN}2.${PLAIN} 启动 Mihomo${PLAIN}"
-        echo -e "${GREEN}3.${PLAIN} 重启 Mihomo${PLAIN}"
-        echo -e "${GREEN}4.${PLAIN} 查看 Mihomo 状态${PLAIN}"
-        echo -e "${GREEN}5.${PLAIN} 修改 Mihomo 配置${PLAIN}"
-        echo -e "${GREEN}6.${PLAIN} 删除 Mihomo ${PLAIN}"
-        echo -e "${GREEN}0.${PLAIN} 返回世界线${PLAIN}"
+        echo -e "${BLUE}============== Mihomo 服务管理菜单 ==============${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN} 停止 Mihomo"
+        echo -e "${GREEN}2.${PLAIN} 启动 Mihomo"
+        echo -e "${GREEN}3.${PLAIN} 重启 Mihomo"
+        echo -e "${GREEN}4.${PLAIN} 查看 Mihomo 状态"
+        echo -e "${GREEN}5.${PLAIN} 修改 Mihomo 配置"
+        echo -e "${GREEN}6.${PLAIN} 删除 Mihomo"
+        echo -e "${GREEN}0.${PLAIN} 返回主菜单"
         read -e -p "$(echo -e "${YELLOW}请输入选项 [0-6]: ${PLAIN}")" subchoice
 
         case $subchoice in
@@ -586,11 +576,11 @@ while true; do
     echo -e "${BLUE}==============================================${PLAIN}"
     echo -e "${BLUE}====      Steins Gate - mihomo Ver.1.0     ====${PLAIN}"
     echo -e "${BLUE}==============================================${PLAIN}"
-    echo -e "${CYAN}选择属于你的命运之门：${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} 安装 Mihomo${PLAIN}"
-    echo -e "${GREEN}2.${PLAIN} 管理 Mihomo${PLAIN}"
-    echo -e "${GREEN}3.${PLAIN} 更新 Mihomo${PLAIN}"
-    echo -e "${GREEN}0.${PLAIN} 再见 El Psy Kongroo${PLAIN}"
+    echo -e "${CYAN}请选择操作：${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 安装 Mihomo"
+    echo -e "${GREEN}2.${PLAIN} 管理 Mihomo"
+    echo -e "${GREEN}3.${PLAIN} 更新 Mihomo"
+    echo -e "${GREEN}0.${PLAIN} 退出脚本"
     read -e -p "$(echo -e "${YELLOW}请输入选项 [0-3]: ${PLAIN}")" choice
 
     case $choice in
@@ -613,9 +603,12 @@ while true; do
             fi
             update_mihomo
             ;;
-        0) echo -e "${GREEN}[*] 退出脚本...${PLAIN}"; exit 0 ;;
-        *) 
-            echo -e "${RED}无效选项，请重新选择。${PLAIN}" 
+        0)
+            echo -e "${GREEN}[*] 退出脚本...${PLAIN}"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}无效选项，请重新选择。${PLAIN}"
             read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
             clear
             ;;
