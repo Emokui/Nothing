@@ -72,7 +72,7 @@ inst_acme(){
         systemctl enable cron
     fi
 
-    read -rp "請輸入註冊郵箱 (例: admin@gmail.com，或留空自動生成一個 gmail 郵箱): " email
+    read -rp "請輸入註冊郵箱 (留空自動生成一個 gmail 郵箱): " email
     if [[ -z $email ]]; then
         automail=$(date +%s%N | md5sum | cut -c 1-16)
         email=$automail@gmail.com
@@ -90,8 +90,7 @@ inst_acme(){
     else
         red "抱歉，Acme.sh 證書一鍵申請腳本安裝失敗"
         green "建議如下："
-        yellow "1. 檢查 VPS 的網絡環境"
-        yellow "2. 腳本可能跟不上時代，建議截圖發布到 GitHub Issues 詢問"
+        yellow "檢查 VPS 的網絡環境"
     fi
     back2menu
 }
@@ -162,8 +161,8 @@ checktls() {
 
             red "抱歉，證書申請失敗"
             green "建議如下: "
-            yellow "1. 自行檢測防火牆是否打開，如使用 80 端口申請模式時，請關閉防火牆或放行 80 端口"
-            yellow "2. 同一域名多次申請可能會觸發 Let's Encrypt 官方風控，請嘗試使用腳本菜單的 9 選項更換證書頒發機構，再重試申請證書，或更換域名、或等待 7 天後再嘗試執行腳本"
+            yellow "1. 自行檢測防火牆配置，80端口是否被占用"
+            yellow "2. 同一域名多次申請可能會觸發風控，請嘗試更換證書頒發機構，再重試申請證書"
         fi
     fi
 }
@@ -244,8 +243,8 @@ acme_standalone(){
             green "域名 ${domain} 目前解析的 IP: ($domainIP)"
             red "當前域名解析的 IP 與當前 VPS 使用的真實 IP 不匹配"
             green "建議如下："
-            yellow "1. 請確保 CloudFlare 小雲朵為關閉狀態 (僅限 DNS)，其他域名解析或 CDN 網站設置同理"
-            yellow "2. 請檢查 DNS 解析設置的 IP 是否為 VPS 的真實 IP"
+            yellow "1. 請確保 CloudFlare 小雲朵為關閉狀態"
+            yellow "2. 請確保 DNS解析設置的 IP 為 VPS 的真實 IP"
             back2menu
         fi
     fi
@@ -421,20 +420,20 @@ menu() {
     echo -e "#             ${GREEN}運命石之扉の選択,El Psy Kongroo${PLAIN}             #"
     echo "#############################################################"
     echo ""
-    echo -e " ${GREEN}1.${PLAIN} 安裝 Acme.sh 域名證書申請腳本"
-    echo -e " ${GREEN}2.${PLAIN} ${RED}卸載 Acme.sh 域名證書申請腳本${PLAIN}"
+    echo -e " ${GREEN}1.${PLAIN}  安裝 Acme.sh 域名證書申請腳本"
+    echo -e " ${GREEN}2.${PLAIN} ${RED} 卸載 Acme.sh 域名證書申請腳本${PLAIN}"
     echo " -------------"
-    echo -e " ${GREEN}3.${PLAIN} 申請單域名證書 ${YELLOW}(80 端口申請)${PLAIN}"
-    echo -e " ${GREEN}4.${PLAIN} 申請單域名證書 ${YELLOW}(CF API 申請)${PLAIN} ${GREEN}(無需解析)${PLAIN} ${RED}(不支持 freenom 域名)${PLAIN}"
-    echo -e " ${GREEN}5.${PLAIN} 申請泛域名證書 ${YELLOW}(CF API 申請)${PLAIN} ${GREEN}(無需解析)${PLAIN} ${RED}(不支持 freenom 域名)${PLAIN}"
+    echo -e " ${GREEN}3.${PLAIN}  申請單域名證書 ${YELLOW}(80 端口申請)${PLAIN}"
+    echo -e " ${GREEN}4.${PLAIN}  申請單域名證書 ${YELLOW}(CF API 申請)${PLAIN} ${GREEN}(無需解析)${PLAIN}"
+    echo -e " ${GREEN}5.${PLAIN}  申請泛域名證書 ${YELLOW}(CF API 申請)${PLAIN} ${GREEN}(無需解析)${PLAIN}"
     echo " -------------"
-    echo -e " ${GREEN}6.${PLAIN} 查看已申請的證書"
-    echo -e " ${GREEN}7.${PLAIN} 撤銷並刪除已申請的證書"
-    echo -e " ${GREEN}8.${PLAIN} 手動續期已申請的證書"
-    echo -e " ${GREEN}9.${PLAIN} 切換證書頒發機構"
-    echo -e " ${GREEN}10.${PLAIN} 生成自簽名 ECC 證書 ${YELLOW}(本地生成)${PLAIN}"
+    echo -e " ${GREEN}6.${PLAIN}  查看已申請的證書"
+    echo -e " ${GREEN}7.${PLAIN}  撤銷並刪除已申請的證書"
+    echo -e " ${GREEN}8.${PLAIN}  手動續期已申請的證書"
+    echo -e " ${GREEN}9.${PLAIN}  切換證書頒發機構"
+    echo -e " ${GREEN}10.${PLAIN} 生成自簽名證書"
     echo " -------------"
-    echo -e " ${GREEN}0.${PLAIN} 退出腳本"
+    echo -e " ${GREEN}0.${PLAIN}  退出腳本"
     echo ""
     read -rp "請輸入選項 [0-10]: " menuInput
     case "$menuInput" in
