@@ -164,32 +164,59 @@ change_timezone() {
         press_any_key_to_continue
         return
     fi
+
+    # 获取当前IP对应的时区和国家
+    ipinfo=$(curl -s ipinfo.io)
+    current_tz=$(echo "$ipinfo" | grep -oP '"timezone":\s*"\K[^"]+')
+    current_country=$(echo "$ipinfo" | grep -oP '"country":\s*"\K[^"]+')
+
+    # 大洲列表
+    zones=("Africa" "America" "Asia" "Atlantic" "Australia" "Europe" "Indian" "Pacific" "Etc")
     while true; do
         clear
         echo -e "${LIGHTCYAN}========= 更改时区 =========${WHITE}"
         echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
-        zones=("Asia" "Europe" "America" "Africa" "Australia" "Etc")
+        [ -n "$current_tz" ] && echo -e "${CYAN}推荐时区 (IP: $current_country): $current_tz${WHITE}"
         for i in "${!zones[@]}"; do
             echo -e "${GREEN}$((i+1)).${WHITE} ${zones[$i]}"
         done
         echo -e "${YELLOW}0.${WHITE} 返回主菜单"
-        read -rp "请选择大区(数字): " zone_choice
+        read -rp "请选择大洲(数字): " zone_choice
         zone_choice=$(echo "$zone_choice" | xargs)
         [[ "$zone_choice" == "0" ]] && return
-        if ! [[ "$zone_choice" =~ ^[1-6]$ ]]; then
+        if ! [[ "$zone_choice" =~ ^[1-9]$ ]] || [ "$zone_choice" -gt "${#zones[@]}" ]; then
             echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1; continue
         fi
         zone="${zones[$((zone_choice-1))]}"
-        # 查询所有子时区
-        mapfile -t options < <(timedatectl list-timezones | grep "^$zone/")
+        # 查询所有该大洲时区
+        mapfile -t tz_list < <(timedatectl list-timezones | grep "^$zone/")
+        # 只保留每个国家或主城市的第一个时区
+        declare -A country_map
+        for tz in "${tz_list[@]}"; do
+            # 取 Asia/Shanghai，Shanghai 作为国家城市名
+            city=$(echo "$tz" | cut -d/ -f2 | cut -d_ -f1)
+            # 用城市首字母做唯一性（也可以用城市名/国家名映射）
+            [ -z "${country_map[$city]}" ] && country_map[$city]=$tz
+        done
+
+        # 排序并显示
+        options=()
+        for key in "${!country_map[@]}"; do
+            options+=("${country_map[$key]}")
+        done
+        IFS=$'\n' options=($(sort <<<"${options[*]}"))
+        unset IFS
+
         while true; do
             clear
-            echo -e "${LIGHTCYAN}========= $zone 的时区列表 =========${WHITE}"
+            echo -e "${LIGHTCYAN}========= 请选择国家/城市 =========${WHITE}"
             for i in "${!options[@]}"; do
-                printf "%2d. %s\n" $((i+1)) "${options[$i]}"
+                mark=""
+                [ "${options[$i]}" = "$current_tz" ] && mark=" << 推荐"
+                printf "%2d. %s%s\n" $((i+1)) "${options[$i]}" "$mark"
             done
             echo -e "${YELLOW}0.${WHITE} 返回上级"
-            read -rp "请选择时区(数字): " city_choice
+            read -rp "请选择(数字): " city_choice
             city_choice=$(echo "$city_choice" | xargs)
             [[ "$city_choice" == "0" ]] && break
             if ! [[ "$city_choice" =~ ^[0-9]+$ ]] || [ "$city_choice" -lt 1 ] || [ "$city_choice" -gt "${#options[@]}" ]; then
