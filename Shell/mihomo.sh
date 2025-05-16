@@ -529,7 +529,7 @@ manage_service() {
         echo -e "${GREEN}5.${PLAIN} 修改 Mihomo 配置${PLAIN}"
         echo -e "${GREEN}6.${PLAIN} 删除 Mihomo ${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 返回世界线${PLAIN}"
-        read -e -p "$(echo -e "${YELLOW}请输入选项 [0-7]: ${PLAIN}")" subchoice
+        read -e -p "$(echo -e "${YELLOW}请输入选项 [0-6]: ${PLAIN}")" subchoice
 
         case $subchoice in
             1)
@@ -559,12 +559,12 @@ manage_service() {
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
                 ;;
+            5)
+                modify_mihomo_config
+                ;;
             6)
                 delete_mihomo
                 break
-                ;;
-            5)
-                modify_mihomo_config
                 ;;
             0)
                 echo -e "${CYAN}[*] 返回主菜单...${PLAIN}"
@@ -587,8 +587,8 @@ while true; do
     echo -e "${BLUE}====      Steins Gate - mihomo Ver.1.0     ====${PLAIN}"
     echo -e "${BLUE}==============================================${PLAIN}"
     echo -e "${CYAN}选择属于你的命运之门：${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} 安装并配置 Mihomo (systemd/timer 2分钟后自启)${PLAIN}"
-    echo -e "${GREEN}2.${PLAIN} 管理 Mihomo 服务 (systemd)${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 安装 Mihomo${PLAIN}"
+    echo -e "${GREEN}2.${PLAIN} 管理 Mihomo${PLAIN}"
     echo -e "${GREEN}3.${PLAIN} 更新 Mihomo${PLAIN}"
     echo -e "${GREEN}0.${PLAIN} 再见 El Psy Kongroo${PLAIN}"
     read -e -p "$(echo -e "${YELLOW}请输入选项 [0-3]: ${PLAIN}")" choice
