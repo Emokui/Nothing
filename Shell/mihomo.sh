@@ -526,9 +526,8 @@ manage_service() {
         echo -e "${GREEN}2.${PLAIN} 启动 Mihomo${PLAIN}"
         echo -e "${GREEN}3.${PLAIN} 重启 Mihomo${PLAIN}"
         echo -e "${GREEN}4.${PLAIN} 查看 Mihomo 状态${PLAIN}"
-        echo -e "${GREEN}5.${PLAIN} 查看 Timer 状态${PLAIN}"
-        echo -e "${GREEN}6.${PLAIN} 删除 Mihomo 及配置${PLAIN}"
-        echo -e "${GREEN}7.${PLAIN} 修改 Mihomo 配置并自动重启${PLAIN}"
+        echo -e "${GREEN}5.${PLAIN} 修改 Mihomo 配置${PLAIN}"
+        echo -e "${GREEN}6.${PLAIN} 删除 Mihomo ${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 返回世界线${PLAIN}"
         read -e -p "$(echo -e "${YELLOW}请输入选项 [0-7]: ${PLAIN}")" subchoice
 
@@ -560,17 +559,11 @@ manage_service() {
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
                 ;;
-            5)
-                echo -e "${CYAN}[*] 查看 Timer 状态...${PLAIN}"
-                sudo systemctl status ${TIMER_NAME}
-                read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
-                clear
-                ;;
             6)
                 delete_mihomo
                 break
                 ;;
-            7)
+            5)
                 modify_mihomo_config
                 ;;
             0)
