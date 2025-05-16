@@ -5,14 +5,8 @@ export PATH
 #=================================================
 #	System Required: CentOS 6/7,Debian 8/9,Ubuntu 16+
 #	Description: 一键重装系统
-#	Version: 1.0.1
-#	Author: 千影,Vicer
-#	Blog: https://www.94ish.me/
 #=================================================
-
-sh_ver="1.0.1"
-github="raw.githubusercontent.com/chiakge/installNET/master"
-
+github="raw.githubusercontent.com/Emokui/Nothing/master"
 Green_font_prefix="\033[32m" && Red_font_prefix="\033[31m" && Green_background_prefix="\033[42;37m" && Red_background_prefix="\033[41;37m" && Font_color_suffix="\033[0m"
 Info="${Green_font_prefix}[信息]${Font_color_suffix}"
 Error="${Red_font_prefix}[错误]${Font_color_suffix}"
