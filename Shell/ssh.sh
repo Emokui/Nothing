@@ -193,10 +193,8 @@ change_timezone() {
         # 只保留每个国家或主城市的第一个时区
         declare -A country_map
         for tz in "${tz_list[@]}"; do
-            # 取 Asia/Shanghai，Shanghai 作为国家城市名
             city=$(echo "$tz" | cut -d/ -f2 | cut -d_ -f1)
-            # 用城市首字母做唯一性（也可以用城市名/国家名映射）
-            [ -z "${country_map[$city]}" ] && country_map[$city]=$tz
+            [ -z "${country_map[$city]+isset}" ] && country_map[$city]=$tz
         done
 
         # 排序并显示
