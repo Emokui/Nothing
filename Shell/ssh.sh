@@ -165,17 +165,15 @@ change_timezone() {
         return
     fi
 
-    # 获取当前IP对应的时区
+    # 获取当前IP对应的时区（可选，不做高亮）
     ipinfo=$(curl -s ipinfo.io)
     current_tz=$(echo "$ipinfo" | grep -oP '"timezone":\s*"\K[^"]+')
 
-    # 只考虑常用洲
     zones=("Africa" "America" "Asia" "Atlantic" "Australia" "Europe" "Indian" "Pacific" "Etc")
     while true; do
         clear
         echo -e "${LIGHTCYAN}========= 更改时区 =========${WHITE}"
         echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
-        [ -n "$current_tz" ] && echo -e "${CYAN}推荐时区: $current_tz${WHITE}"
         for i in "${!zones[@]}"; do
             echo -e "${GREEN}$((i+1)).${WHITE} ${zones[$i]}"
         done
@@ -188,32 +186,27 @@ change_timezone() {
         fi
         zone="${zones[$((zone_choice-1))]}"
         mapfile -t tz_list < <(timedatectl list-timezones | grep "^$zone/")
-        declare -A country_map
+        declare -A city_map
         for tz in "${tz_list[@]}"; do
             city=$(echo "$tz" | cut -d'/' -f2)
-            [ -z "${country_map[$city]+isset}" ] && country_map[$city]="$city/$city"
+            [ -z "${city_map[$city]+isset}" ] && city_map[$city]="$city"
         done
 
         # 排序并显示
         options=()
-        for key in "${!country_map[@]}"; do
-            options+=("${country_map[$key]}")
+        for key in "${!city_map[@]}"; do
+            options+=("${city_map[$key]}")
         done
         IFS=$'\n' options=($(sort <<<"${options[*]}"))
         unset IFS
 
         while true; do
             clear
-            echo -e "${LIGHTCYAN}========= 请选择国家/城市 =========${WHITE}"
+            echo -e "${LIGHTCYAN}========= 请选择城市 =========${WHITE}"
             for i in "${!options[@]}"; do
                 show_str="${options[$i]}"
-                city_name=$(echo "$show_str" | cut -d'/' -f1)
-                tz_part="$zone/$city_name"
-                if [ "$tz_part" = "$current_tz" ]; then
-                    printf "${BOLD}${YELLOW}%2d. %s << 推荐${WHITE}\n" $((i+1)) "$show_str"
-                else
-                    printf "${GREEN}%2d.${WHITE} %s\n" $((i+1)) "$show_str"
-                fi
+                # 仅城市名加颜色
+                printf "%2d. ${LIGHTCYAN}%s${WHITE}\n" $((i+1)) "$show_str"
             done
             echo -e "${YELLOW}0.${WHITE} 返回上级"
             read -rp "请选择(数字): " city_choice
@@ -222,8 +215,7 @@ change_timezone() {
             if ! [[ "$city_choice" =~ ^[0-9]+$ ]] || [ "$city_choice" -lt 1 ] || [ "$city_choice" -gt "${#options[@]}" ]; then
                 echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1; continue
             fi
-            sel="${options[$((city_choice-1))]}"
-            city_name=$(echo "$sel" | cut -d'/' -f1)
+            city_name="${options[$((city_choice-1))]}"
             tz_set="$zone/$city_name"
             echo -e "${YELLOW}正在设置时区为 $tz_set...${WHITE}"
             if timedatectl set-timezone "$tz_set"; then
