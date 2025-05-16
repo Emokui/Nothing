@@ -202,11 +202,11 @@ change_timezone() {
             1)
                 if [ -n "$current_tz" ]; then
                     echo -e "${YELLOW}正在设置时区为 $current_tz...${WHITE}"
-                    if timedatectl set-timezone "$current_tz" 2>err.log; then
+                    if output=$(timedatectl set-timezone "$current_tz" 2>&1); then
                         echo -e "${GREEN}时区已成功设为 $current_tz，当前时间: $(date)${WHITE}"
                     else
                         echo -e "${RED}设置失败，详细信息如下：${WHITE}"
-                        cat err.log
+                        echo "$output"
                     fi
                 else
                     echo -e "${RED}未检测到推荐时区！${WHITE}"
