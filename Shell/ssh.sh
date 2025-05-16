@@ -9,28 +9,17 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ====== 颜色变量统一管理 ======
-declare -A COLOR
-COLOR[gray]='\033[37m'
-COLOR[red]='\033[31m'
-COLOR[green]='\033[32m'
-COLOR[yellow]='\033[33m'
-COLOR[blue]='\033[34m'
-COLOR[white]='\033[97m'
-COLOR[reset]='\033[0m'
-COLOR[purple]='\033[35m'
-COLOR[lightcyan]='\033[96m'
-COLOR[cyan]='\033[36m'
-COLOR[bold]='\033[1m'
-
-gl_hui=${COLOR[gray]}
-gl_hong=${COLOR[red]}
-gl_lv=${COLOR[green]}
-gl_huang=${COLOR[yellow]}
-gl_lan=${COLOR[blue]}
-gl_bai=${COLOR[white]}
-gl_zi=${COLOR[purple]}
-gl_kjlan=${COLOR[lightcyan]}
-gl_rst=${COLOR[reset]}
+RED='\033[31m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+BLUE='\033[34m'
+PURPLE='\033[35m'
+CYAN='\033[36m'
+WHITE='\033[97m'
+RESET='\033[0m'
+BOLD='\033[1m'
+LIGHTCYAN='\033[96m'
+GRAY='\033[37m'
 
 press_any_key_to_continue() {
     if [ -t 0 ]; then
@@ -44,12 +33,12 @@ press_any_key_to_continue() {
 
 send_stats() {
     local action="$1"
-    echo -e "${gl_hui}执行选项: $action${gl_bai}" >&2
+    echo -e "${GRAY}执行选项: $action${WHITE}" >&2
 }
 
 linux_update() {
     send_stats "系统更新"
-    echo -e "${gl_huang}正在更新系统...${gl_bai}"
+    echo -e "${YELLOW}正在更新系统...${WHITE}"
     if command -v apt &>/dev/null; then
         apt update && apt upgrade -y
     elif command -v dnf &>/dev/null; then
@@ -63,16 +52,16 @@ linux_update() {
     elif command -v zypper &>/dev/null; then
         zypper refresh && zypper update -y
     else
-        echo -e "${gl_hong}未知的包管理器!${gl_bai}"
+        echo -e "${RED}未知的包管理器!${WHITE}"
         return 1
     fi
-    echo -e "${gl_lv}系统更新完成${gl_bai}"
+    echo -e "${GREEN}系统更新完成${WHITE}"
     press_any_key_to_continue
 }
 
 linux_clean() {
     send_stats "系统清理"
-    echo -e "${gl_huang}正在清理系统垃圾...${gl_bai}"
+    echo -e "${YELLOW}正在清理系统垃圾...${WHITE}"
     if command -v apt &>/dev/null; then
         apt autoremove -y && apt autoclean -y
     elif command -v dnf &>/dev/null; then
@@ -89,10 +78,10 @@ linux_clean() {
     elif command -v zypper &>/dev/null; then
         zypper clean
     else
-        echo -e "${gl_hong}未知的包管理器!${gl_bai}"
+        echo -e "${RED}未知的包管理器!${WHITE}"
         return 1
     fi
-    echo -e "${gl_lv}系统清理完成${gl_bai}"
+    echo -e "${GREEN}系统清理完成${WHITE}"
     press_any_key_to_continue
 }
 
@@ -152,47 +141,47 @@ change_ssh_port() {
 change_timezone() {
     send_stats "更改时区"
     if ! command -v timedatectl >/dev/null; then
-        echo -e "${gl_hong}未安装timedatectl，无法自动设置时区${gl_bai}"
+        echo -e "${RED}未安装timedatectl，无法自动设置时区${WHITE}"
         press_any_key_to_continue
         return
     fi
     while true; do
         clear
-        echo -e "${gl_kjlan}========= 更改时区 =========${gl_bai}"
-        echo -e "${gl_huang}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${gl_bai}"
+        echo -e "${LIGHTCYAN}========= 更改时区 =========${WHITE}"
+        echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
         zones=("Asia" "Europe" "America" "Africa" "Australia" "Etc")
         for i in "${!zones[@]}"; do
-            echo -e "${gl_lv}$((i+1)).${gl_bai} ${zones[$i]}"
+            echo -e "${GREEN}$((i+1)).${WHITE} ${zones[$i]}"
         done
-        echo -e "${gl_huang}0.${gl_bai} 返回主菜单"
+        echo -e "${YELLOW}0.${WHITE} 返回主菜单"
         read -rp "请选择大区(数字): " zone_choice
         zone_choice=$(echo "$zone_choice" | xargs)
         [[ "$zone_choice" == "0" ]] && return
         if ! [[ "$zone_choice" =~ ^[1-6]$ ]]; then
-            echo -e "${gl_hong}无效选项，请重试${gl_bai}"; sleep 1; continue
+            echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1; continue
         fi
         zone="${zones[$((zone_choice-1))]}"
         # 查询所有子时区
         mapfile -t options < <(timedatectl list-timezones | grep "^$zone/")
         while true; do
             clear
-            echo -e "${gl_kjlan}========= $zone 的时区列表 =========${gl_bai}"
+            echo -e "${LIGHTCYAN}========= $zone 的时区列表 =========${WHITE}"
             for i in "${!options[@]}"; do
                 printf "%2d. %s\n" $((i+1)) "${options[$i]}"
             done
-            echo -e "${gl_huang}0.${gl_bai} 返回上级"
+            echo -e "${YELLOW}0.${WHITE} 返回上级"
             read -rp "请选择时区(数字): " city_choice
             city_choice=$(echo "$city_choice" | xargs)
             [[ "$city_choice" == "0" ]] && break
             if ! [[ "$city_choice" =~ ^[0-9]+$ ]] || [ "$city_choice" -lt 1 ] || [ "$city_choice" -gt "${#options[@]}" ]; then
-                echo -e "${gl_hong}无效选项，请重试${gl_bai}"; sleep 1; continue
+                echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1; continue
             fi
             city="${options[$((city_choice-1))]}"
-            echo -e "${gl_huang}正在设置时区为 $city...${gl_bai}"
+            echo -e "${YELLOW}正在设置时区为 $city...${WHITE}"
             if timedatectl set-timezone "$city"; then
-                echo -e "${gl_lv}时区已成功设为 $city${gl_bai}"
+                echo -e "${GREEN}时区已成功设为 $city${WHITE}"
             else
-                echo -e "${gl_hong}设置失败，请重试${gl_bai}"
+                echo -e "${RED}设置失败，请重试${WHITE}"
             fi
             press_any_key_to_continue
             return
@@ -312,9 +301,9 @@ reboot_vps() {
 
 # ====== 防火墙配置 ======
 configure_firewall() {
-    echo -e "${COLOR[blue]}[*] 检查 iptables 是否安装...${COLOR[reset]}"
+    echo -e "${BLUE}[*] 检查 iptables 是否安装...${RESET}"
     if ! command -v iptables &>/dev/null; then
-        echo -e "${COLOR[yellow]}[!] 未检测到 iptables，开始安装...${COLOR[reset]}"
+        echo -e "${YELLOW}[!] 未检测到 iptables，开始安装...${RESET}"
         if command -v apt &>/dev/null; then
             apt update && apt install -y iptables iptables-persistent
         elif command -v dnf &>/dev/null; then
@@ -332,25 +321,25 @@ configure_firewall() {
         elif command -v apk &>/dev/null; then
             apk add iptables
         else
-            echo -e "${COLOR[red]}[!] 无法安装 iptables，请手动安装。${COLOR[reset]}"
+            echo -e "${RED}[!] 无法安装 iptables，请手动安装。${RESET}"
             press_any_key_to_continue
             return 1
         fi
-        echo -e "${COLOR[green]}[✓] iptables 已安装${COLOR[reset]}"
+        echo -e "${GREEN}[✓] iptables 已安装${RESET}"
     else
-        echo -e "${COLOR[green]}[✓] iptables 已存在${COLOR[reset]}"
+        echo -e "${GREEN}[✓] iptables 已存在${RESET}"
     fi
 
     while true; do
         clear
-        echo -e "${COLOR[bold]}${COLOR[cyan]}========= iptables 防火墙管理 =========${COLOR[reset]}"
-        echo -e "${COLOR[green]}1. 开启端口${COLOR[reset]}"
-        echo -e "${COLOR[red]}2. 关闭端口${COLOR[reset]}"
-        echo -e "${COLOR[green]}3. 开启全部端口${COLOR[reset]}"
-        echo -e "${COLOR[red]}4. 关闭全部端口(保留SSH)${COLOR[reset]}"
-        echo -e "${COLOR[blue]}5. 显示已开启的端口${COLOR[reset]}"
-        echo -e "${COLOR[yellow]}0. 返回主菜单${COLOR[reset]}"
-        echo -e "${COLOR[bold]}${COLOR[cyan]}======================================${COLOR[reset]}"
+        echo -e "${BOLD}${CYAN}========= iptables 防火墙管理 =========${RESET}"
+        echo -e "${GREEN}1. 开启端口${RESET}"
+        echo -e "${RED}2. 关闭端口${RESET}"
+        echo -e "${GREEN}3. 开启全部端口${RESET}"
+        echo -e "${RED}4. 关闭全部端口(保留SSH)${RESET}"
+        echo -e "${BLUE}5. 显示已开启的端口${RESET}"
+        echo -e "${YELLOW}0. 返回主菜单${RESET}"
+        echo -e "${BOLD}${CYAN}======================================${RESET}"
         read -rp "请输入选项(0-5): " action_choice
         action_choice=$(echo "$action_choice" | xargs)
         [[ "$action_choice" == "0" ]] && return
@@ -369,20 +358,20 @@ configure_firewall() {
                         if [[ "$action_choice" == "1" ]]; then
                             iptables -A INPUT -p tcp --dport $start_port:$end_port -j ACCEPT
                             iptables -A INPUT -p udp --dport $start_port:$end_port -j ACCEPT
-                            echo -e "${COLOR[green]}[✓] 端口范围 $port 已开启${COLOR[reset]}"
+                            echo -e "${GREEN}[✓] 端口范围 $port 已开启${RESET}"
                         else
-                            [[ "$start_port" -le 22 && "$end_port" -ge 22 ]] && { echo -e "${COLOR[yellow]}[!] 警告: 不允许关闭 SSH 端口 (22)，已跳过。${COLOR[reset]}"; continue; }
+                            [[ "$start_port" -le 22 && "$end_port" -ge 22 ]] && { echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)，已跳过。${RESET}"; continue; }
                             iptables -A INPUT -p tcp --dport $start_port:$end_port -j DROP
                             iptables -A INPUT -p udp --dport $start_port:$end_port -j DROP
-                            echo -e "${COLOR[red]}[✓] 端口范围 $port 已关闭${COLOR[reset]}"
+                            echo -e "${RED}[✓] 端口范围 $port 已关闭${RESET}"
                         fi
                     else
                         if [[ ! "$port" =~ ^[0-9]+$ ]]; then
-                            echo -e "${COLOR[red]}[!] 无效端口: $port${COLOR[reset]}"
+                            echo -e "${RED}[!] 无效端口: $port${RESET}"
                             continue
                         fi
                         if [[ "$port" == "22" && "$action_choice" == "2" ]]; then
-                            echo -e "${COLOR[yellow]}[!] 警告: 不允许关闭 SSH 端口 (22)，跳过${COLOR[reset]}"
+                            echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)，跳过${RESET}"
                             continue
                         fi
                         # 先删除旧规则（tcp/udp）
@@ -393,11 +382,11 @@ configure_firewall() {
                         if [[ "$action_choice" == "1" ]]; then
                             iptables -A INPUT -p tcp --dport $port -j ACCEPT
                             iptables -A INPUT -p udp --dport $port -j ACCEPT
-                            echo -e "${COLOR[green]}[✓] 端口 $port 已开启${COLOR[reset]}"
+                            echo -e "${GREEN}[✓] 端口 $port 已开启${RESET}"
                         else
                             iptables -A INPUT -p tcp --dport $port -j DROP
                             iptables -A INPUT -p udp --dport $port -j DROP
-                            echo -e "${COLOR[red]}[✓] 端口 $port 已关闭${COLOR[reset]}"
+                            echo -e "${RED}[✓] 端口 $port 已关闭${RESET}"
                         fi
                     fi
                 done
@@ -407,9 +396,9 @@ configure_firewall() {
                     service iptables save
                 fi
                 if [[ "$action_choice" == "1" ]]; then
-                    echo -e "${COLOR[green]}[✓] 所有指定端口已开启完成${COLOR[reset]}"
+                    echo -e "${GREEN}[✓] 所有指定端口已开启完成${RESET}"
                 else
-                    echo -e "${COLOR[red]}[✓] 所有指定端口已关闭完成${COLOR[reset]}"
+                    echo -e "${RED}[✓] 所有指定端口已关闭完成${RESET}"
                 fi
                 press_any_key_to_continue
                 ;;
@@ -423,7 +412,7 @@ configure_firewall() {
                 elif command -v service &>/dev/null && service iptables save &>/dev/null; then
                     service iptables save
                 fi
-                echo -e "${COLOR[green]}[✓] 所有端口已开启${COLOR[reset]}"
+                echo -e "${GREEN}[✓] 所有端口已开启${RESET}"
                 press_any_key_to_continue
                 ;;
             4)
@@ -439,16 +428,16 @@ configure_firewall() {
                 elif command -v service &>/dev/null && service iptables save &>/dev/null; then
                     service iptables save
                 fi
-                echo -e "${COLOR[red]}[✓] 所有端口已关闭 (SSH 端口除外)${COLOR[reset]}"
+                echo -e "${RED}[✓] 所有端口已关闭 (SSH 端口除外)${RESET}"
                 press_any_key_to_continue
                 ;;
             5)
                 iptables_output=$(iptables -L INPUT -n -v)
-                echo -e "${COLOR[blue]}$iptables_output${COLOR[reset]}"
+                echo -e "${BLUE}$iptables_output${RESET}"
                 press_any_key_to_continue
                 ;;
             *)
-                echo -e "${COLOR[red]}[!] 无效选项，请重新选择${COLOR[reset]}"
+                echo -e "${RED}[!] 无效选项，请重新选择${RESET}"
                 sleep 1
                 ;;
         esac
@@ -469,18 +458,18 @@ detect_network_manager() {
 }
 
 show_current_dns() {
-    echo -e "${gl_huang}当前DNS配置:${gl_bai}"
+    echo -e "${YELLOW}当前DNS配置:${WHITE}"
     echo "================="
     grep "nameserver" /etc/resolv.conf || echo "未找到DNS配置"
     echo "================="
     network_manager=$(detect_network_manager)
     case $network_manager in
         "NetworkManager")
-            echo -e "${gl_huang}NetworkManager配置:${gl_bai}"
+            echo -e "${YELLOW}NetworkManager配置:${WHITE}"
             nmcli dev show | grep DNS || echo "未找到NetworkManager DNS配置"
             ;;
         "systemd-resolved")
-            echo -e "${gl_huang}systemd-resolved配置:${gl_bai}"
+            echo -e "${YELLOW}systemd-resolved配置:${WHITE}"
             resolvectl status | grep "DNS Servers" || echo "未找到systemd-resolved DNS配置"
             ;;
     esac
@@ -494,7 +483,7 @@ persistent_set_dns() {
         "NetworkManager")
             CONNECTION=$(nmcli -t -f NAME c show --active | head -n1)
             if [ -z "$CONNECTION" ]; then
-                echo -e "${gl_hong}错误: 未找到活动的网络连接${gl_bai}"
+                echo -e "${RED}错误: 未找到活动的网络连接${WHITE}"
                 return 1
             fi
             if [ -z "$secondary_dns" ]; then
@@ -508,7 +497,7 @@ persistent_set_dns() {
         "systemd-resolved")
             INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
             if [ -z "$INTERFACE" ]; then
-                echo -e "${gl_hong}错误: 未找到默认网络接口${gl_bai}"
+                echo -e "${RED}错误: 未找到默认网络接口${WHITE}"
                 return 1
             fi
             if [ -z "$secondary_dns" ]; then
@@ -520,7 +509,7 @@ persistent_set_dns() {
         "netplan")
             NETPLAN_FILE=$(find /etc/netplan -name "*.yaml" | head -n1)
             if [ -z "$NETPLAN_FILE" ]; then
-                echo -e "${gl_hong}错误: 未找到netplan配置文件${gl_bai}"
+                echo -e "${RED}错误: 未找到netplan配置文件${WHITE}"
                 return 1
             fi
             cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
@@ -542,21 +531,21 @@ persistent_set_dns() {
             chattr +i /etc/resolv.conf 2>/dev/null || true
             ;;
     esac
-    echo -e "${gl_lv}DNS设置已更新并已持久化${gl_bai}"
+    echo -e "${GREEN}DNS设置已更新并已持久化${WHITE}"
 }
 
 set_predefined_dns() {
-    echo -e "${gl_huang}正在设置DNS为 8.8.8.8 和 1.1.1.1...${gl_bai}"
+    echo -e "${YELLOW}正在设置DNS为 8.8.8.8 和 1.1.1.1...${WHITE}"
     persistent_set_dns "8.8.8.8" "1.1.1.1"
 }
 
 set_manual_dns() {
-    echo -e "${gl_huang}请输入主要DNS服务器:${gl_bai}"
+    echo -e "${YELLOW}请输入主要DNS服务器:${WHITE}"
     read primary_dns
-    echo -e "${gl_huang}请输入次要DNS服务器(可选，直接按回车跳过):${gl_bai}"
+    echo -e "${YELLOW}请输入次要DNS服务器(可选，直接按回车跳过):${WHITE}"
     read secondary_dns
     if [ -z "$primary_dns" ]; then
-        echo -e "${gl_hong}错误: 主要DNS服务器不能为空${gl_bai}"
+        echo -e "${RED}错误: 主要DNS服务器不能为空${WHITE}"
         return
     fi
     persistent_set_dns "$primary_dns" "$secondary_dns"
@@ -565,10 +554,10 @@ set_manual_dns() {
 dns_config_menu() {
     while true; do
         clear
-        echo -e "${gl_kjlan}DNS配置工具${gl_bai}"
+        echo -e "${LIGHTCYAN}DNS配置工具${WHITE}"
         echo "================="
         show_current_dns
-        echo -e "${gl_huang}请选择操作:${gl_bai}"
+        echo -e "${YELLOW}请选择操作:${WHITE}"
         echo "1. 修改DNS为8.8.8.8和1.1.1.1"
         echo "2. 手动修改DNS"
         echo -e "0. 返回主菜单"
@@ -578,7 +567,7 @@ dns_config_menu() {
             1) set_predefined_dns;;
             2) set_manual_dns;;
             0) return;;
-            *) echo -e "${gl_hong}无效选项，请重试${gl_bai}"; sleep 1;;
+            *) echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1;;
         esac
         press_any_key_to_continue "按任意键继续..."
     done
@@ -588,30 +577,30 @@ main_menu() {
     while true; do
         clear
         echo
-        echo -e "${gl_kjlan}==== Steins Gate - 凤凰院凶真 Ver.1.0 ==== ${gl_bai}"
-        echo -e "${gl_lv}01.${gl_bai} 系统更新"
-        echo -e "${gl_lv}02.${gl_bai} 系统清理"
-        echo -e "${gl_lv}03.${gl_bai} 更改时区"
-        echo -e "${gl_lv}04.${gl_bai} 开启 root登录"
-        echo -e "${gl_lv}05.${gl_bai} 修改 root密码"
-        echo -e "${gl_lv}06.${gl_bai} 修改 SSH端口"
-        echo -e "${gl_lv}07.${gl_bai} 配置 防火墙"
-        echo -e "${gl_lv}08.${gl_bai} 配置 DNS"
-        echo -e "${gl_lv}09.${gl_bai} 管理 BBR"
-        echo -e "${gl_lv}10.${gl_bai} 管理 WARP"
-        echo -e "${gl_lv}11.${gl_bai} 重启 VPS"
-        echo -e "${gl_lv}12.${gl_bai} 安装 wget/unzip"
-        echo -e "${gl_lv}13.${gl_bai} 配置 Acme"
-        echo -e "${gl_lv}14.${gl_bai} 配置 Snell"
-        echo -e "${gl_lv}15.${gl_bai} 超级 Snell"
-        echo -e "${gl_lv}16.${gl_bai} 配置 Mihomo"
-        echo -e "${gl_lv}17.${gl_bai} 配置 Trojan"
-        echo -e "${gl_lv}18.${gl_bai} 配置 Hysteria"
-        echo -e "${gl_lv}19.${gl_bai} 配置 SubStore"
-        echo -e "${gl_lv}20.${gl_bai} 一键 DDSystem"
-        echo -e "${gl_lv}21.${gl_bai} 一键 Debian12"
-        echo -e "${gl_lv}22.${gl_bai} 反代 Nginx"
-        echo -e "${gl_lv} 0.${gl_bai} 离开 El Psy Kongroo"
+        echo -e "${LIGHTCYAN}==== Steins Gate - 凤凰院凶真 Ver.1.0 ==== ${WHITE}"
+        echo -e "${GREEN}01.${WHITE} 系统更新"
+        echo -e "${GREEN}02.${WHITE} 系统清理"
+        echo -e "${GREEN}03.${WHITE} 更改时区"
+        echo -e "${GREEN}04.${WHITE} 开启 root登录"
+        echo -e "${GREEN}05.${WHITE} 修改 root密码"
+        echo -e "${GREEN}06.${WHITE} 修改 SSH端口"
+        echo -e "${GREEN}07.${WHITE} 配置 防火墙"
+        echo -e "${GREEN}08.${WHITE} 配置 DNS"
+        echo -e "${GREEN}09.${WHITE} 管理 BBR"
+        echo -e "${GREEN}10.${WHITE} 管理 WARP"
+        echo -e "${GREEN}11.${WHITE} 重启 VPS"
+        echo -e "${GREEN}12.${WHITE} 安装 wget/unzip"
+        echo -e "${GREEN}13.${WHITE} 配置 Acme"
+        echo -e "${GREEN}14.${WHITE} 配置 Snell"
+        echo -e "${GREEN}15.${WHITE} 超级 Snell"
+        echo -e "${GREEN}16.${WHITE} 配置 Mihomo"
+        echo -e "${GREEN}17.${WHITE} 配置 Trojan"
+        echo -e "${GREEN}18.${WHITE} 配置 Hysteria"
+        echo -e "${GREEN}19.${WHITE} 配置 SubStore"
+        echo -e "${GREEN}20.${WHITE} 一键 DDSystem"
+        echo -e "${GREEN}21.${WHITE} 一键 Debian12"
+        echo -e "${GREEN}22.${WHITE} 反代 Nginx"
+        echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
@@ -637,8 +626,8 @@ main_menu() {
             20) install_install;;
             21) install_debian12;;
             22) install_nginx;;
-            0) clear; echo -e "${gl_zi}「运命石之扉の选择,El Psy Kongroo」${gl_bai}"; sleep 1; clear; break;;
-            *) clear; echo -e "${gl_hong}[!] 无效选项，请重新选择${gl_bai}"; sleep 2;;
+            0) clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${WHITE}"; sleep 1; clear; break;;
+            *) clear; echo -e "${RED}[!] 无效选项，请重新选择${WHITE}"; sleep 2;;
         esac
     done
 }
