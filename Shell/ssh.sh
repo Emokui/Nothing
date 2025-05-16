@@ -207,6 +207,7 @@ change_timezone() {
                     else
                         echo -e "${RED}设置失败，详细信息如下：${WHITE}"
                         cat err.log
+                        rm -f err.log
                     fi
                 else
                     echo -e "${RED}未检测到推荐时区！${WHITE}"
@@ -252,6 +253,7 @@ change_timezone() {
                 else
                     echo -e "${RED}设置失败，详细信息如下：${WHITE}"
                     cat err.log
+                    rm -f err.log
                 fi
                 press_any_key_to_continue
                 continue
