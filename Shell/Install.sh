@@ -3,7 +3,6 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
 #=================================================
-#	System Required: CentOS 6/7,Debian 8/9,Ubuntu 16+
 #	Description: 一键重装系统
 #=================================================
 github="raw.githubusercontent.com/Emokui/Nothing/Zero/Shell"
