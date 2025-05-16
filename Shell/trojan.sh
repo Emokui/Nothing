@@ -482,7 +482,7 @@ manage_trojan_go() {
         echo -e "${GREEN}1.${PLAIN} 啟動 Trojan-Go"
         echo -e "${GREEN}2.${PLAIN} 停止 Trojan-Go"
         echo -e "${GREEN}3.${PLAIN} 重啟 Trojan-Go"
-        echo -e "${GREEN}4.${PLAIN} 查看當前 Trojan-Go 配置"
+        echo -e "${GREEN}4.${PLAIN} 查看 Trojan-Go 配置"
         echo -e "${GREEN}5.${PLAIN} 修改 Trojan-Go 配置"
         echo -e "${GREEN}6.${PLAIN} 刪除 Trojan-Go"
         echo -e "${GREEN}0.${PLAIN} 返回主菜單"
@@ -505,10 +505,10 @@ main_menu() {
         clear
         banner
         echo -e "${BOLD}${BLUE}========== 主 選 單 ==========${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} ACME申請證書(需開放80端口)"
+        echo -e "${GREEN}1.${PLAIN} Acme證書申请"
         echo -e "${GREEN}2.${PLAIN} 安裝 Trojan-Go"
         echo -e "${GREEN}3.${PLAIN} 管理 Trojan-Go"
-        echo -e "${GREEN}4.${PLAIN} 卸載 acme.sh 及證書"
+        echo -e "${GREEN}4.${PLAIN} 卸載 Acme 及證書"
         echo -e "${GREEN}0.${PLAIN} 離開命運石之門"
         echo ""
         read -p "$(echo -e "${YELLOW}請輸入選項 [0-4]: ${PLAIN}")" choice
