@@ -21,6 +21,8 @@ BOLD='\033[1m'
 LIGHTCYAN='\033[96m'
 GRAY='\033[37m'
 
+# ====== 通用工具函数 ======
+
 press_any_key_to_continue() {
     if [ -t 0 ]; then
         local msg="${1:-按任意键返回菜单...}"
@@ -35,6 +37,8 @@ send_stats() {
     local action="$1"
     echo -e "${GRAY}执行选项: $action${WHITE}" >&2
 }
+
+# ====== 系统管理功能 ======
 
 linux_update() {
     send_stats "系统更新"
@@ -59,10 +63,12 @@ linux_update() {
     press_any_key_to_continue
 }
 
+
 linux_clean() {
     send_stats "系统清理"
     echo -e "${YELLOW}正在清理系统垃圾...${WHITE}"
-    # 包管理器垃圾清理
+
+    # ------ 包管理器缓存清理 ------
     if command -v apt &>/dev/null; then
         apt autoremove -y && apt autoclean -y
     elif command -v dnf &>/dev/null; then
@@ -83,18 +89,18 @@ linux_clean() {
         return 1
     fi
 
-    # 1. 清理系统日志
+    # ------ 清理系统日志（全部删除） ------
     echo -e "${YELLOW}正在清理所有日志文件...${WHITE}"
     if command -v journalctl &>/dev/null; then
         journalctl --vacuum-time=1s
     fi
     find /var/log -type f -name "*.log" -exec rm -f {} \;
 
-    # 2. 清理临时目录
+    # ------ 清理临时目录 ------
     echo -e "${YELLOW}正在清理临时目录...${WHITE}"
     rm -rf /tmp/* /var/tmp/*
 
-    # 3. 清理用户缓存
+    # ------ 清理用户缓存 ------
     echo -e "${YELLOW}正在清理用户缓存...${WHITE}"
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
@@ -104,15 +110,16 @@ linux_clean() {
     press_any_key_to_continue
 }
 
+
+# ====== SSH 管理 ======
+
 enable_root_login() {
     send_stats "开启root登录并设置密码"
 
-    # 设置 Root 密码
     echo "==== 设置 Root 密码 ===="
     passwd root
     echo "[✓] Root 密码已成功设置"
 
-    # 修改 SSH 配置文件
     echo "==== 开启 Root 登录并启用密码登录 ===="
     if ! grep -q '^PermitRootLogin' /etc/ssh/sshd_config; then
         echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
@@ -120,24 +127,25 @@ enable_root_login() {
         sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
     fi
 
-    # 确保密码登录被启用
     if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
         echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
     else
         sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
     fi
 
-    # 重启 SSH 服务以应用更改
     systemctl restart sshd
     echo "[✓] Root 登录和密码登录已启用，请尝试使用密码登录"
     press_any_key_to_continue
 }
+
+
 change_root_password() {
     send_stats "修改root密码"
     echo "==== 修改 root 密码 ===="
     passwd root
     press_any_key_to_continue
 }
+
 
 change_ssh_port() {
     send_stats "修改SSH端口"
@@ -157,10 +165,21 @@ change_ssh_port() {
     press_any_key_to_continue
 }
 
+
+# ====== 时区管理 ======
+
 change_timezone() {
     send_stats "更改时区"
     if ! command -v timedatectl >/dev/null; then
         echo -e "${RED}未安装timedatectl，无法自动设置时区${WHITE}"
+        echo -e "${YELLOW}请手动安装 systemd 相关组件。常用安装命令如下：${WHITE}"
+        if [ -f /etc/debian_version ]; then
+            echo -e "  sudo apt update && sudo apt install systemd"
+        elif [ -f /etc/redhat-release ]; then
+            echo -e "  sudo yum install systemd"
+        else
+            echo -e "  请根据你的系统类型安装 systemd"
+        fi
         press_any_key_to_continue
         return
     fi
@@ -172,9 +191,10 @@ change_timezone() {
     while true; do
         clear
         echo -e "${LIGHTCYAN}========= 更改时区 =========${WHITE}"
+        echo -e "${YELLOW}当前系统时间: $(date)${WHITE}"
         echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
-        echo -e "${GREEN}1.${WHITE} 设置为推荐时区: ${YELLOW}$current_tz${WHITE}"
-        echo -e "${GREEN}2.${WHITE} 手动输入国家代码（如 CN JP US）"
+        echo -e "${GREEN}1.${WHITE} 推荐时区 (${YELLOW}$current_tz${WHITE})"
+        echo -e "${GREEN}2.${WHITE} 按国家代码选择"
         echo -e "${YELLOW}0.${WHITE} 返回主菜单"
         read -rp "请选择: " choice
         choice=$(echo "$choice" | xargs)
@@ -182,10 +202,11 @@ change_timezone() {
             1)
                 if [ -n "$current_tz" ]; then
                     echo -e "${YELLOW}正在设置时区为 $current_tz...${WHITE}"
-                    if timedatectl set-timezone "$current_tz"; then
-                        echo -e "${GREEN}时区已成功设为 $current_tz${WHITE}"
+                    if timedatectl set-timezone "$current_tz" 2>err.log; then
+                        echo -e "${GREEN}时区已成功设为 $current_tz，当前时间: $(date)${WHITE}"
                     else
-                        echo -e "${RED}设置失败，请重试${WHITE}"
+                        echo -e "${RED}设置失败，详细信息如下：${WHITE}"
+                        cat err.log
                     fi
                 else
                     echo -e "${RED}未检测到推荐时区！${WHITE}"
@@ -226,10 +247,11 @@ change_timezone() {
                 fi
                 sel_tz="${lines[$((tz_choice-1))]}"
                 echo -e "${YELLOW}正在设置时区为 $sel_tz...${WHITE}"
-                if timedatectl set-timezone "$sel_tz"; then
-                    echo -e "${GREEN}时区已成功设为 $sel_tz${WHITE}"
+                if timedatectl set-timezone "$sel_tz" 2>err.log; then
+                    echo -e "${GREEN}时区已成功设为 $sel_tz，当前时间: $(date)${WHITE}"
                 else
-                    echo -e "${RED}设置失败，请重试${WHITE}"
+                    echo -e "${RED}设置失败，详细信息如下：${WHITE}"
+                    cat err.log
                 fi
                 press_any_key_to_continue
                 continue
@@ -244,6 +266,9 @@ change_timezone() {
         esac
     done
 }
+
+
+# ====== 基础工具安装 ======
 
 install_base_tools() {
     send_stats "安装wget unzip"
@@ -265,90 +290,40 @@ install_base_tools() {
     press_any_key_to_continue
 }
 
-install_acme() {
-    send_stats "配置Acme"
+
+# ====== 第三方工具/服务安装 ======
+
+run_install_script() {
     set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/acme.sh)
+    bash <(curl -sL "$1")
     set -e
     press_any_key_to_continue
 }
-install_snell() {
-    send_stats "配置Snell"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_mihomo() {
-    send_stats "配置Mihomo"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/mihomo.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_trojan() {
-    send_stats "配置Trojan"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/trojan.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_hysteria() {
-    send_stats "配置Hysteria"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/hysteria.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_substore() {
-    send_stats "配置SubStore"
-    set +e
-    bash <(curl -fsSL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/substore.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_install() {
-    send_stats "一键DDSystem"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/Install.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_nginx() {
-    send_stats "反代Nginx"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/nginx.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_snell-pro() {
-    send_stats "超级Snell"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell-pro.sh)
-    set -e
-    press_any_key_to_continue
-}
-bbr_menu() {
-    send_stats "管理BBR"
-    set +e
-    bash <(wget -O - https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh)
-    set -e
-    press_any_key_to_continue
-}
-warp_menu() {
-    send_stats "管理WARP"
-    set +e
-    bash <(curl -sL https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh)
-    set -e
-    press_any_key_to_continue
-}
+
+install_acme()      { send_stats "配置Acme";      run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/acme.sh"; }
+install_snell()     { send_stats "配置Snell";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell.sh"; }
+install_mihomo()    { send_stats "配置Mihomo";    run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/mihomo.sh"; }
+install_trojan()    { send_stats "配置Trojan";    run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/trojan.sh"; }
+install_hysteria()  { send_stats "配置Hysteria";  run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/hysteria.sh"; }
+install_substore()  { send_stats "配置SubStore";  run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/substore.sh"; }
+install_install()   { send_stats "一键DDSystem";  run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/Install.sh"; }
+install_nginx()     { send_stats "反代Nginx";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/nginx.sh"; }
+install_snell-pro() { send_stats "超级Snell";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell-pro.sh"; }
+bbr_menu()          { send_stats "管理BBR";       run_install_script "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh"; }
+warp_menu()         { send_stats "管理WARP";      run_install_script "https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh"; }
+
+
+# ====== VPS 重启 ======
+
 reboot_vps() {
     send_stats "重启VPS"
     echo "即将重启系统..."
     reboot
 }
 
+
 # ====== 防火墙配置 ======
+
 configure_firewall() {
     echo -e "${BLUE}[*] 检查 iptables 是否安装...${RESET}"
     if ! command -v iptables &>/dev/null; then
@@ -493,7 +468,9 @@ configure_firewall() {
     done
 }
 
-# ====== DNS配置 ======
+
+# ====== DNS 配置 ======
+
 detect_network_manager() {
     if command -v systemctl > /dev/null && systemctl is-active --quiet systemd-resolved; then
         echo "systemd-resolved"
@@ -613,14 +590,17 @@ dns_config_menu() {
         read -rp "请选择操作: " option
         option=$(echo "$option" | xargs)
         case "$option" in
-            1) set_predefined_dns;;
-            2) set_manual_dns;;
-            0) return;;
-            *) echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1;;
+            1) set_predefined_dns ;;
+            2) set_manual_dns ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项，请重试${WHITE}"; sleep 1 ;;
         esac
         press_any_key_to_continue "按任意键继续..."
     done
 }
+
+
+# ====== 主菜单 ======
 
 main_menu() {
     while true; do
@@ -652,29 +632,29 @@ main_menu() {
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
-            1) linux_update;;
-            2) linux_clean;;
-            3) change_timezone;;
-            4) enable_root_login;;
-            5) change_root_password;;
-            6) change_ssh_port;;
-            7) configure_firewall;;
-            8) dns_config_menu;;
-            9) bbr_menu;;
-            10) warp_menu;;
-            11) echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps;;
-            12) install_base_tools;;
-            13) install_acme;;
-            14) install_nginx;;
-            15) install_snell;;
-            16) install_snell-pro;;
-            17) install_mihomo;;
-            18) install_trojan;;
-            19) install_hysteria;;
-            20) install_substore;;
-            21) install_install;;
-            0) clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${WHITE}"; sleep 1; clear; break;;
-            *) clear; echo -e "${RED}[!] 无效选项，请重新选择${WHITE}"; sleep 2;;
+            1)  linux_update ;;
+            2)  linux_clean ;;
+            3)  change_timezone ;;
+            4)  enable_root_login ;;
+            5)  change_root_password ;;
+            6)  change_ssh_port ;;
+            7)  configure_firewall ;;
+            8)  dns_config_menu ;;
+            9)  bbr_menu ;;
+            10) warp_menu ;;
+            11) echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
+            12) install_base_tools ;;
+            13) install_acme ;;
+            14) install_nginx ;;
+            15) install_snell ;;
+            16) install_snell-pro ;;
+            17) install_mihomo ;;
+            18) install_trojan ;;
+            19) install_hysteria ;;
+            20) install_substore ;;
+            21) install_install ;;
+            0)  clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${WHITE}"; sleep 1; clear; break ;;
+            *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${WHITE}"; sleep 2 ;;
         esac
     done
 }
