@@ -226,7 +226,7 @@ start_menu(){
     echo -e " ${Green_font_prefix}4.${Font_color_suffix} 切换安装模式"
     echo -e " ${Green_font_prefix}5.${Font_color_suffix} 切换镜像源"
     echo -e "————————————————————————————————"
-    echo -e " ${Green_font_prefix}6.${Font_color_suffix} DD debian12"
+    echo -e " ${Green_font_prefix}6.${Font_color_suffix} 重装为Debian12系统"
     echo -e " ${Green_font_prefix}0.${Font_color_suffix} 退出脚本"
     echo
     echo -e " 当前模式: 安装${Yellow_font_prefix}${vbit}${Font_color_suffix}位系统，${Yellow_font_prefix}${model}${Font_color_suffix}模式,${Yellow_font_prefix}${country}${Font_color_suffix}镜像源。"
