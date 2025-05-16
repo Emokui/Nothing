@@ -254,14 +254,7 @@ install_substore() {
 install_install() {
     send_stats "一键DDSystem"
     set +e
-    bash <(curl -sL https://csnm.pages.dev/chiakge/installNET/master/Install.sh)
-    set -e
-    press_any_key_to_continue
-}
-install_debian12() {
-    send_stats "一键Debian12"
-    set +e
-    bash <(curl -sL https://csnm.pages.dev/bin456789/reinstall/main/reinstall.sh) debian 12
+    bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/Install.sh)
     set -e
     press_any_key_to_continue
 }
@@ -591,15 +584,14 @@ main_menu() {
         echo -e "${GREEN}11.${WHITE} 重启 VPS"
         echo -e "${GREEN}12.${WHITE} 安装 wget/unzip"
         echo -e "${GREEN}13.${WHITE} 配置 Acme"
-        echo -e "${GREEN}14.${WHITE} 配置 Snell"
-        echo -e "${GREEN}15.${WHITE} 超级 Snell"
-        echo -e "${GREEN}16.${WHITE} 配置 Mihomo"
-        echo -e "${GREEN}17.${WHITE} 配置 Trojan"
-        echo -e "${GREEN}18.${WHITE} 配置 Hysteria"
-        echo -e "${GREEN}19.${WHITE} 配置 SubStore"
-        echo -e "${GREEN}20.${WHITE} 一键 DDSystem"
-        echo -e "${GREEN}21.${WHITE} 一键 Debian12"
-        echo -e "${GREEN}22.${WHITE} 反代 Nginx"
+        echo -e "${GREEN}14.${WHITE} 反代 Nginx"
+        echo -e "${GREEN}15.${WHITE} 配置 Snell"
+        echo -e "${GREEN}16.${WHITE} 超级 Snell"
+        echo -e "${GREEN}17.${WHITE} 配置 Mihomo"
+        echo -e "${GREEN}18.${WHITE} 配置 Trojan"
+        echo -e "${GREEN}19.${WHITE} 配置 Hysteria"
+        echo -e "${GREEN}20.${WHITE} 配置 SubStore"
+        echo -e "${GREEN}21.${WHITE} 一键 DDsystem"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
@@ -617,15 +609,14 @@ main_menu() {
             11) echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps;;
             12) install_base_tools;;
             13) install_acme;;
-            14) install_snell;;
-            15) install_snell-pro;;
-            16) install_mihomo;;
-            17) install_trojan;;
-            18) install_hysteria;;
-            19) install_substore;;
-            20) install_install;;
-            21) install_debian12;;
-            22) install_nginx;;
+            14) install_nginx;;
+            15) install_snell;;
+            16) install_snell-pro;;
+            17) install_mihomo;;
+            18) install_trojan;;
+            19) install_hysteria;;
+            20) install_substore;;
+            21) install_install;;
             0) clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${WHITE}"; sleep 1; clear; break;;
             *) clear; echo -e "${RED}[!] 无效选项，请重新选择${WHITE}"; sleep 2;;
         esac
