@@ -167,7 +167,8 @@ change_timezone() {
 
     # 获取当前IP对应的时区（推荐高亮用）
     ipinfo=$(curl -s ipinfo.io)
-    current_tz=$(echo "$ipinfo" | grep -oP '"timezone":\s*"\K[^"]+')
+    current_tz=$(echo "$ipinfo" | grep -oP '"timezone":\s*"\K[^"]+"')
+    current_tz=${current_tz//\"/} # 去除引号
 
     zones=("Africa" "America" "Asia" "Atlantic" "Australia" "Europe" "Indian" "Pacific" "Etc")
     while true; do
@@ -193,7 +194,6 @@ change_timezone() {
             [ -z "${city_map[$city]+isset}" ] && city_map[$city]="$city"
         done
 
-        # 排序并显示
         options=()
         for key in "${!city_map[@]}"; do
             options+=("${city_map[$key]}")
@@ -208,10 +208,10 @@ change_timezone() {
                 city_name="${options[$i]}"
                 tz_set="$zone/$city_name"
                 if [ "$tz_set" = "$current_tz" ]; then
-                    # 推荐时区高亮
-                    printf "${GREEN}%2d.${WHITE} ${BOLD}${YELLOW}%s${WHITE} ${YELLOW}<< 推荐${WHITE}\n" $((i+1)) "$city_name"
+                    # 推荐时区高亮: 数字绿色、时区黄色、尾部标记黄色，末尾恢复白色
+                    printf "${GREEN}%2d.${WHITE} ${YELLOW}%s${WHITE} ${YELLOW}<< 推荐${WHITE}\n" $((i+1)) "$city_name"
                 else
-                    # 普通城市
+                    # 普通城市: 数字绿色、时区蓝色、末尾恢复白色
                     printf "${GREEN}%2d.${WHITE} ${LIGHTCYAN}%s${WHITE}\n" $((i+1)) "$city_name"
                 fi
             done
