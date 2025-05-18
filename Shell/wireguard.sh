@@ -52,7 +52,7 @@ install_deps() {
 }
 
 # ========== 全局配置 ==========
-WG_DIR="${HOME}/.warp"
+WG_DIR="${HOME}/warp"
 FREE_CONF="${WG_DIR}/warp_free.conf"
 TEAM_CONF="${WG_DIR}/warp_team.conf"
 mkdir -p "$WG_DIR"
