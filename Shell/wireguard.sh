@@ -254,22 +254,29 @@ delete_all() {
     print_separator
     printf "${BOLD}确定要继续吗？(yes/no): ${RESET}"
     read -r confirm
-    if [[ "$confirm" =~ ^[Yy][Ee][Ss]$ ]]; then
-        print_red "正在删除 ${WG_DIR} ..."
-        rm -rf "${WG_DIR}"
-        print_red "正在卸载依赖 ..."
-        if command -v apt >/dev/null 2>&1; then
-            sudo apt remove --purge -y jq awk base64 wireguard-tools xxd hexdump od
-            sudo apt autoremove -y
-        fi
-        print_green "所有配置和依赖已删除！"
-        print_yellow "按回车键退出..."
-        read -r
-        exit 0
-    else
-        print_yellow "操作已取消。"
-        sleep 1
-    fi
+    case "$confirm" in
+        yes|YES|y|Y)
+            print_red "正在删除 ${WG_DIR} ..."
+            rm -rf "${WG_DIR}"
+            print_red "正在卸载依赖 ..."
+            if command -v apt >/dev/null 2>&1; then
+                sudo apt remove --purge -y jq awk base64 wireguard-tools xxd hexdump od
+                sudo apt autoremove -y
+            fi
+            print_green "所有配置和依赖已删除！"
+            print_yellow "按回车键退出..."
+            read -r
+            exit 0
+            ;;
+        no|NO|n|N)
+            print_yellow "操作已取消。"
+            sleep 1
+            ;;
+        *)
+            print_yellow "无效输入，操作已取消。"
+            sleep 1
+            ;;
+    esac
 }
 
 # ========== 主菜单 ==========
