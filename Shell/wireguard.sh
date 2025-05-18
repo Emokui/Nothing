@@ -252,7 +252,7 @@ delete_all() {
     print_red "[*] 警告：将删除warp文件夹及所有相关配置，并卸载依赖！"
     print_red "    此操作不可逆，请确认！"
     print_separator
-    printf "${BOLD}确定要继续吗？(yes/no): ${RESET}"
+    printf "${BOLD}确定要继续吗？(y/n): ${RESET}"
     read -r confirm
     case "$confirm" in
         yes|YES|y|Y)
@@ -260,7 +260,7 @@ delete_all() {
             rm -rf "${WG_DIR}"
             print_red "正在卸载依赖 ..."
             if command -v apt >/dev/null 2>&1; then
-                sudo apt remove --purge -y jq awk base64 wireguard-tools xxd hexdump od
+                sudo apt remove --purge -y jq awk base64 wireguard-tools xxd hexdump od wg
                 sudo apt autoremove -y
             fi
             print_green "所有配置和依赖已删除！"
