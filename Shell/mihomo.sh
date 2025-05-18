@@ -344,11 +344,13 @@ install_mihomo() {
     cat <<EOF > config.yaml
 tun:
   enable: $tun_enable
-  stack: system
+  stack: mixed
   dns-hijack:
-    - '0.0.0.0:53'
+    - any:53
+  mtu: 9000
   strict_route: true
   auto-route: true
+  auto-redirect: true
   auto-detect-interface: true
 
 geodata-mode: false
@@ -356,7 +358,7 @@ geox-url:
   mmdb: "https://raw.githubusercontent.com/NobyDa/geoip/release/Private-GeoIP-CN.mmdb"
 geo-update-interval: 24
 tcp-concurrent: true
-find-process-mode: off
+find-process-mode: strict
 allow-lan: true
 socks-port: $socks_port
 bind-address: "$bind_address"
@@ -370,25 +372,21 @@ sniffer:
   enable: false
 dns:
   enable: true
-  listen: 0.0.0.0:53
+  listen: any:53
   ipv6: false
-  default-nameserver:
-    - 8.8.8.8
-    - 1.1.1.1
   nameserver:
     - 1.1.1.1
+  fallback:
     - 8.8.8.8
   direct-nameserver:
-    - 1.1.1.1
-    - 8.8.8.8
-  enhanced-mode: fake-ip # or redir-host
+    - system
+  enhanced-mode: fake-ip
 
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
     - '*'
     - '+.lan'
     - '+.local'
- # use-hosts: true
 
 proxies:
   - name: "warp"
