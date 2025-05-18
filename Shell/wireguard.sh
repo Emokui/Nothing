@@ -65,7 +65,7 @@ cfcurl() {
         --header 'CF-Client-Version: a-6.81-2410012252.0' \
         --header 'Accept: application/json; charset=UTF-8' \
         --tls-max 1.2 \
-        --ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-CCM:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AE[...]' \
+        --ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-CCM:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256' \
         --disable \
         --silent \
         --show-error \
@@ -154,6 +154,7 @@ EOF
     echo "Endpoint = ${endpoint_ipv6}"
     echo "Endpoint = ${endpoint_host}"
 }
+
 # ========== 业务逻辑 ==========
 generate_free_account_config() {
     print_separator
@@ -245,6 +246,32 @@ show_current_config() {
     done
 }
 
+delete_all() {
+    cls
+    print_separator
+    print_red "[*] 警告：将删除warp文件夹及所有相关配置，并卸载依赖！"
+    print_red "    此操作不可逆，请确认！"
+    print_separator
+    printf "${BOLD}确定要继续吗？(yes/no): ${RESET}"
+    read -r confirm
+    if [[ "$confirm" =~ ^[Yy][Ee][Ss]$ ]]; then
+        print_red "正在删除 ${WG_DIR} ..."
+        rm -rf "${WG_DIR}"
+        print_red "正在卸载依赖 ..."
+        if command -v apt >/dev/null 2>&1; then
+            sudo apt remove --purge -y jq awk base64 wireguard-tools xxd hexdump od
+            sudo apt autoremove -y
+        fi
+        print_green "所有配置和依赖已删除！"
+        print_yellow "按回车键退出..."
+        read -r
+        exit 0
+    else
+        print_yellow "操作已取消。"
+        sleep 1
+    fi
+}
+
 # ========== 主菜单 ==========
 main_menu() {
     while true; do
@@ -255,14 +282,16 @@ main_menu() {
         echo -e "${YELLOW}${BOLD}1.${RESET} ${GREEN}生成免费账户配置${RESET}"
         echo -e "${YELLOW}${BOLD}2.${RESET} ${BLUE}获取团队账户配置${RESET}"
         echo -e "${YELLOW}${BOLD}3.${RESET} ${BOLD}查看当前配置${RESET}"
+        echo -e "${YELLOW}${BOLD}4.${RESET} ${RED}删除所有配置及依赖${RESET}"
         echo -e "${YELLOW}${BOLD}0.${RESET} 退出"
         print_separator
-        printf "${BOLD}请输入选项 [0-3]: ${RESET}"
+        printf "${BOLD}请输入选项 [0-4]: ${RESET}"
         read -r choice
         case "$choice" in
             1) check_and_install_deps; safe_call generate_free_account_config ;;
             2) check_and_install_deps; safe_call generate_team_account_config ;;
             3) safe_call show_current_config ;;
+            4) safe_call delete_all ;;
             0) print_green "Bye!"; exit 0 ;;
             *) print_red "无效选项，请重新输入！"; sleep 1 ;;
         esac
