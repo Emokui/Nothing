@@ -1,264 +1,314 @@
-#!/bin/sh
+#!/bin/bash
 
-# Safety options
-set -e # Exit on error
-set -u # Treat unset variables as an error
-set -f # Disable globbing
+set -euo pipefail
 
-# Constants
-BASE_URL='https://api.cloudflareclient.com/v0a2483'
-DEPENDENCIES="curl jq awk printf cat base64 wg"
-AT_LEAST_ONE_OF_THESE="xxd,hexdump,od"
+# 颜色定义
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[36m"
+BOLD="\033[1m"
+RESET="\033[0m"
 
-# Validate dependencies are installed
-exit_with_error=0
-for dep in ${DEPENDENCIES}; do
-	if ! command -v "${dep}" >/dev/null 2>&1; then
-		echo "Error: ${dep} is not installed." >&2
-		exit_with_error=1
-	fi
-done
-for dep in ${AT_LEAST_ONE_OF_THESE}; do
-	while IFS=, read -r dep1 dep2 dep3; do
-		if command -v "${dep1}" >/dev/null 2>&1 || \
-			command -v "${dep2}" >/dev/null 2>&1 || \
-			command -v "${dep3}" >/dev/null 2>&1; then
-			break
-		fi
-		echo "Error: At least one of ${dep1}, ${dep2}, or ${dep3} is required." >&2
-		exit_with_error=1
-	done <<-EOF
-		${dep}
-	EOF
-done
-[ "${exit_with_error}" -eq 1 ] && exit 1
-
-# Initialize variables that are settable by the user
-cf_trace=0
-curl_ip_protocol=0
-curl_opts=
-refresh_token=
-show_regonly=0
-teams_ephemeral_token=
-token=
-model_name="rany2/warp.sh"
-device_name=
-
-# Helper function to send traffic to Cloudflare API without
-# tripping up their TLS fingerprinting mechanism and triggering
-# a block.
-cfcurl() {
-	# shellcheck disable=SC2086
-	curl \
-		--header 'User-Agent: 1.1.1.1/6.81' \
-		--header 'CF-Client-Version: a-6.81-2410012252.0' \
-		--header 'Accept: application/json; charset=UTF-8' \
-		--tls-max 1.2 \
-		--ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-CCM:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-CCM:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES128-SHA:AES256-GCM-SHA384:AES256-CCM:AES128-GCM-SHA256:AES128-CCM:AES256-SHA256:AES128-SHA256:AES256-SHA:AES128-SHA:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES256-CCM:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES128-CCM:DHE-RSA-AES256-SHA256:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA' \
-		--disable \
-		--silent \
-		--show-error \
-		--fail \
-		${curl_opts} \
-		"${@}"
+# 清屏函数
+cls() {
+    command -v clear >/dev/null 2>&1 && clear || printf "\n%.0s" {1..10}
 }
 
-# Strip port from IP:port string
-strip_port() {
-	IFS= read -r str
-	printf '%s' "${str%:*}"
-}
+# 彩色打印
+print_red()    { echo -e "${RED}$*${RESET}"; }
+print_green()  { echo -e "${GREEN}$*${RESET}"; }
+print_yellow() { echo -e "${YELLOW}$*${RESET}"; }
+print_blue()   { echo -e "${BLUE}$*${RESET}"; }
+print_bold()   { echo -e "${BOLD}$*${RESET}"; }
 
-# Print separator for better readability
+# 分割线
 print_separator() {
-	printf '%s\n' '----------------------------------------' >&2
+    echo -e "${BLUE}----------------------------------------${RESET}"
 }
 
-# Functions for options
-help_page() { cat >&2 <<-EOF
+# 依赖检查与安装
+DEPENDENCIES=(curl jq awk base64 wireguard-tools)
+POSSIBLE_HEX=(xxd hexdump od)
+INSTALL_MISSING_DEPS=()
 
-	Usage $0 [options]
-	  -4  use ipv4 for curl
-	  -6  use ipv6 for curl
-	  -T  teams JWT token (default no JWT token is sent)
-	  -R  refresh token (format is token,device_id,wg_private_key; specify this to get a refreshed config)
-	  -m  model name (default is rany2/warp.sh)
-	  -d  device name (default is blank)
-	  -t  show cloudflare trace and exit only
-	  -h  show this help page and exit only
+check_and_install_deps() {
+    print_blue "[*] 检查依赖..."
+    for dep in "${DEPENDENCIES[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            INSTALL_MISSING_DEPS+=("$dep")
+        fi
+    done
+    # wg 命令检查（兼容性安全兜底）
+    if ! command -v wg >/dev/null 2>&1; then
+        INSTALL_MISSING_DEPS+=("wireguard-tools")
+    fi
+    # HEX 工具检测
+    HEX_OK=false
+    for hexdep in "${POSSIBLE_HEX[@]}"; do
+        if command -v "$hexdep" >/dev/null 2>&1; then
+            HEX_OK=true
+            break
+        fi
+    done
+    if ! $HEX_OK; then
+        INSTALL_MISSING_DEPS+=("xxd")
+    fi
+    if ((${#INSTALL_MISSING_DEPS[@]} > 0)); then
+        print_yellow "[*] 检测到缺少依赖: ${INSTALL_MISSING_DEPS[*]}"
+        install_deps "${INSTALL_MISSING_DEPS[@]}"
+    fi
+}
 
-	Regarding Teams enrollment:
-	  1. Visit https://<teams id>.cloudflareaccess.com/warp
-	  2. Authenticate yourself as you would with the official client
-	  3. Check the source code of the page for the JWT token or use the following code in the "Web Console" (Ctrl+Shift+K):
-	  	  console.log(document.querySelector("meta[http-equiv='refresh']").content.split("=")[2])
-	  4. Pass the output as the value for the parameter -T. The final command will look like:
-	  	  ${0} -T eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.....
+install_deps() {
+    local deps=("$@")
+    print_blue "[*] 正在尝试自动安装缺失组件..."
+    if command -v apt >/dev/null 2>&1; then
+        # wireguard-tools、xxd 都有官方包
+        sudo apt update
+        if ! sudo apt install -y "${deps[@]}"; then
+            print_red "依赖安装失败，脚本退出。"
+            exit 1
+        fi
+    else
+        print_red "仅支持 Debian/Ubuntu（apt），请手动安装依赖：${deps[*]}"
+        exit 1
+    fi
+}
 
-	Regarding -T and -R options:
-	  -T and -R both could take a file as an argument. The file should be in the same format as the command line argument.
-	  This is so that the token wouldn't be exposed in the shell history or process list.
+# 配置目录与常量
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+WG_DIR="${BASE_DIR}/WireGuard"
+FREE_CONF="${WG_DIR}/warp_free.conf"
+TEAM_CONF="${WG_DIR}/warp_team.conf"
+mkdir -p "$WG_DIR"
+BASE_URL='https://api.cloudflareclient.com/v0a2483'
 
-	EOF
+# 工具函数
+cfcurl() {
+    curl \
+        --header 'User-Agent: 1.1.1.1/6.81' \
+        --header 'CF-Client-Version: a-6.81-2410012252.0' \
+        --header 'Accept: application/json; charset=UTF-8' \
+        --tls-max 1.2 \
+        --ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-CCM:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256' \
+        --disable \
+        --silent \
+        --show-error \
+        --fail \
+        "$@"
+}
 
-	exit "${1}"
+strip_port() {
+    IFS= read -r str
+    printf '%s' "${str%:*}"
 }
 
 clientid_to_hex() {
-	if command -v xxd >/dev/null 2>&1; then
-		xxd -p -c 1
-	elif command -v hexdump >/dev/null 2>&1; then
-		hexdump -v -e '/1 "%02x\n"'
-	elif command -v od >/dev/null 2>&1; then
-		od -An -v -t x1 -w1 | awk '{$1=$1; print}'
-	else
-		echo "Error: No suitable command found to convert client ID to hex." >&2
-		exit 1
-	fi
+    if command -v xxd >/dev/null 2>&1; then
+        xxd -p -c 1
+    elif command -v hexdump >/dev/null 2>&1; then
+        hexdump -v -e '/1 "%02x\n"'
+    elif command -v od >/dev/null 2>&1; then
+        od -An -v -t x1 -w1 | awk '{$1=$1; print}'
+    else
+        print_red "Error: No suitable command found to convert client ID to hex."
+        exit 1
+    fi
 }
 
-# Parse options
-while getopts "46stT:R:m:d:h" opt; do
-	case "${opt}" in
-		4) curl_ip_protocol=4 ;;
-		6) curl_ip_protocol=6 ;;
-		s) show_regonly=1 ;;
-		t) cf_trace=1 ;;
-		T) teams_ephemeral_token="${OPTARG}" ;;
-		R) refresh_token="${OPTARG}" ;;
-		m) model_name="${OPTARG}" ;;
-		d) device_name="${OPTARG}" ;;
-		h) help_page 0 ;;
-		*) help_page 1 ;;
-	esac
-done
+# 主菜单
+main_menu() {
+    while true; do
+        cls
+        print_separator
+        print_bold "${GREEN}Cloudflare WARP WireGuard 管理脚本${RESET}"
+        print_separator
+        echo -e "${YELLOW} 1)${RESET} 生成${GREEN}免费账户${RESET}配置（${FREE_CONF}）"
+        echo -e "${YELLOW} 2)${RESET} 获取${BLUE}团队账户${RESET}配置（${TEAM_CONF}）"
+        echo -e "${YELLOW} 3)${RESET} 查看${GREEN}当前配置${RESET}"
+        echo -e "${YELLOW} 0)${RESET} 退出"
+        print_separator
+        printf "${BOLD}请输入选项 [0-3]: ${RESET}"
+        read -r choice
+        case "$choice" in
+            1) generate_free_account_config ;;
+            2) generate_team_account_config ;;
+            3) show_current_config ;;
+            0) print_green "Bye!"; exit 0 ;;
+            *) print_red "无效选项，请重新输入！"; sleep 1 ;;
+        esac
+        print_yellow "按回车键返回主菜单..."
+        read -r
+    done
+}
 
-# If a file is provided as an argument to -T, we read the token from the file
-if [ -n "${teams_ephemeral_token}" ] && [ -e "${teams_ephemeral_token}" ]; then
-	teams_ephemeral_token=$(cat "${teams_ephemeral_token}")
-fi
+# 选项功能
+generate_free_account_config() {
+    print_separator
+    print_bold "[*] 生成免费账户 WireGuard 配置"
+    # 自动设定设备名和模型名
+    device_name=""
+    model_name="rany2/warp.sh"
+    wg_private_key="$(wg genkey)"
+    wg_public_key="$(printf %s "${wg_private_key}" | wg pubkey)"
+    print_blue "正在请求 Cloudflare API ..."
+    reg="$(cfcurl --header 'Content-Type: application/json' --request "POST" \
+        --data '{"key":"'"${wg_public_key}"'","install_id":"","fcm_token":"","model":"'"${model_name}"'","serial_number":"","name":"'"${device_name}"'","locale":"en_US"}' \
+        "${BASE_URL}/reg")"
+    output_config "$reg" "$wg_private_key" "$wg_public_key" "$FREE_CONF"
+    print_green "[*] 配置已保存至 $FREE_CONF"
+}
 
-# If a file is provided as an argument to -R, we read the token from the file
-if [ -n "${refresh_token}" ] && [ -e "${refresh_token}" ]; then
-	refresh_token=$(cat "${refresh_token}")
-fi
+generate_team_account_config() {
+    print_separator
+    print_bold "[*] 生成团队账户 WireGuard 配置"
+    printf "${BOLD}请输入团队 JWT Token:${RESET} "
+    read -r teams_token
+    # 自动设定设备名和模型名
+    device_name=""
+    model_name="rany2/warp.sh"
+    wg_private_key="$(wg genkey)"
+    wg_public_key="$(printf %s "${wg_private_key}" | wg pubkey)"
+    print_blue "正在请求 Cloudflare API ..."
+    reg="$(cfcurl --header 'Content-Type: application/json' --request "POST" \
+        --header 'CF-Access-Jwt-Assertion: '"${teams_token}" \
+        --data '{"key":"'"${wg_public_key}"'","install_id":"","fcm_token":"","model":"'"${model_name}"'","serial_number":"","name":"'"${device_name}"'","locale":"en_US"}' \
+        "${BASE_URL}/reg")"
+    output_config "$reg" "$wg_private_key" "$wg_public_key" "$TEAM_CONF"
+    print_green "[*] 配置已保存至 $TEAM_CONF"
+}
 
-# If user is okay with forcing IP protocol on curl, we do so
-case "${curl_ip_protocol}" in
-	4) curl_opts="${curl_opts} "'--ipv4'; ;;
-	6) curl_opts="${curl_opts} "'--ipv6'; ;;
-	*) ;;
-esac
+show_current_config() {
+    while true; do
+        cls
+        print_separator
+        print_bold "[*] 查看当前 WireGuard 配置"
+        print_separator
+        echo -e "${YELLOW} 1)${RESET} 查看${GREEN}免费账户${RESET}配置（${FREE_CONF}）"
+        echo -e "${YELLOW} 2)${RESET} 查看${BLUE}团队账户${RESET}配置（${TEAM_CONF}）"
+        echo -e "${YELLOW} 0)${RESET} 返回主菜单"
+        print_separator
+        printf "${BOLD}请选择要查看的配置 [0-2]: ${RESET}"
+        read -r sub_choice
+        case "$sub_choice" in
+            1)
+                if [ -f "$FREE_CONF" ]; then
+                    print_separator
+                    print_green "免费账户配置($FREE_CONF):"
+                    print_separator
+                    cat "$FREE_CONF"
+                    print_separator
+                else
+                    print_yellow "未找到免费账户配置文件。"
+                fi
+                print_yellow "按回车键返回..."
+                read -r
+                ;;
+            2)
+                if [ -f "$TEAM_CONF" ]; then
+                    print_separator
+                    print_blue "团队账户配置($TEAM_CONF):"
+                    print_separator
+                    cat "$TEAM_CONF"
+                    print_separator
+                else
+                    print_yellow "未找到团队账户配置文件。"
+                fi
+                print_yellow "按回车键返回..."
+                read -r
+                ;;
+            0)
+                break
+                ;;
+            *)
+                print_red "无效选项，请重新输入！"
+                sleep 1
+                ;;
+        esac
+    done
+}
 
-# If requested, we show trace after all options have been parsed
-if [ "${cf_trace}" -eq 1 ]; then
-	cfcurl "https://www.cloudflare.com/cdn-cgi/trace"
-	exit 0
-fi
+output_config() {
+    reg="$1"
+    wg_private_key="$2"
+    wg_public_key="$3"
+    out_file="$4"
 
-if [ -n "${refresh_token}" ]; then
-	# If a refresh token is provided, we use it to get a new config
-	token=$(printf %s "${refresh_token}" | awk -F, '{print $1}')
-	device_id=$(printf %s "${refresh_token}" | awk -F, '{print $2}')
-	wg_private_key=$(printf %s "${refresh_token}" | awk -F, '{print $3}')
-	wg_public_key=$(printf %s "${wg_private_key}" | wg pubkey)
-	reg="$(cfcurl --header 'Content-Type: application/json' -H "Authorization: Bearer ${token}" "${BASE_URL}/reg/${device_id}")"
-else
-	# Register a new account if no refresh token is provided
-	wg_private_key="$(wg genkey)"
-	wg_public_key="$(printf %s "${wg_private_key}" | wg pubkey)"
-	reg="$(cfcurl --header 'Content-Type: application/json' --request "POST" --header 'CF-Access-Jwt-Assertion: '"${teams_ephemeral_token}" \
-		--data '{"key":"'"${wg_public_key}"'","install_id":"","fcm_token":"","model":"'"${model_name}"'","serial_number":"","name":"'"${device_name}"'","locale":"en_US"}' \
-		"${BASE_URL}/reg")"
-fi
+    wg_config=$(printf %s "${reg}" | jq -r '
+.config as $c |
+$c.peers[0].public_key + "\n" +
+$c.peers[0].endpoint.host + "\n" +
+$c.peers[0].endpoint.v4 + "\n" +
+$c.peers[0].endpoint.v6 + "\n" +
+$c.peers[0].interface.addresses.v4 + "\n" +
+$c.peers[0].interface.addresses.v6 + "\n" +
+($c.peers[0].client_id // $c.peers[0].reserved // $c.client_id // "")
+')
+    endpoint_port=2408
+    peer_public_key=$(printf %s "${wg_config}" | awk 'NR==1')
+    endpoint_host=$(printf %s "${wg_config}" | awk 'NR==2' | strip_port)":${endpoint_port}"
+    endpoint_ipv4=$(printf %s "${wg_config}" | awk 'NR==3' | strip_port)":${endpoint_port}"
+    endpoint_ipv6=$(printf %s "${wg_config}" | awk 'NR==4' | strip_port)":${endpoint_port}"
+    address_ipv4=$(printf %s "${wg_config}" | awk 'NR==5')
+    address_ipv6=$(printf %s "${wg_config}" | awk 'NR==6')
+    client_id_b64=$(printf %s "${wg_config}" | awk 'NR==7')
+    if [ -n "$client_id_b64" ]; then
+        client_id_hex=$(printf %s "${client_id_b64}" | base64 -d 2>/dev/null | clientid_to_hex)
+    else
+        client_id_hex=""
+    fi
+    if [ -n "$client_id_hex" ]; then
+        client_id_dec=$(printf '%s\n' "${client_id_hex}" | while read -r hex; do
+            [ -n "$hex" ] && printf "%d, " "0x${hex}"
+        done)
+        client_id_dec="[${client_id_dec%, }]"
+        client_id_hex_full=$(printf %s "${client_id_hex}" | awk 'BEGIN { ORS=""; print "0x" } { print }')
+    else
+        client_id_dec="[N/A]"
+        client_id_hex_full="N/A"
+    fi
 
-# DEBUG: Show registration response
-if [ "${show_regonly}" -eq 1 ]; then
-	printf '%s\n' "${reg}" | jq
-	print_separator
-fi
+    cf_creds=$(printf %s "${reg}" | jq -r '
+        .id+"\n"+
+        .account.id+"\n"+
+        .account.license+"\n"+
+        .token
+    ')
+    device_id=$(printf %s "${cf_creds}" | awk 'NR==1')
+    account_id=$(printf %s "${cf_creds}" | awk 'NR==2')
+    account_license=$(printf %s "${cf_creds}" | awk 'NR==3')
+    [ -z "${account_license}" ] && account_license="Unknown"
+    token=$(printf %s "${cf_creds}" | awk 'NR==4')
+    cat > "$out_file" <<-EOF
+[Interface]
+PrivateKey = ${wg_private_key}
+#PublicKey = ${wg_public_key}
+Address = ${address_ipv4}, ${address_ipv6}
+DNS = 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001
+MTU = 1280
 
-# Extract Wireguard details from registration response
-wg_config=$(printf %s "${reg}" | jq -r '.config|(
-	.peers[0]|
-	.public_key+"\n"+               # NR==1
-	.endpoint.host+"\n"+            # NR==2
-	.endpoint.v4+"\n"+              # NR==3
-	.endpoint.v6)+"\n"+             # NR==4
-	.interface.addresses.v4+"\n"+   # NR==5
-	.interface.addresses.v6+"\n"+   # NR==6
-	.client_id                      # NR==7
-	'
-)
-endpoint_port=2408
-peer_public_key=$(printf %s "${wg_config}" | awk 'NR==1')
-endpoint_host=$(printf %s "${wg_config}" | awk 'NR==2' | strip_port)":${endpoint_port}"
-endpoint_ipv4=$(printf %s "${wg_config}" | awk 'NR==3' | strip_port)":${endpoint_port}"
-endpoint_ipv6=$(printf %s "${wg_config}" | awk 'NR==4' | strip_port)":${endpoint_port}"
-address_ipv4=$(printf %s "${wg_config}" | awk 'NR==5')
-address_ipv6=$(printf %s "${wg_config}" | awk 'NR==6')
-client_id_b64=$(printf %s "${wg_config}" | awk 'NR==7')
-client_id_hex=$(printf %s "${client_id_b64}" | base64 -d | clientid_to_hex)
-client_id_dec=$(printf '%s\n' "${client_id_hex}" | while read -r hex; do printf "%d, " "0x${hex}"; done)
-## Add brackets and remove trailing comma and space
-client_id_dec="[${client_id_dec%, }]"
-## Add 0x prefix and remove newline
-client_id_hex=$(printf %s "${client_id_hex}" | awk 'BEGIN { ORS=""; print "0x" } { print }')
+# To refresh the config, 请重新生成配置
 
-# Extract Cloudflare credentials from registration response
-cf_creds=$(printf %s "${reg}" | jq -r '
-	.id+"\n"+                       # NR==1
-	.account.id+"\n"+               # NR==2
-	.account.license+"\n"+          # NR==3
-	.token                          # NR==4
-	'
-)
-device_id=$(printf %s "${cf_creds}" | awk 'NR==1')
-account_id=$(printf %s "${cf_creds}" | awk 'NR==2')
-account_license=$(printf %s "${cf_creds}" | awk 'NR==3')
-if [ -z "${account_license}" ] && [ -n "${teams_ephemeral_token}" ]; then
-	account_license="N/A"
-elif [ -z "${account_license}" ]; then
-	account_license="Unknown"
-fi
-if [ -z "${token}" ]; then
-	token=$(printf %s "${cf_creds}" | awk 'NR==4')
-fi
+# Cloudflare Warp specific variables
+#CFDeviceId = ${device_id}
+#CFAccountId = ${account_id}
+#CFAccountLicense = ${account_license}
+#CFToken = ${token}
+#CFClientIdB64 = ${client_id_b64}
+#CFClientIdHex = ${client_id_hex_full}
+#CFClientIdDec = ${client_id_dec}
 
-# Write WARP Wireguard config and quit
-cat <<-EOF
-	[Interface]
-	PrivateKey = ${wg_private_key}
-	#PublicKey = ${wg_public_key}
-	Address = ${address_ipv4}, ${address_ipv6}
-	DNS = 1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001
-	MTU = 1280
-
-	# To refresh the config, run the following command:
-	# ${0} -R '${token},${device_id},${wg_private_key}'
-	# or
-	# ${0} -R /path/to/refresh_token.txt
-	# where refresh_token.txt contains the above string.
-
-	# Cloudflare Warp specific variables
-	#CFDeviceId = ${device_id}
-	#CFAccountId = ${account_id}
-	#CFAccountLicense = ${account_license}
-	#CFToken = ${token}
-	## Cloudflare Client ID in various formats.
-	## NOTE: this is also referred to as "reserved key" as the client ID
-	##       is put in the reserved field in the WireGuard header.
-	#CFClientIdB64 = ${client_id_b64}
-	#CFClientIdHex = ${client_id_hex}
-	#CFClientIdDec = ${client_id_dec}
-
-	[Peer]
-	PublicKey = ${peer_public_key}
-	AllowedIPs = 0.0.0.0/0, ::/0
-	PersistentKeepalive = 25
-	# If UDP 2408 is blocked, you could try UDP 500, UDP 1701, or UDP 4500.
-	Endpoint = ${endpoint_ipv4}
-	#Endpoint = ${endpoint_ipv6}
-	#Endpoint = ${endpoint_host}
+[Peer]
+PublicKey = ${peer_public_key}
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+Endpoint = ${endpoint_ipv4}
+#Endpoint = ${endpoint_ipv6}
+#Endpoint = ${endpoint_host}
 EOF
-exit 0
+}
+
+# 主体逻辑
+check_and_install_deps
+main_menu
