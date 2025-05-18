@@ -70,21 +70,21 @@ modify_trojan_config() {
     echo -e "------------------------------------------------${PLAIN}"
     echo -e "${YELLOW}请交互输入新配置项（直接回车为保留原值）：${PLAIN}"
 
-    old_local_port=$(grep -oP '"local_port":\s*\K[0-9]+' "$CONFIG")
-    old_remote_addr=$(grep -oP '"remote_addr":\s*"\K[^"]+' "$CONFIG")
-    old_remote_port=$(grep -oP '"remote_port":\s*\K[0-9]+' "$CONFIG")
-    old_password=$(grep -oP '"password":\s*\[\s*"\K[^"]+' "$CONFIG")
-    old_ws_path=$(grep -oP '"path":\s*"\K[^"]+' "$CONFIG" | head -n 1)
-    old_domain=$(grep -oP '"host":\s*"\K[^"]+' "$CONFIG")
-    old_cert=$(grep -oP '"cert":\s*"\K[^"]+' "$CONFIG")
-    old_key=$(grep -oP '"key":\s*"\K[^"]+' "$CONFIG")
+    old_local_port=$(jq -r '.local_port' "$CONFIG" 2>/dev/null)
+    old_remote_addr=$(jq -r '.remote_addr' "$CONFIG" 2>/dev/null)
+    old_remote_port=$(jq -r '.remote_port' "$CONFIG" 2>/dev/null)
+    old_password=$(jq -r '.password[0]' "$CONFIG" 2>/dev/null)
+    old_ws_path=$(jq -r '.websocket.path' "$CONFIG" 2>/dev/null)
+    old_domain=$(jq -r '.ssl.sni' "$CONFIG" 2>/dev/null)
+    old_cert=$(jq -r '.ssl.cert' "$CONFIG" 2>/dev/null)
+    old_key=$(jq -r '.ssl.key' "$CONFIG" 2>/dev/null)
 
     # forward_proxy 旧值提取
-    old_fp_enabled=$(grep -oP '"forward_proxy":\s*\{[^\}]*"enabled":\s*\K(true|false)' "$CONFIG")
-    old_fp_addr=$(grep -oP '"proxy_addr":\s*"\K[^"]+' "$CONFIG")
-    old_fp_port=$(grep -oP '"proxy_port":\s*\K[0-9]+' "$CONFIG")
-    old_fp_username=$(grep -oP '"username":\s*"\K[^"]*' "$CONFIG")
-    old_fp_password=$(grep -oP '"password":\s*"\K[^"]*' "$CONFIG")
+    old_fp_enabled=$(jq -r '.forward_proxy.enabled' "$CONFIG" 2>/dev/null)
+    old_fp_addr=$(jq -r '.forward_proxy.proxy_addr' "$CONFIG" 2>/dev/null)
+    old_fp_port=$(jq -r '.forward_proxy.proxy_port' "$CONFIG" 2>/dev/null)
+    old_fp_username=$(jq -r '.forward_proxy.username' "$CONFIG" 2>/dev/null)
+    old_fp_password=$(jq -r '.forward_proxy.password' "$CONFIG" 2>/dev/null)
 
     read -p "$(echo -e "${CYAN}请输入本地监听端口 (节点端口) [默认: $old_local_port]: ${PLAIN}")" local_port
     local_port=${local_port:-$old_local_port}
@@ -95,7 +95,7 @@ modify_trojan_config() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认: $old_remote_port]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-$old_remote_port}
 
-    read -p "$(echo -e "${CYAN}请输入密码 (回车随机8位数字字母) [默认: $old_password]: ${PLAIN}")" password
+    read -p "$(echo -e "${CYAN}请输入密码 [默认: $old_password]: ${PLAIN}")" password
     if [ -z "$password" ]; then
         password=$old_password
         if [ -z "$password" ]; then
