@@ -283,7 +283,7 @@ main_menu() {
         echo -e "${YELLOW}${BOLD}2.${RESET} ${BLUE}获取团队账户配置${RESET}"
         echo -e "${YELLOW}${BOLD}3.${RESET} ${BLUE}查看当前配置${RESET}"
         echo -e "${YELLOW}${BOLD}4.${RESET} ${RED}删除所有配置及依赖${RESET}"
-        echo -e "${YELLOW}${BOLD}0.${RESET} ${GREEN}退出${RESET}"
+        echo -e "${YELLOW}${BOLD}0.${RESET} ${BLUE}退出${RESET}"
         print_separator
         printf "${BOLD}请输入选项 [0-4]: ${RESET}"
         read -r choice
