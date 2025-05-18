@@ -249,7 +249,7 @@ show_current_config() {
 delete_all() {
     cls
     print_separator
-    print_red "[*] 警告：将删除warp文件夹及所有相关配置，并卸载依赖！"
+    print_red "[*] 警告：将删除所有相关配置，并彻底卸载依赖和WireGuard程序！"
     print_red "    此操作不可逆，请确认！"
     print_separator
     printf "${BOLD}确定要继续吗？(y/n): ${RESET}"
@@ -260,10 +260,15 @@ delete_all() {
             rm -rf "${WG_DIR}"
             print_red "正在卸载依赖 ..."
             if command -v apt >/dev/null 2>&1; then
-                sudo apt remove --purge -y jq awk base64 wireguard-tools xxd hexdump od wg
+                # 尝试卸载所有相关依赖和WireGuard主程序
+                sudo apt remove --purge -y jq awk base64 wireguard-tools wireguard xxd hexdump od wg wireguard-dkms wireguard-modules
                 sudo apt autoremove -y
             fi
-            print_green "所有配置和依赖已删除！"
+            print_red "正在删除残留的可执行文件 ..."
+            sudo rm -f /usr/bin/wg /usr/bin/wg-quick /usr/bin/wireguard-go
+            sudo rm -f /usr/local/bin/wg /usr/local/bin/wg-quick /usr/local/bin/wireguard-go
+            sudo rm -rf /etc/wireguard
+            print_green "所有配置、依赖和WireGuard主程序已彻底删除！"
             print_yellow "按回车键退出..."
             read -r
             exit 0
