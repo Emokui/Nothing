@@ -311,7 +311,7 @@ install_nginx()     { send_stats "反代Nginx";     run_install_script "https://
 install_snell-pro() { send_stats "超级Snell";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell-pro.sh"; }
 bbr_menu()          { send_stats "管理BBR";       run_install_script "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh"; }
 warp_menu()         { send_stats "管理WARP";      run_install_script "https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh"; }
-install_wireguard() { send_stats "配置WireGuard"; run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
+install_wireguard() { send_stats "提取WireGuard"; run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
 
 
 
@@ -631,7 +631,7 @@ main_menu() {
         echo -e "${GREEN}19.${WHITE} 配置 Hysteria"
         echo -e "${GREEN}20.${WHITE} 配置 SubStore"
         echo -e "${GREEN}21.${WHITE} 一键 DDsystem"
-        echo -e "${GREEN}22.${WHITE} 配置 WireGuard"
+        echo -e "${GREEN}22.${WHITE} 提取 WireGuard"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
