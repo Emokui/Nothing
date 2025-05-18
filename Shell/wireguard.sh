@@ -260,7 +260,6 @@ delete_all() {
             rm -rf "${WG_DIR}"
             print_red "正在卸载依赖 ..."
             if command -v apt >/dev/null 2>&1; then
-                # 尝试卸载所有相关依赖和WireGuard主程序
                 sudo apt remove --purge -y jq awk base64 wireguard-tools wireguard xxd hexdump od wg wireguard-dkms wireguard-modules
                 sudo apt autoremove -y
             fi
@@ -268,6 +267,25 @@ delete_all() {
             sudo rm -f /usr/bin/wg /usr/bin/wg-quick /usr/bin/wireguard-go
             sudo rm -f /usr/local/bin/wg /usr/local/bin/wg-quick /usr/local/bin/wireguard-go
             sudo rm -rf /etc/wireguard
+
+            # 检查 wireguard-tools 是否已完全卸载
+            if dpkg -l | grep -q wireguard-tools; then
+                print_red "wireguard-tools 未能卸载干净，尝试再次移除..."
+                sudo apt remove --purge -y wireguard-tools
+                sudo apt autoremove -y
+            fi
+            if command -v wg >/dev/null 2>&1; then
+                print_red "警告：wg 命令仍然存在，已尝试手动删除。"
+                sudo rm -f "$(command -v wg)"
+                if command -v wg >/dev/null 2>&1; then
+                    print_red "wg 仍未被移除，请手动检查。"
+                else
+                    print_green "wg 已成功移除。"
+                fi
+            else
+                print_green "wg 命令已不存在。"
+            fi
+
             print_green "所有配置、依赖和WireGuard主程序已彻底删除！"
             print_yellow "按回车键退出..."
             read -r
@@ -282,34 +300,6 @@ delete_all() {
             sleep 1
             ;;
     esac
-}
-
-# ========== 主菜单 ==========
-main_menu() {
-    while true; do
-        cls
-        print_separator
-        print_bold "${GREEN}Cloudflare WARP WireGuard 管理脚本${RESET}"
-        print_separator
-        echo -e "${YELLOW}${BOLD}1.${RESET} ${BLUE}生成免费账户配置${RESET}"
-        echo -e "${YELLOW}${BOLD}2.${RESET} ${BLUE}获取团队账户配置${RESET}"
-        echo -e "${YELLOW}${BOLD}3.${RESET} ${BLUE}查看当前配置${RESET}"
-        echo -e "${YELLOW}${BOLD}4.${RESET} ${RED}删除所有配置及依赖${RESET}"
-        echo -e "${YELLOW}${BOLD}0.${RESET} ${GREEN}退出${RESET}"
-        print_separator
-        printf "${BOLD}请输入选项 [0-4]: ${RESET}"
-        read -r choice
-        case "$choice" in
-            1) check_and_install_deps; safe_call generate_free_account_config ;;
-            2) check_and_install_deps; safe_call generate_team_account_config ;;
-            3) safe_call show_current_config ;;
-            4) safe_call delete_all ;;
-            0) print_green "Bye!"; exit 0 ;;
-            *) print_red "无效选项，请重新输入！"; sleep 1 ;;
-        esac
-        print_yellow "按回车键返回主菜单..."
-        read -r
-    done
 }
 
 # ========== 主菜单自动恢复 ==========
