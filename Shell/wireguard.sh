@@ -252,7 +252,7 @@ delete_all() {
     print_red "[*] 警告：将删除所有相关配置，并彻底卸载依赖和WireGuard程序！"
     print_red "    此操作不可逆，请确认！"
     print_separator
-    printf "${BOLD}确定要继续吗？(y/n): ${RESET}"
+    printf "${BOLD}确定要继续吗？(Y/n): ${RESET}"
     read -r confirm
     case "$confirm" in
         yes|YES|y|Y)
@@ -300,6 +300,34 @@ delete_all() {
             sleep 1
             ;;
     esac
+}
+
+# ========== 主菜单 ==========
+main_menu() {
+    while true; do
+        cls
+        print_separator
+        print_bold "${GREEN}Cloudflare WARP WireGuard 管理脚本${RESET}"
+        print_separator
+        echo -e "${YELLOW}${BOLD}1.${RESET} ${BLUE}生成免费账户配置${RESET}"
+        echo -e "${YELLOW}${BOLD}2.${RESET} ${BLUE}获取团队账户配置${RESET}"
+        echo -e "${YELLOW}${BOLD}3.${RESET} ${BLUE}查看当前配置${RESET}"
+        echo -e "${YELLOW}${BOLD}4.${RESET} ${RED}删除所有配置及依赖${RESET}"
+        echo -e "${YELLOW}${BOLD}0.${RESET} ${GREEN}退出${RESET}"
+        print_separator
+        printf "${BOLD}请输入选项 [0-4]: ${RESET}"
+        read -r choice
+        case "$choice" in
+            1) check_and_install_deps; safe_call generate_free_account_config ;;
+            2) check_and_install_deps; safe_call generate_team_account_config ;;
+            3) safe_call show_current_config ;;
+            4) safe_call delete_all ;;
+            0) print_green "Bye!"; exit 0 ;;
+            *) print_red "无效选项，请重新输入！"; sleep 1 ;;
+        esac
+        print_yellow "按回车键返回主菜单..."
+        read -r
+    done
 }
 
 # ========== 主菜单自动恢复 ==========
