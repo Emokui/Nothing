@@ -175,9 +175,9 @@ dns:
   listen: any:53
   ipv6: false
   nameserver:
-    - 1.1.1.1
-  fallback:
     - 8.8.8.8
+  fallback:
+    - 1.1.1.1
   direct-nameserver:
     - system
   enhanced-mode: fake-ip
