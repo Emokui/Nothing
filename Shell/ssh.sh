@@ -110,6 +110,73 @@ linux_clean() {
     press_any_key_to_continue
 }
 
+# ====== 虚拟内存（Swap）管理 ======
+swapfile_path="/swapfile"
+
+set_swap_menu() {
+    while true; do
+        clear
+        echo -e "${LIGHTCYAN}========= 虚拟内存（Swap）管理 =========${WHITE}"
+        echo -e "${GREEN}1.${WHITE} 设置为 1024 MB (1GB)"
+        echo -e "${GREEN}2.${WHITE} 设置为 2048 MB (2GB)"
+        echo -e "${GREEN}3.${WHITE} 手动输入 MB 大小"
+        echo -e "${YELLOW}0.${WHITE} 返回主菜单"
+        echo
+        read -rp "请输入选项 [0-3]: " opt
+        opt=$(echo "$opt" | xargs)
+        case "$opt" in
+            1)
+                set_swap 1024
+                ;;
+            2)
+                set_swap 2048
+                ;;
+            3)
+                read -rp "请输入你想要的 Swap 大小 (单位 MB): " custom
+                if [[ "$custom" =~ ^[0-9]+$ ]] && (( custom >= 128 )); then
+                    set_swap "$custom"
+                else
+                    echo -e "${RED}输入无效，请输入大于等于128的数字。${WHITE}"
+                    press_any_key_to_continue
+                fi
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo -e "${RED}无效选项，请重试。${WHITE}"
+                press_any_key_to_continue
+                ;;
+        esac
+    done
+}
+
+set_swap() {
+    size_mb="$1"
+
+    send_stats "设置Swap为 ${size_mb} MB"
+
+    sudo swapoff "$swapfile_path" 2>/dev/null || true
+    sudo rm -f "$swapfile_path"
+
+    echo -e "${YELLOW}正在创建 ${size_mb}MB 的 Swap 文件...${WHITE}"
+    if ! sudo fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
+        sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+    fi
+
+    sudo chmod 600 "$swapfile_path"
+    sudo mkswap "$swapfile_path"
+    sudo swapon "$swapfile_path"
+
+    sudo sed -i '/^\/swapfile/d' /etc/fstab
+    echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+
+    echo
+    echo -e "${GREEN}Swap 设置完成，当前情况：${WHITE}"
+    free -h
+    swapon --show
+    press_any_key_to_continue
+}
 
 # ====== SSH 管理 ======
 
@@ -612,26 +679,27 @@ main_menu() {
         echo -e "${LIGHTCYAN}==== Steins Gate - 凤凰院凶真 Ver.2.0 ==== ${WHITE}"
         echo -e "${GREEN}01.${WHITE} 系统更新"
         echo -e "${GREEN}02.${WHITE} 系统清理"
-        echo -e "${GREEN}03.${WHITE} 更改时区"
-        echo -e "${GREEN}04.${WHITE} 开启 root登录"
-        echo -e "${GREEN}05.${WHITE} 修改 root密码"
+        echo -e "${GREEN}03.${WHITE} 设置时区"
+        echo -e "${GREEN}04.${WHITE} 设置防火墙"
+        echo -e "${GREEN}05.${WHITE} 设置虚拟内存"
         echo -e "${GREEN}06.${WHITE} 修改 SSH端口"
-        echo -e "${GREEN}07.${WHITE} 配置 防火墙"
-        echo -e "${GREEN}08.${WHITE} 配置 DNS"
-        echo -e "${GREEN}09.${WHITE} 管理 BBR"
-        echo -e "${GREEN}10.${WHITE} 管理 WARP"
-        echo -e "${GREEN}11.${WHITE} 重启 VPS"
-        echo -e "${GREEN}12.${WHITE} 安装 wget/unzip"
-        echo -e "${GREEN}13.${WHITE} 配置 Acme"
-        echo -e "${GREEN}14.${WHITE} 反代 Nginx"
-        echo -e "${GREEN}15.${WHITE} 配置 Snell"
-        echo -e "${GREEN}16.${WHITE} 超级 Snell"
-        echo -e "${GREEN}17.${WHITE} 配置 Mihomo"
-        echo -e "${GREEN}18.${WHITE} 配置 Trojan"
-        echo -e "${GREEN}19.${WHITE} 配置 Hysteria"
-        echo -e "${GREEN}20.${WHITE} 配置 SubStore"
-        echo -e "${GREEN}21.${WHITE} 一键 DDsystem"
-        echo -e "${GREEN}22.${WHITE} 提取 WireGuard"
+        echo -e "${GREEN}07.${WHITE} 开启 root登录"
+        echo -e "${GREEN}08.${WHITE} 修改 root密码"
+        echo -e "${GREEN}09.${WHITE} 重启 VPS"
+        echo -e "${GREEN}10.${WHITE} 配置 DNS"
+        echo -e "${GREEN}11.${WHITE} 管理 BBR"
+        echo -e "${GREEN}12.${WHITE} 管理 WARP"
+        echo -e "${GREEN}13.${WHITE} 安装 Wget"
+        echo -e "${GREEN}14.${WHITE} 配置 Acme"
+        echo -e "${GREEN}15.${WHITE} 反代 Nginx"
+        echo -e "${GREEN}16.${WHITE} 配置 Snell"
+        echo -e "${GREEN}17.${WHITE} 超级 Snell"
+        echo -e "${GREEN}18.${WHITE} 配置 Mihomo"
+        echo -e "${GREEN}19.${WHITE} 配置 Trojan"
+        echo -e "${GREEN}20.${WHITE} 配置 Hysteria"
+        echo -e "${GREEN}21.${WHITE} 配置 SubStore"
+        echo -e "${GREEN}22.${WHITE} 一键 DDsystem"
+        echo -e "${GREEN}23.${WHITE} 提取 WireGuard"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
@@ -639,25 +707,26 @@ main_menu() {
             1)  linux_update ;;
             2)  linux_clean ;;
             3)  change_timezone ;;
-            4)  enable_root_login ;;
-            5)  change_root_password ;;
+            4)  configure_firewall ;;
+            5)  set_swap_menu ;;
             6)  change_ssh_port ;;
-            7)  configure_firewall ;;
-            8)  dns_config_menu ;;
-            9)  bbr_menu ;;
-            10) warp_menu ;;
-            11) echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            12) install_base_tools ;;
-            13) install_acme ;;
-            14) install_nginx ;;
-            15) install_snell ;;
-            16) install_snell-pro ;;
-            17) install_mihomo ;;
-            18) install_trojan ;;
-            19) install_hysteria ;;
-            20) install_substore ;;
-            21) install_install ;;
-            22) install_wireguard ;;
+            7)  enable_root_login ;;
+            8)  change_root_password ;;
+            9)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
+            10) dns_config_menu ;;
+            11) bbr_menu ;;
+            12) warp_menu ;; 
+            13) install_base_tools ;;
+            14) install_acme ;;
+            15) install_nginx ;;
+            16) install_snell ;;
+            17) install_snell-pro ;;
+            18) install_mihomo ;;
+            19) install_trojan ;;
+            20) install_hysteria ;;
+            21) install_substore ;;
+            22) install_install ;;
+            23) install_wireguard ;;
             0)  clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${WHITE}"; sleep 1; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${WHITE}"; sleep 2 ;;
         esac
