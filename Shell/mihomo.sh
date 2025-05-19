@@ -58,19 +58,221 @@ EOF
 }
 
 # 获取 Mihomo 最新稳定版
-get_latest_stable_version() {
-    local raw_version
-    echo -e "${CYAN}[*] 检查最新稳定 Mihomo 版本...${PLAIN}" >&2
-    raw_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases | \
-        grep -oP '(?<=tag_name": "v)\d+\.\d+\.\d+(?=")' | \
-        grep -v "Prerelease" | head -n 1)
-    if [ -z "$raw_version" ]; then
-        echo -e "${RED}[!] 无法获取最新稳定版本，请检查网络或 GitHub API。${PLAIN}" >&2
+get_latest_mihomo_url() {
+    latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"v\([0-9.]*\)".*/v\1/')
+    echo "https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-${latest_version}.gz"
+}
+
+install_mihomo() {
+    echo -e "${CYAN}[*] 开始安装并配置 Mihomo...${PLAIN}"
+    mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
+
+    download_url=$(get_latest_mihomo_url)
+
+    echo -e "${CYAN}[*] 下载 Mihomo: $download_url ${PLAIN}"
+    wget "$download_url" -O "mihomo.gz"
+    check_status "下载 Mihomo"
+
+    gunzip -f "mihomo.gz"
+    mv "mihomo-linux-amd64-"* mihomo
+    chmod +x mihomo
+    check_status "设置执行权限"
+
+    echo -e "${YELLOW}[*] 是否启用 tun 模式？${PLAIN}"
+    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n]: ${PLAIN}")" enable_tun
+    enable_tun=${enable_tun:-y}
+    if [[ "$enable_tun" == "y" || "$enable_tun" == "Y" ]]; then
+        tun_enable=true
+    else
+        tun_enable=false
+    fi
+    echo
+
+    echo -e "${YELLOW}[*] 请配置 WireGuard 参数：${PLAIN}"
+
+    read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[回车使用默认值]${PLAIN}: ")" private_key
+    private_key=${private_key:-eMCyIN4iJrc9jeot1L+53I1N7whB3AVlMYCF43yJfnQ=}
+
+    read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" server
+    server=${server:-162.159.193.8}
+
+    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2408,可填:500,1701,2408,4500]${PLAIN}: ")" port
+    port=${port:-2408}
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
         exit 1
     fi
-    local latest_version="v${raw_version}"
-    echo -e "${GREEN}[*] 最新稳定版本: $latest_version${PLAIN}" >&2
-    echo "$latest_version"
+
+    read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" public_key
+    public_key=${public_key:-bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=}
+
+    read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}${CYAN}[默认值:[20,67,117]]${PLAIN}: ")" reserved
+    reserved=${reserved:-[20,67,117]}
+
+    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认值:1280,可填:1350]${PLAIN}: ")" mtu
+    mtu=${mtu:-1280}
+    echo
+
+    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车默认18443）：${PLAIN}"
+    read -e -p "$(echo -e "${BLUE}  socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
+    socks_port=${socks_port:-18443}
+    echo
+
+    echo -e "${YELLOW}[*] 请配置 bind-address 监听地址: ${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问，推荐)"
+    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡，允许外部访问)"
+    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" bind_choice
+    case "$bind_choice" in
+        2) bind_address="0.0.0.0" ;;
+        *) bind_address="127.0.0.1" ;;
+    esac
+
+    echo -e "${YELLOW}[*] 是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
+    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (默认n): ${PLAIN}")" auth_enable
+    auth_enable=${auth_enable:-n}
+    if [[ "$auth_enable" == "y" || "$auth_enable" == "Y" ]]; then
+        read -e -p "$(echo -e "${BLUE}请输入用户名 (默认admin): ${PLAIN}")" auth_user
+        read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" auth_pass
+        auth_user=${auth_user:-admin}
+        auth_pass=${auth_pass:-admin}
+        authentication_config="authentication:\n  - \"$auth_user:$auth_pass\""
+    else
+        authentication_config=""
+    fi
+
+    echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
+    cat <<EOF > config.yaml
+tun:
+  enable: $tun_enable
+  stack: mixed
+  dns-hijack:
+    - any:53
+  mtu: 9000
+  strict_route: true
+  auto-route: true
+  auto-redirect: true
+  auto-detect-interface: true
+
+geodata-mode: false
+geox-url:
+  mmdb: "https://raw.githubusercontent.com/NobyDa/geoip/release/Private-GeoIP-CN.mmdb"
+geo-update-interval: 24
+tcp-concurrent: true
+find-process-mode: strict
+allow-lan: true
+socks-port: $socks_port
+bind-address: "$bind_address"
+$(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
+mode: rule
+log-level: warning
+ipv6: false
+profile:
+  store-fake-ip: true
+sniffer:
+  enable: false
+dns:
+  enable: true
+  listen: any:53
+  ipv6: false
+  nameserver:
+    - 1.1.1.1
+  fallback:
+    - 8.8.8.8
+  direct-nameserver:
+    - system
+  enhanced-mode: fake-ip
+
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*'
+    - '+.lan'
+    - '+.local'
+
+proxies:
+  - name: "warp"
+    type: wireguard
+    private-key: $private_key
+    server: $server
+    port: $port
+    ip: 172.16.0.2
+    public-key: $public_key
+    allowed-ips: ['0.0.0.0/0']
+    reserved: $reserved
+    udp: true
+    mtu: $mtu
+
+rule-providers:
+  Ai:
+    type: http
+    behavior: classical
+    format: text
+    path: ./𝗔𝗜
+    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗔𝗜
+    interval: 86400
+  YouTube:
+    type: http
+    behavior: classical
+    format: text
+    path: ./𝗬𝗼𝘂𝗧𝘂𝗯𝗲
+    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗬𝗼𝘂𝗧𝘂𝗯𝗲
+    interval: 86400
+
+rules:
+  - RULE-SET,YouTube,warp,no-resolve
+  - RULE-SET,Ai,warp,no-resolve
+  - MATCH,DIRECT
+EOF
+    check_status "创建配置文件"
+
+    echo -e "${CYAN}[*] 配置 systemd service 与 timer...${PLAIN}"
+    create_systemd_service
+    create_systemd_timer
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now ${TIMER_NAME}
+    echo -e "${GREEN}[*] Mihomo 安装完成，将于开机2分钟后自动启动。${PLAIN}"
+    echo -e "${CYAN}你也可以用 'sudo systemctl [start|stop|restart|status] ${SERVICE_NAME}' 管理"
+    echo "查看定时器状态：sudo systemctl status ${TIMER_NAME}${PLAIN}"
+
+    read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
+    clear
+}
+
+# 更新Mihomo内核
+get_latest_mihomo_url_and_version() {
+    latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
+    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-${latest_version}.gz"
+    echo "$url|${latest_version}"
+}
+
+update_mihomo() {
+    echo -e "${CYAN}[*] 开始更新 Mihomo...${PLAIN}"
+    cd "$MIHOMO_DIR" || { echo -e "${RED}[!] 无法进入 $MIHOMO_DIR 目录。${PLAIN}"; exit 1; }
+    result=$(get_latest_mihomo_url_and_version)
+    download_url="${result%|*}"
+
+    echo -e "${CYAN}[*] 下载 Mihomo: $download_url ${PLAIN}"
+    wget "$download_url" -O "mihomo.gz"
+    check_status "下载 Mihomo"
+
+    gunzip -f "mihomo.gz"
+    bin_file="mihomo"
+    if [ ! -f "$bin_file" ]; then
+        echo -e "${RED}[!] 解压后未找到 $bin_file，请检查下载或解压是否成功。${PLAIN}"
+        exit 1
+    fi
+
+    mv -f "$bin_file" mihomo
+    chmod +x mihomo
+    check_status "设置执行权限"
+
+    echo -e "${CYAN}[*] 重启 Mihomo systemd 服务...${PLAIN}"
+    sudo systemctl restart ${SERVICE_NAME}.service
+    sleep 2
+    sudo systemctl status ${SERVICE_NAME}.service
+
+    read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
+    clear
 }
 
 # 修改 Mihomo 配置
@@ -257,217 +459,6 @@ modify_mihomo_config() {
                 ;;
         esac
     done
-}
-
-# 安装 Mihomo
-install_mihomo() {
-    echo -e "${CYAN}[*] 开始安装并配置 Mihomo...${PLAIN}"
-    mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
-
-    latest_version=$(get_latest_stable_version)
-    download_url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-compatible-${latest_version}.gz"
-
-    echo -e "${CYAN}[*] 下载 Mihomo $latest_version...${PLAIN}"
-    wget "$download_url" -O "mihomo-linux-amd64-compatible-${latest_version}.gz"
-    check_status "下载 Mihomo"
-
-    echo -e "${CYAN}[*] 解压并赋予执行权限...${PLAIN}"
-    gunzip "mihomo-linux-amd64-compatible-${latest_version}.gz"
-    check_status "解压文件"
-    mv "mihomo-linux-amd64-compatible-${latest_version}" mihomo
-    chmod +x mihomo
-    check_status "设置执行权限"
-
-    echo -e "${YELLOW}[*] 是否启用 tun 模式？${PLAIN}"
-    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n]: ${PLAIN}")" enable_tun
-    enable_tun=${enable_tun:-y}
-    if [[ "$enable_tun" == "y" || "$enable_tun" == "Y" ]]; then
-        tun_enable=true
-    else
-        tun_enable=false
-    fi
-    echo
-
-    echo -e "${YELLOW}[*] 请配置 WireGuard 参数：${PLAIN}"
-
-    read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[回车使用默认值]${PLAIN}: ")" private_key
-    private_key=${private_key:-eMCyIN4iJrc9jeot1L+53I1N7whB3AVlMYCF43yJfnQ=}
-
-    read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" server
-    server=${server:-162.159.193.8}
-
-    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2408,可填:500,1701,2408,4500]${PLAIN}: ")" port
-    port=${port:-2408}
-    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
-        exit 1
-    fi
-
-    read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" public_key
-    public_key=${public_key:-bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=}
-
-    read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}${CYAN}[默认值:[20,67,117]]${PLAIN}: ")" reserved
-    reserved=${reserved:-[20,67,117]}
-
-    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认值:1280,可填:1350]${PLAIN}: ")" mtu
-    mtu=${mtu:-1280}
-    echo
-
-    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车默认18443）：${PLAIN}"
-    read -e -p "$(echo -e "${BLUE}  socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
-    socks_port=${socks_port:-18443}
-    echo
-
-    echo -e "${YELLOW}[*] 请配置 bind-address 监听地址: ${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问，推荐)"
-    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡，允许外部访问)"
-    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" bind_choice
-    case "$bind_choice" in
-        2) bind_address="0.0.0.0" ;;
-        *) bind_address="127.0.0.1" ;;
-    esac
-
-    echo -e "${YELLOW}[*] 是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
-    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (默认n): ${PLAIN}")" auth_enable
-    auth_enable=${auth_enable:-n}
-    if [[ "$auth_enable" == "y" || "$auth_enable" == "Y" ]]; then
-        read -e -p "$(echo -e "${BLUE}请输入用户名 (默认admin): ${PLAIN}")" auth_user
-        read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" auth_pass
-        auth_user=${auth_user:-admin}
-        auth_pass=${auth_pass:-admin}
-        authentication_config="authentication:\n  - \"$auth_user:$auth_pass\""
-    else
-        authentication_config=""
-    fi
-
-    echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
-    cat <<EOF > config.yaml
-tun:
-  enable: $tun_enable
-  stack: mixed
-  dns-hijack:
-    - any:53
-  mtu: 9000
-  strict_route: true
-  auto-route: true
-  auto-redirect: true
-  auto-detect-interface: true
-
-geodata-mode: false
-geox-url:
-  mmdb: "https://raw.githubusercontent.com/NobyDa/geoip/release/Private-GeoIP-CN.mmdb"
-geo-update-interval: 24
-tcp-concurrent: true
-find-process-mode: strict
-allow-lan: true
-socks-port: $socks_port
-bind-address: "$bind_address"
-$(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
-mode: rule
-log-level: warning
-ipv6: false
-profile:
-  store-fake-ip: true
-sniffer:
-  enable: false
-dns:
-  enable: true
-  listen: any:53
-  ipv6: false
-  nameserver:
-    - 1.1.1.1
-  fallback:
-    - 8.8.8.8
-  direct-nameserver:
-    - system
-  enhanced-mode: fake-ip
-
-  fake-ip-range: 198.18.0.1/16
-  fake-ip-filter:
-    - '*'
-    - '+.lan'
-    - '+.local'
-
-proxies:
-  - name: "warp"
-    type: wireguard
-    private-key: $private_key
-    server: $server
-    port: $port
-    ip: 172.16.0.2
-    public-key: $public_key
-    allowed-ips: ['0.0.0.0/0']
-    reserved: $reserved
-    udp: true
-    mtu: $mtu
-
-rule-providers:
-  Ai:
-    type: http
-    behavior: classical
-    format: text
-    path: ./𝗔𝗜
-    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗔𝗜
-    interval: 86400
-  YouTube:
-    type: http
-    behavior: classical
-    format: text
-    path: ./𝗬𝗼𝘂𝗧𝘂𝗯𝗲
-    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗬𝗼𝘂𝗧𝘂𝗯𝗲
-    interval: 86400
-
-rules:
-  - RULE-SET,YouTube,warp,no-resolve
-  - RULE-SET,Ai,warp,no-resolve
-  - MATCH,DIRECT
-EOF
-    check_status "创建配置文件"
-
-    echo -e "${CYAN}[*] 配置 systemd service 与 timer...${PLAIN}"
-    create_systemd_service
-    create_systemd_timer
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable --now ${TIMER_NAME}
-    echo -e "${GREEN}[*] Mihomo 安装完成，将于开机2分钟后自动启动。${PLAIN}"
-    echo -e "${CYAN}你也可以用 'sudo systemctl [start|stop|restart|status] ${SERVICE_NAME}' 管理"
-    echo "查看定时器状态：sudo systemctl status ${TIMER_NAME}${PLAIN}"
-
-    read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
-    clear
-}
-
-# 更新 Mihomo
-update_mihomo() {
-    echo -e "${CYAN}[*] 开始更新 Mihomo...${PLAIN}"
-    cd "$MIHOMO_DIR" || { echo -e "${RED}[!] 无法进入 $MIHOMO_DIR 目录。${PLAIN}"; exit 1; }
-    latest_version=$(get_latest_stable_version)
-    download_url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-compatible-${latest_version}.gz"
-
-    echo -e "${CYAN}[*] 下载 Mihomo $latest_version...${PLAIN}"
-    wget "$download_url" -O "mihomo-linux-amd64-compatible-${latest_version}.gz"
-    check_status "下载 Mihomo"
-
-    echo -e "${CYAN}[*] 解压并替换文件...${PLAIN}"
-    gunzip "mihomo-linux-amd64-compatible-${latest_version}.gz"
-    check_status "解压文件"
-    if [ -f "$MIHOMO_PATH" ]; then
-        mv "$MIHOMO_PATH" "$MIHOMO_PATH.old"
-        echo -e "${YELLOW}[*] 已备份旧内核到 $MIHOMO_PATH.old${PLAIN}"
-    fi
-    mv "mihomo-linux-amd64-compatible-${latest_version}" mihomo
-    chmod +x mihomo
-    check_status "设置执行权限"
-    rm -f "$MIHOMO_PATH.old"
-
-    echo -e "${CYAN}[*] 重启 Mihomo systemd 服务...${PLAIN}"
-    sudo systemctl restart ${SERVICE_NAME}.service
-    sleep 2
-    sudo systemctl status ${SERVICE_NAME}.service
-
-    read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
-    clear
 }
 
 # 删除 Mihomo 及配置
