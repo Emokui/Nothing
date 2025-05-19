@@ -539,6 +539,21 @@ configure_firewall() {
 }
 
 
+# ====== 安全修改 /etc/resolv.conf 工具函数 ======
+safe_update_resolv_conf() {
+    local primary_dns="$1"
+    local secondary_dns="$2"
+    # 解锁
+    chattr -i /etc/resolv.conf 2>/dev/null
+    # 写入DNS
+    {
+        echo "nameserver $primary_dns"
+        [ -n "$secondary_dns" ] && echo "nameserver $secondary_dns"
+    } > /etc/resolv.conf
+    # 上锁
+    chattr +i /etc/resolv.conf 2>/dev/null
+}
+
 # ====== DNS 配置 ======
 
 detect_network_manager() {
@@ -620,11 +635,7 @@ persistent_set_dns() {
             netplan apply
             ;;
         *)
-            cp /etc/resolv.conf /etc/resolv.conf.bak
-            chattr -i /etc/resolv.conf 2>/dev/null || true
-            echo "nameserver $primary_dns" > /etc/resolv.conf
-            [ -n "$secondary_dns" ] && echo "nameserver $secondary_dns" >> /etc/resolv.conf
-            chattr +i /etc/resolv.conf 2>/dev/null || true
+            safe_update_resolv_conf "$primary_dns" "$secondary_dns"
             ;;
     esac
     echo -e "${GREEN}DNS设置已更新并已持久化${WHITE}"
