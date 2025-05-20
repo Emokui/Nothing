@@ -263,8 +263,8 @@ rule-providers:
     interval: 86400
 
 rules:
-  - RULE-SET,YouTube,warp
-  - RULE-SET,Ai,warp
+  - RULE-SET,YouTube,warp,no-resolve
+  - RULE-SET,Ai,warp,no-resolve
   - MATCH,DIRECT
 EOF
     check_status "创建配置文件"
