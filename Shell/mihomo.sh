@@ -447,9 +447,9 @@ modify_mihomo_config() {
                 public_key="$newval"
                 ;;
             10)
-                read -e -p "$(echo -e "${BLUE}WireGuard Reserved [当前:$reserved]: ${PLAIN}")" newval
+                read -e -p "$(echo -e "${BLUE}WireGuard Reserved [当前:$reserved] (以逗号分隔,如 144,38,103): ${PLAIN}")" newval
                 newval=${newval:-$reserved}
-                yq e '(.proxies[] | select(.name == "warp") ).reserved = "'"$newval"'"' -i "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp")).reserved = ['"$newval"']' -i "$CONFIG_PATH"
                 reserved="$newval"
                 ;;
             11)
