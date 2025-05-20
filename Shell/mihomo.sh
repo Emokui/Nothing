@@ -307,6 +307,7 @@ modify_mihomo_config() {
     fi
 
     tun_enable=$(awk '/^tun:/ {f=1} f && /enable:/ {print $2;f=0}' "$CONFIG_PATH")
+    mode_val=$(awk '/^mode:/ {print $2}' "$CONFIG_PATH")
     socks_port=$(awk '/^socks-port:/ {print $2}' "$CONFIG_PATH")
     bind_address=$(awk '/^bind-address:/ {print $2}' "$CONFIG_PATH" | tr -d '"')
     has_auth=$(awk '/^authentication:/ {print "yes"}' "$CONFIG_PATH")
@@ -324,19 +325,20 @@ modify_mihomo_config() {
         clear
         echo -e "${BLUE}========== Mihomo 配置修改 ==========${PLAIN}"
         echo -e "${CYAN}当前配置:${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} tun.enable:           ${YELLOW}$tun_enable${PLAIN}"
-        echo -e "${GREEN}2.${PLAIN} socks-port:           ${YELLOW}${socks_port:-无}${PLAIN}"
-        echo -e "${GREEN}3.${PLAIN} bind-address:         ${YELLOW}${bind_address:-127.0.0.1}${PLAIN}"
-        echo -e "${GREEN}4.${PLAIN} SOCKS5认证:           ${YELLOW}${has_auth:-无}${PLAIN}"
-        echo -e "${GREEN}5.${PLAIN} WireGuard Private-key:${YELLOW}$private_key${PLAIN}"
-        echo -e "${GREEN}6.${PLAIN} WireGuard Server:     ${YELLOW}$server${PLAIN}"
-        echo -e "${GREEN}7.${PLAIN} WireGuard Port:       ${YELLOW}$port${PLAIN}"
-        echo -e "${GREEN}8.${PLAIN} WireGuard Public-key: ${YELLOW}$public_key${PLAIN}"
-        echo -e "${GREEN}9.${PLAIN} WireGuard Reserved:   ${YELLOW}$reserved${PLAIN}"
-        echo -e "${GREEN}10.${PLAIN} WireGuard MTU:        ${YELLOW}$mtu${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN} tun.enable:            ${YELLOW}$tun_enable${PLAIN}"
+        echo -e "${GREEN}2.${PLAIN} mode:                  ${YELLOW}${mode_val}${PLAIN}"
+        echo -e "${GREEN}3.${PLAIN} socks-port:            ${YELLOW}${socks_port:-无}${PLAIN}"
+        echo -e "${GREEN}4.${PLAIN} bind-address:          ${YELLOW}${bind_address:-127.0.0.1}${PLAIN}"
+        echo -e "${GREEN}5.${PLAIN} SOCKS5认证:             ${YELLOW}${has_auth:-无}${PLAIN}"
+        echo -e "${GREEN}6.${PLAIN} WireGuard Private-key: ${YELLOW}$private_key${PLAIN}"
+        echo -e "${GREEN}7.${PLAIN} WireGuard Server:      ${YELLOW}$server${PLAIN}"
+        echo -e "${GREEN}8.${PLAIN} WireGuard Port:        ${YELLOW}$port${PLAIN}"
+        echo -e "${GREEN}9.${PLAIN} WireGuard Public-key:  ${YELLOW}$public_key${PLAIN}"
+        echo -e "${GREEN}10.${PLAIN} WireGuard Reserved:   ${YELLOW}$reserved${PLAIN}"
+        echo -e "${GREEN}11.${PLAIN} WireGuard MTU:        ${YELLOW}$mtu${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 保存并重启 Mihomo 服务${PLAIN}"
         echo -e "${GREEN}q.${PLAIN} 放弃修改并返回${PLAIN}"
-        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-10/q]: ${PLAIN}")" modchoice
+        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-11/q]: ${PLAIN}")" modchoice
 
         case $modchoice in
             1)
@@ -350,7 +352,26 @@ modify_mihomo_config() {
                 ' "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 tun_enable="$newval"
                 ;;
-            2)
+           2)
+               echo -e "${YELLOW}请选择新的 mode 参数:${PLAIN}"
+               echo -e "${GREEN}1.${PLAIN} rule (规则模式)"
+               echo -e "${GREEN}2.${PLAIN} global (全局模式)"
+               echo -e "${GREEN}3.${PLAIN} direct (直连模式)"
+               read -e -p "$(echo -e "${BLUE}请输入选项 [1/2/3] (当前:${mode_val:-rule}): ${PLAIN}")" mode_choice
+               case "$mode_choice" in
+                   2) newmode="global" ;;
+                   3) newmode="direct" ;;
+                   1|"") newmode="rule" ;;
+                   *) echo -e "${RED}无效选项，未更改。${PLAIN}"; read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"; continue ;;
+               esac
+               if grep -q "^mode:" "$CONFIG_PATH"; then
+                   sed -i "s/^mode:.*/mode: $newmode/" "$CONFIG_PATH"
+               else
+                   sed -i "/^bind-address:/a mode: $newmode" "$CONFIG_PATH"
+               fi
+               mode_val="$newmode"
+               ;;
+            3)
                 read -e -p "$(echo -e "${BLUE}socks-port [当前:$socks_port]: ${PLAIN}")" newval
                 newval=${newval:-$socks_port}
                 if grep -q "^socks-port:" "$CONFIG_PATH"; then
@@ -360,7 +381,7 @@ modify_mihomo_config() {
                 fi
                 socks_port="$newval"
                 ;;
-            3)
+            4)
                 echo -e "${YELLOW}请选择 bind-address 监听地址:${PLAIN}"
                 echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问，推荐)"
                 echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡，允许外部访问)"
@@ -376,7 +397,7 @@ modify_mihomo_config() {
                 fi
                 bind_address="$newval"
                 ;;
-            4)
+            5)
                 echo -e "${YELLOW}是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
                 read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (当前: ${has_auth:-n}): ${PLAIN}")" auth_enable
                 auth_enable=${auth_enable:-n}
@@ -400,7 +421,7 @@ modify_mihomo_config() {
                     auth_pass=""
                 fi
                 ;;
-            5)
+            6)
                 read -e -p "$(echo -e "${BLUE}WireGuard Private-key [当前:$private_key]: ${PLAIN}")" newval
                 newval=${newval:-$private_key}
                 awk '
@@ -410,7 +431,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 private_key="$newval"
                 ;;
-            6)
+            7)
                 read -e -p "$(echo -e "${BLUE}WireGuard Server [当前:$server]: ${PLAIN}")" newval
                 newval=${newval:-$server}
                 awk '
@@ -420,7 +441,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 server="$newval"
                 ;;
-            7)
+            8)
                 read -e -p "$(echo -e "${BLUE}WireGuard Port [当前:$port]: ${PLAIN}")" newval
                 newval=${newval:-$port}
                 awk '
@@ -430,7 +451,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 port="$newval"
                 ;;
-            8)
+            9)
                 read -e -p "$(echo -e "${BLUE}WireGuard Public-key [当前:$public_key]: ${PLAIN}")" newval
                 newval=${newval:-$public_key}
                 awk '
@@ -440,7 +461,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 public_key="$newval"
                 ;;
-            9)
+            10)
                 read -e -p "$(echo -e "${BLUE}WireGuard Reserved [当前:$reserved]: ${PLAIN}")" newval
                 newval=${newval:-$reserved}
                 awk '
@@ -450,7 +471,7 @@ modify_mihomo_config() {
                 ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
                 reserved="$newval"
                 ;;
-            10)
+            11)
                 read -e -p "$(echo -e "${BLUE}WireGuard MTU [当前:$mtu]: ${PLAIN}")" newval
                 newval=${newval:-$mtu}
                 awk '
