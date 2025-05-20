@@ -36,7 +36,7 @@ check_yq() {
         echo -e "${GREEN}[*] yq 已成功安装。${PLAIN}"
     fi
 }
-
+check_yq
 # 检查命令执行结果
 check_status() {
     if [ $? -ne 0 ]; then
