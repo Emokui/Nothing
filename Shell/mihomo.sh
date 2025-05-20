@@ -253,15 +253,15 @@ rule-providers:
     type: http
     behavior: classical
     format: text
-    path: ./𝗔𝗜
-    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗔𝗜
+    path: ./AI
+    url: https://raw.githubusercontent.com/Emokui/Rule/list/Mihomo/AI
     interval: 86400
   YouTube:
     type: http
     behavior: classical
     format: text
-    path: ./𝗬𝗼𝘂𝗧𝘂𝗯𝗲
-    url: https://raw.githubusercontent.com/Emokui/Rule/𝗟𝗶𝘀𝘁/𝗬𝗼𝘂𝗧𝘂𝗯𝗲
+    path: ./YouTube
+    url: https://raw.githubusercontent.com/Emokui/Rule/list/Mihomo/YouTube
     interval: 86400
 
 rules:
