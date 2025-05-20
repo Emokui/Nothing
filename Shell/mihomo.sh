@@ -29,6 +29,7 @@ check_yq() {
             exit 1
         fi
         sudo chmod +x /usr/local/bin/yq
+        hash -r
         if ! command -v yq >/dev/null 2>&1; then
             echo -e "${RED}[!] yq 安装失败，请手动安装。${PLAIN}"
             exit 1
@@ -37,6 +38,7 @@ check_yq() {
     fi
 }
 check_yq
+
 # 检查命令执行结果
 check_status() {
     if [ $? -ne 0 ]; then
@@ -140,7 +142,6 @@ install_mihomo() {
                 exit 1
             fi
             read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}: ")" public_key
-            read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}: ")" reserved
             read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}: ")" mtu
             ;;
         *)
@@ -148,7 +149,6 @@ install_mihomo() {
             server="162.159.193.8"
             port="2408"
             public_key="bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-            reserved="[20,67,117]"
             mtu="1280"
             ;;
     esac
@@ -244,7 +244,6 @@ proxies:
     ip: 172.16.0.2
     public-key: $public_key
     allowed-ips: ['0.0.0.0/0']
-    reserved: $reserved
     udp: true
     mtu: $mtu
 
@@ -319,6 +318,7 @@ update_mihomo() {
     read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
     clear
 }
+
 # 修改 Mihomo 配置
 modify_mihomo_config() {
     if [ ! -f "$CONFIG_PATH" ]; then
@@ -340,7 +340,6 @@ modify_mihomo_config() {
     server=$(yq e '.proxies[] | select(.name == "warp") | .server' "$CONFIG_PATH")
     port=$(yq e '.proxies[] | select(.name == "warp") | .port' "$CONFIG_PATH")
     public_key=$(yq e '.proxies[] | select(.name == "warp") | .public-key' "$CONFIG_PATH")
-    reserved=$(yq e '.proxies[] | select(.name == "warp") | .reserved' "$CONFIG_PATH")
     mtu=$(yq e '.proxies[] | select(.name == "warp") | .mtu' "$CONFIG_PATH")
 
     while true; do
@@ -356,11 +355,10 @@ modify_mihomo_config() {
         echo -e "${GREEN}7.${PLAIN} WireGuard Server:      ${YELLOW}$server${PLAIN}"
         echo -e "${GREEN}8.${PLAIN} WireGuard Port:        ${YELLOW}$port${PLAIN}"
         echo -e "${GREEN}9.${PLAIN} WireGuard Public-key:  ${YELLOW}$public_key${PLAIN}"
-        echo -e "${GREEN}10.${PLAIN} WireGuard Reserved:   ${YELLOW}$reserved${PLAIN}"
-        echo -e "${GREEN}11.${PLAIN} WireGuard MTU:        ${YELLOW}$mtu${PLAIN}"
+        echo -e "${GREEN}10.${PLAIN} WireGuard MTU:        ${YELLOW}$mtu${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 保存并重启 Mihomo 服务${PLAIN}"
         echo -e "${GREEN}q.${PLAIN} 放弃修改并返回${PLAIN}"
-        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-11/q]: ${PLAIN}")" modchoice
+        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-10/q]: ${PLAIN}")" modchoice
 
         case $modchoice in
             1)
@@ -447,12 +445,6 @@ modify_mihomo_config() {
                 public_key="$newval"
                 ;;
             10)
-                read -e -p "$(echo -e "${BLUE}WireGuard Reserved [当前:$reserved] (以逗号分隔,如 144,38,103): ${PLAIN}")" newval
-                newval=${newval:-$reserved}
-                yq e '(.proxies[] | select(.name == "warp")).reserved = ['"$newval"']' -i "$CONFIG_PATH"
-                reserved="$newval"
-                ;;
-            11)
                 read -e -p "$(echo -e "${BLUE}WireGuard MTU [当前:$mtu]: ${PLAIN}")" newval
                 newval=${newval:-$mtu}
                 yq e '(.proxies[] | select(.name == "warp") ).mtu = '"$newval"'' -i "$CONFIG_PATH"
