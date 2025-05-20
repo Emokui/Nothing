@@ -256,15 +256,13 @@ update_mihomo() {
     check_status "下载 Mihomo"
 
     gunzip -f "mihomo.gz"
-    bin_file="mihomo"
-    if [ ! -f "$bin_file" ]; then
-        echo -e "${RED}[!] 解压后未找到 $bin_file，请检查下载或解压是否成功。${PLAIN}"
+    if [ -f "mihomo" ]; then
+        chmod +x mihomo
+        check_status "设置执行权限"
+    else
+        echo -e "${RED}[!] 解压后未找到 mihomo 可执行文件，请检查下载或解压是否成功。${PLAIN}"
         exit 1
     fi
-
-    mv -f "$bin_file" mihomo
-    chmod +x mihomo
-    check_status "设置执行权限"
 
     echo -e "${CYAN}[*] 重启 Mihomo systemd 服务...${PLAIN}"
     sudo systemctl restart ${SERVICE_NAME}.service
@@ -274,7 +272,6 @@ update_mihomo() {
     read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
     clear
 }
-
 # 修改 Mihomo 配置
 modify_mihomo_config() {
     if [ ! -f "$CONFIG_PATH" ]; then
