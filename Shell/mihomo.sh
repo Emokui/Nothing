@@ -15,6 +15,28 @@ CONFIG_PATH="${MIHOMO_DIR}/config.yaml"
 SERVICE_NAME="mihomo-user"
 TIMER_NAME="mihomo-user.timer"
 
+# 检查yq是否安装，否则自动下载安装
+check_yq() {
+    if ! command -v yq >/dev/null 2>&1; then
+        echo -e "${YELLOW}[!] 未检测到 yq，正在自动安装...${PLAIN}"
+        YQ_URL="https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+        if command -v curl >/dev/null 2>&1; then
+            sudo curl -L "$YQ_URL" -o /usr/local/bin/yq
+        elif command -v wget >/dev/null 2>&1; then
+            sudo wget "$YQ_URL" -O /usr/local/bin/yq
+        else
+            echo -e "${RED}[!] curl 和 wget 都未安装，无法自动安装 yq，请手动安装。${PLAIN}"
+            exit 1
+        fi
+        sudo chmod +x /usr/local/bin/yq
+        if ! command -v yq >/dev/null 2>&1; then
+            echo -e "${RED}[!] yq 安装失败，请手动安装。${PLAIN}"
+            exit 1
+        fi
+        echo -e "${GREEN}[*] yq 已成功安装。${PLAIN}"
+    fi
+}
+
 # 检查命令执行结果
 check_status() {
     if [ $? -ne 0 ]; then
@@ -93,9 +115,9 @@ install_mihomo() {
 
     # mode参数交互
     echo -e "${YELLOW}[*] 请选择运行模式 mode: ${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} rule (规则模式)"
-    echo -e "${GREEN}2.${PLAIN} global (全局模式)"
-    echo -e "${GREEN}3.${PLAIN} direct (直连模式)"
+    echo -e "${GREEN}1.${PLAIN} rule"
+    echo -e "${GREEN}2.${PLAIN} global"
+    echo -e "${GREEN}3.${PLAIN} direct"
     read -e -p "$(echo -e "${BLUE}请输入选项 [1/2/3] (默认1): ${PLAIN}")" mode_choice
     case "$mode_choice" in
         2) mode="global" ;;
@@ -306,20 +328,20 @@ modify_mihomo_config() {
         return
     fi
 
-    tun_enable=$(awk '/^tun:/ {f=1} f && /enable:/ {print $2;f=0}' "$CONFIG_PATH")
-    mode_val=$(awk '/^mode:/ {print $2}' "$CONFIG_PATH")
-    socks_port=$(awk '/^socks-port:/ {print $2}' "$CONFIG_PATH")
-    bind_address=$(awk '/^bind-address:/ {print $2}' "$CONFIG_PATH" | tr -d '"')
-    has_auth=$(awk '/^authentication:/ {print "yes"}' "$CONFIG_PATH")
-    auth_user_pass=$(awk '/^  - / {print $2}' "$CONFIG_PATH" | head -n 1)
+    tun_enable=$(yq e '.tun.enable' "$CONFIG_PATH")
+    mode_val=$(yq e '.mode' "$CONFIG_PATH")
+    socks_port=$(yq e '.socks-port' "$CONFIG_PATH")
+    bind_address=$(yq e '.bind-address' "$CONFIG_PATH" | tr -d '"')
+    has_auth=$(yq e '.authentication // ""' "$CONFIG_PATH")
+    auth_user_pass=$(yq e '.authentication[0]' "$CONFIG_PATH")
     auth_user=$(echo "$auth_user_pass" | cut -d: -f1)
     auth_pass=$(echo "$auth_user_pass" | cut -d: -f2)
-    private_key=$(awk '/- name: "warp"/, /mtu:/ {if($1=="private-key:")print $2}' "$CONFIG_PATH")
-    server=$(awk '/- name: "warp"/, /mtu:/ {if($1=="server:")print $2}' "$CONFIG_PATH")
-    port=$(awk '/- name: "warp"/, /mtu:/ {if($1=="port:")print $2}' "$CONFIG_PATH")
-    public_key=$(awk '/- name: "warp"/, /mtu:/ {if($1=="public-key:")print $2}' "$CONFIG_PATH")
-    reserved=$(awk '/- name: "warp"/, /mtu:/ {if($1=="reserved:")print $2}' "$CONFIG_PATH")
-    mtu=$(awk '/- name: "warp"/, /mtu:/ {if($1=="mtu:")print $2}' "$CONFIG_PATH")
+    private_key=$(yq e '.proxies[] | select(.name == "warp") | .private-key' "$CONFIG_PATH")
+    server=$(yq e '.proxies[] | select(.name == "warp") | .server' "$CONFIG_PATH")
+    port=$(yq e '.proxies[] | select(.name == "warp") | .port' "$CONFIG_PATH")
+    public_key=$(yq e '.proxies[] | select(.name == "warp") | .public-key' "$CONFIG_PATH")
+    reserved=$(yq e '.proxies[] | select(.name == "warp") | .reserved' "$CONFIG_PATH")
+    mtu=$(yq e '.proxies[] | select(.name == "warp") | .mtu' "$CONFIG_PATH")
 
     while true; do
         clear
@@ -344,41 +366,28 @@ modify_mihomo_config() {
             1)
                 read -e -p "$(echo -e "${BLUE}tun.enable (true/false) [当前:$tun_enable]: ${PLAIN}")" newval
                 newval=${newval:-$tun_enable}
-                awk -v val="$newval" '
-                  BEGIN{f=0}
-                  /^tun:/ {f=1}
-                  f && /enable:/ {sub(/enable: .*/, "enable: "val); f=0}
-                  {print}
-                ' "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '.tun.enable = '"$newval"'' -i "$CONFIG_PATH"
                 tun_enable="$newval"
                 ;;
-           2)
-               echo -e "${YELLOW}请选择新的 mode 参数:${PLAIN}"
-               echo -e "${GREEN}1.${PLAIN} rule (规则模式)"
-               echo -e "${GREEN}2.${PLAIN} global (全局模式)"
-               echo -e "${GREEN}3.${PLAIN} direct (直连模式)"
-               read -e -p "$(echo -e "${BLUE}请输入选项 [1/2/3] (当前:${mode_val:-rule}): ${PLAIN}")" mode_choice
-               case "$mode_choice" in
-                   2) newmode="global" ;;
-                   3) newmode="direct" ;;
-                   1|"") newmode="rule" ;;
-                   *) echo -e "${RED}无效选项，未更改。${PLAIN}"; read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"; continue ;;
-               esac
-               if grep -q "^mode:" "$CONFIG_PATH"; then
-                   sed -i "s/^mode:.*/mode: $newmode/" "$CONFIG_PATH"
-               else
-                   sed -i "/^bind-address:/a mode: $newmode" "$CONFIG_PATH"
-               fi
-               mode_val="$newmode"
-               ;;
+            2)
+                echo -e "${YELLOW}请选择新的 mode 参数:${PLAIN}"
+                echo -e "${GREEN}1.${PLAIN} rule (规则模式)"
+                echo -e "${GREEN}2.${PLAIN} global (全局模式)"
+                echo -e "${GREEN}3.${PLAIN} direct (直连模式)"
+                read -e -p "$(echo -e "${BLUE}请输入选项 [1/2/3] (当前:${mode_val:-rule}): ${PLAIN}")" mode_choice
+                case "$mode_choice" in
+                    2) newmode="global" ;;
+                    3) newmode="direct" ;;
+                    1|"") newmode="rule" ;;
+                    *) echo -e "${RED}无效选项，未更改。${PLAIN}"; read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"; continue ;;
+                esac
+                yq e '.mode = "'"$newmode"'"' -i "$CONFIG_PATH"
+                mode_val="$newmode"
+                ;;
             3)
                 read -e -p "$(echo -e "${BLUE}socks-port [当前:$socks_port]: ${PLAIN}")" newval
                 newval=${newval:-$socks_port}
-                if grep -q "^socks-port:" "$CONFIG_PATH"; then
-                    sed -i "s/^socks-port:.*/socks-port: $newval/" "$CONFIG_PATH"
-                else
-                    sed -i "/^allow-lan:/a socks-port: $newval" "$CONFIG_PATH"
-                fi
+                yq e '.socks-port = '"$newval"'' -i "$CONFIG_PATH"
                 socks_port="$newval"
                 ;;
             4)
@@ -390,11 +399,7 @@ modify_mihomo_config() {
                     2) newval="0.0.0.0" ;;
                     *) newval="127.0.0.1" ;;
                 esac
-                if grep -q "^bind-address:" "$CONFIG_PATH"; then
-                    sed -i "s/^bind-address:.*/bind-address: \"$newval\"/" "$CONFIG_PATH"
-                else
-                    sed -i "/^socks-port:/a bind-address: \"$newval\"" "$CONFIG_PATH"
-                fi
+                yq e '.bind-address = "'"$newval"'"' -i "$CONFIG_PATH"
                 bind_address="$newval"
                 ;;
             5)
@@ -406,16 +411,12 @@ modify_mihomo_config() {
                     read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" newpass
                     newuser=${newuser:-admin}
                     newpass=${newpass:-admin}
-                    if grep -q "^authentication:" "$CONFIG_PATH"; then
-                        sed -i "/^authentication:/,/^ *[^-]/c\authentication:\n  - \"$newuser:$newpass\"" "$CONFIG_PATH"
-                    else
-                        sed -i "/^bind-address:/a authentication:\n  - \"$newuser:$newpass\"" "$CONFIG_PATH"
-                    fi
+                    yq e '.authentication = ["'"$newuser:$newpass"'"]' -i "$CONFIG_PATH"
                     has_auth="yes"
                     auth_user="$newuser"
                     auth_pass="$newpass"
                 else
-                    sed -i '/^authentication:/,/^ *[^-]/d' "$CONFIG_PATH"
+                    yq e 'del(.authentication)' -i "$CONFIG_PATH"
                     has_auth=""
                     auth_user=""
                     auth_pass=""
@@ -424,61 +425,37 @@ modify_mihomo_config() {
             6)
                 read -e -p "$(echo -e "${BLUE}WireGuard Private-key [当前:$private_key]: ${PLAIN}")" newval
                 newval=${newval:-$private_key}
-                awk '
-                  /- name: "warp"/{f=1}
-                  f && /private-key:/{$2=": "newval; $0="    private-key: "newval; f=0}
-                  {print}
-                ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp") ).private-key = "'"$newval"'"' -i "$CONFIG_PATH"
                 private_key="$newval"
                 ;;
             7)
                 read -e -p "$(echo -e "${BLUE}WireGuard Server [当前:$server]: ${PLAIN}")" newval
                 newval=${newval:-$server}
-                awk '
-                  /- name: "warp"/{f=1}
-                  f && /server:/{$2=": "newval; $0="    server: "newval; f=0}
-                  {print}
-                ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp") ).server = "'"$newval"'"' -i "$CONFIG_PATH"
                 server="$newval"
                 ;;
             8)
                 read -e -p "$(echo -e "${BLUE}WireGuard Port [当前:$port]: ${PLAIN}")" newval
                 newval=${newval:-$port}
-                awk '
-                  /- name: "warp"/{f=1}
-                  f && /port:/{$2=": "newval; $0="    port: "newval; f=0}
-                  {print}
-                ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp") ).port = '"$newval"'' -i "$CONFIG_PATH"
                 port="$newval"
                 ;;
             9)
                 read -e -p "$(echo -e "${BLUE}WireGuard Public-key [当前:$public_key]: ${PLAIN}")" newval
                 newval=${newval:-$public_key}
-                awk '
-                  /- name: "warp"/{f=1}
-                  f && /public-key:/{$2=": "newval; $0="    public-key: "newval; f=0}
-                  {print}
-                ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp") ).public-key = "'"$newval"'"' -i "$CONFIG_PATH"
                 public_key="$newval"
                 ;;
             10)
                 read -e -p "$(echo -e "${BLUE}WireGuard Reserved [当前:$reserved]: ${PLAIN}")" newval
                 newval=${newval:-$reserved}
-                awk '
-                  /- name: "warp"/{f=1}
-                  f && /reserved:/{$2=": "newval; $0="    reserved: "newval; f=0}
-                  {print}
-                ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp") ).reserved = "'"$newval"'"' -i "$CONFIG_PATH"
                 reserved="$newval"
                 ;;
             11)
                 read -e -p "$(echo -e "${BLUE}WireGuard MTU [当前:$mtu]: ${PLAIN}")" newval
                 newval=${newval:-$mtu}
-                awk '
-                  /- name: "warp"/{f=1}
-                  f && /mtu:/{$2=": "newval; $0="    mtu: "newval; f=0}
-                  {print}
-                ' newval="$newval" "$CONFIG_PATH" > "$CONFIG_PATH.tmp" && mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+                yq e '(.proxies[] | select(.name == "warp") ).mtu = '"$newval"'' -i "$CONFIG_PATH"
                 mtu="$newval"
                 ;;
             0)
