@@ -194,7 +194,6 @@ tun:
   stack: mixed
   dns-hijack:
     - any:53
-  mtu: 9000
   strict_route: true
   auto-route: true
   auto-redirect: true
@@ -205,7 +204,7 @@ geox-url:
   mmdb: "https://raw.githubusercontent.com/NobyDa/geoip/release/Private-GeoIP-CN.mmdb"
 geo-update-interval: 24
 tcp-concurrent: true
-find-process-mode: strict
+find-process-mode: off
 allow-lan: true
 socks-port: $socks_port
 bind-address: "$bind_address"
@@ -264,8 +263,8 @@ rule-providers:
     interval: 86400
 
 rules:
-  - RULE-SET,YouTube,warp,no-resolve
-  - RULE-SET,Ai,warp,no-resolve
+  - RULE-SET,YouTube,warp
+  - RULE-SET,Ai,warp
   - MATCH,DIRECT
 EOF
     check_status "创建配置文件"
