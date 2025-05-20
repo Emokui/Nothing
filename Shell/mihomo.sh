@@ -68,77 +68,102 @@ install_mihomo() {
     mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
 
     download_url=$(get_latest_mihomo_url)
-
     echo -e "${CYAN}[*] 下载 Mihomo: $download_url ${PLAIN}"
     wget "$download_url" -O "mihomo.gz"
     check_status "下载 Mihomo"
 
     gunzip -f "mihomo.gz"
-    mv "mihomo-linux-amd64-"* mihomo
-    chmod +x mihomo
-    check_status "设置执行权限"
-
-    echo -e "${YELLOW}[*] 是否启用 tun 模式？${PLAIN}"
-    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n]: ${PLAIN}")" enable_tun
-    enable_tun=${enable_tun:-y}
-    if [[ "$enable_tun" == "y" || "$enable_tun" == "Y" ]]; then
-        tun_enable=true
+    if [ -f "mihomo" ]; then
+        chmod +x mihomo
+        check_status "设置执行权限"
     else
-        tun_enable=false
-    fi
-    echo
-
-    echo -e "${YELLOW}[*] 请配置 WireGuard 参数：${PLAIN}"
-
-    read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN} ${CYAN}[回车使用默认值]${PLAIN}: ")" private_key
-    private_key=${private_key:-eMCyIN4iJrc9jeot1L+53I1N7whB3AVlMYCF43yJfnQ=}
-
-    read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" server
-    server=${server:-162.159.193.8}
-
-    read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}${CYAN}[回车默认:2408,可填:500,1701,2408,4500]${PLAIN}: ")" port
-    port=${port:-2408}
-    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
+        echo -e "${RED}[!] 解压后未找到 mihomo 可执行文件，请检查下载或解压是否成功。${PLAIN}"
         exit 1
     fi
 
-    read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}${CYAN}[回车使用默认值]${PLAIN}: ")" public_key
-    public_key=${public_key:-bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=}
+    # tun模式交互
+    echo -e "${YELLOW}[*] 是否启用 tun 模式？${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 开启"
+    echo -e "${GREEN}2.${PLAIN} 关闭"
+    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" tun_choice
+    case "$tun_choice" in
+        2) tun_enable=false ;;
+        *) tun_enable=true ;;
+    esac
 
-    read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}${CYAN}[默认值:[20,67,117]]${PLAIN}: ")" reserved
-    reserved=${reserved:-[20,67,117]}
+    # mode参数交互
+    echo -e "${YELLOW}[*] 请选择运行模式 mode: ${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} rule (规则模式)"
+    echo -e "${GREEN}2.${PLAIN} global (全局模式)"
+    echo -e "${GREEN}3.${PLAIN} direct (直连模式)"
+    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2/3] (默认1): ${PLAIN}")" mode_choice
+    case "$mode_choice" in
+        2) mode="global" ;;
+        3) mode="direct" ;;
+        *) mode="rule" ;;
+    esac
 
-    read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}${CYAN}[默认值:1280,可填:1350]${PLAIN}: ")" mtu
-    mtu=${mtu:-1280}
-    echo
+    # WireGuard参数交互
+    echo -e "${YELLOW}[*] WireGuard配置方式：${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 使用默认配置"
+    echo -e "${GREEN}2.${PLAIN} 手动输入配置"
+    read -e -p "$(echo -e "${BLUE}请选择 [1/2] (默认1): ${PLAIN}")" wg_choice
+    case "$wg_choice" in
+        2)
+            read -e -p "$(echo -e "${BLUE}  Private-key${PLAIN}: ")" private_key
+            read -e -p "$(echo -e "${BLUE}  Endpoint    ${PLAIN}: ")" server
+            read -e -p "$(echo -e "${BLUE}  Port        ${PLAIN}: ")" port
+            if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                echo -e "${RED}[!] 无效端口号，请输入 1-65535 之间的数字。${PLAIN}"
+                exit 1
+            fi
+            read -e -p "$(echo -e "${BLUE}  Public-key  ${PLAIN}: ")" public_key
+            read -e -p "$(echo -e "${BLUE}  Reserved    ${PLAIN}: ")" reserved
+            read -e -p "$(echo -e "${BLUE}  MTU         ${PLAIN}: ")" mtu
+            ;;
+        *)
+            private_key="eMCyIN4iJrc9jeot1L+53I1N7whB3AVlMYCF43yJfnQ="
+            server="162.159.193.8"
+            port="2408"
+            public_key="bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+            reserved="[20,67,117]"
+            mtu="1280"
+            ;;
+    esac
 
-    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口（回车默认18443）：${PLAIN}"
+    # socks-port
+    echo -e "${YELLOW}[*] 请输入 SOCKS5 代理端口：${PLAIN}"
     read -e -p "$(echo -e "${BLUE}  socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
     socks_port=${socks_port:-18443}
     echo
 
+    # bind-address
     echo -e "${YELLOW}[*] 请配置 bind-address 监听地址: ${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问，推荐)"
-    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (所有网卡，允许外部访问)"
+    echo -e "${GREEN}1.${PLAIN} 127.0.0.1 (仅本地访问)"
+    echo -e "${GREEN}2.${PLAIN} 0.0.0.0 (允许公网访问)"
     read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认1): ${PLAIN}")" bind_choice
     case "$bind_choice" in
         2) bind_address="0.0.0.0" ;;
         *) bind_address="127.0.0.1" ;;
     esac
 
+    # socks5认证
     echo -e "${YELLOW}[*] 是否为 SOCKS5 设置用户名密码认证？${PLAIN}"
-    read -e -p "$(echo -e "${BLUE}启用请输入 y，禁用请输入 n [y/n] (默认n): ${PLAIN}")" auth_enable
-    auth_enable=${auth_enable:-n}
-    if [[ "$auth_enable" == "y" || "$auth_enable" == "Y" ]]; then
-        read -e -p "$(echo -e "${BLUE}请输入用户名 (默认admin): ${PLAIN}")" auth_user
-        read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" auth_pass
-        auth_user=${auth_user:-admin}
-        auth_pass=${auth_pass:-admin}
-        authentication_config="authentication:\n  - \"$auth_user:$auth_pass\""
-    else
-        authentication_config=""
-    fi
+    echo -e "${GREEN}1.${PLAIN} 开启"
+    echo -e "${GREEN}2.${PLAIN} 关闭"
+    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认2): ${PLAIN}")" auth_choice
+    case "$auth_choice" in
+        1)
+            read -e -p "$(echo -e "${BLUE}请输入用户名 (默认admin): ${PLAIN}")" auth_user
+            read -e -p "$(echo -e "${BLUE}请输入密码 (默认admin): ${PLAIN}")" auth_pass
+            auth_user=${auth_user:-admin}
+            auth_pass=${auth_pass:-admin}
+            authentication_config="authentication:\n  - \"$auth_user:$auth_pass\""
+            ;;
+        *)
+            authentication_config=""
+            ;;
+    esac
 
     echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
     cat <<EOF > config.yaml
@@ -163,7 +188,7 @@ allow-lan: true
 socks-port: $socks_port
 bind-address: "$bind_address"
 $(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
-mode: rule
+mode: $mode
 log-level: warning
 ipv6: false
 profile:
