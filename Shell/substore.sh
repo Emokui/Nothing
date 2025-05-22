@@ -22,6 +22,7 @@ check_root() {
 }
 
 install_packages() {
+    hash -r
     if ! command -v docker &> /dev/null; then
         echo -e "${YELLOW}正在安装 Docker 和 Docker Compose...${PLAIN}"
         if ! curl -fsSL https://get.docker.com | bash; then
@@ -74,11 +75,27 @@ install_substore() {
         custom_port=$default_port
     fi
 
+    echo -e "${YELLOW}请选择访问方式：${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 公网访问（所有设备可访问）"
+    echo -e "${GREEN}2.${PLAIN} 仅本机访问（127.0.0.1，仅本机可访问）"
+    read -p "请输入选项 [1/2]，默认1: " access_choice
+    access_choice="${access_choice:-1}"
+
+    if [[ "$access_choice" == "2" ]]; then
+        port_mapping="127.0.0.1:${custom_port}:3001"
+        panel_host="127.0.0.1"
+    else
+        port_mapping="${custom_port}:3001"
+        panel_host="$public_ip"
+    fi
+
     mkdir -p /root/substore "$SUBSTORE_DATA_PATH"
 
     echo -e "${YELLOW}清理旧容器和配置...${PLAIN}"
-    docker rm -f sub-store >/dev/null 2>&1 || true
-    docker compose -p sub-store down >/dev/null 2>&1 || true
+    if command -v docker &>/dev/null; then
+        docker rm -f sub-store >/dev/null 2>&1 || true
+        docker compose -p sub-store down >/dev/null 2>&1 || true
+    fi
 
     cat <<EOF > "$SUBSTORE_COMPOSE_PATH"
 name: sub-store-app
@@ -91,7 +108,7 @@ services:
       - SUB_STORE_BACKEND_UPLOAD_CRON=55 23 * * *
       - SUB_STORE_FRONTEND_BACKEND_PATH=/$secret_key
     ports:
-      - "${custom_port}:3001"
+      - "$port_mapping"
     volumes:
       - $SUBSTORE_DATA_PATH:/opt/app/data
 EOF
@@ -112,18 +129,18 @@ EOF
     systemctl enable cron >/dev/null 2>&1
     systemctl start cron
 
-    local cron_job="0 * * * * cd /root/substore && docker stop sub-store && docker rm sub-store && docker compose -f $SUBSTORE_COMPOSE_PATH -p sub-store pull sub-store && docker compose -f $SUBSTORE_COMPOSE_PATH -p sub-store up -d sub-store >/dev/null 2>&1"
+    local cron_job="0 * * * * cd /root/substore && docker stop sub-store && docker rm sub-store && docker compose -f $SUBSTORE_COMPOSE_PATH -p sub-store pull sub-store && docker compose -f $SUBSTORE_COMPOSE_PATH -p sub-store up -d"
     (crontab -l 2>/dev/null || true; echo "$cron_job") | sort -u | crontab -
 
     echo -e "${CYAN}等待服务启动...${PLAIN}"
     for i in {1..30}; do
         if curl -s "http://127.0.0.1:$custom_port" >/dev/null; then
             echo -e "\n${GREEN}部署成功！您的 Sub-Store 信息如下：${PLAIN}"
-            echo -e "${YELLOW}Sub-Store 面板：http://$public_ip:$custom_port${PLAIN}"
-            echo -e "${YELLOW}后端地址：http://$public_ip:$custom_port/$secret_key${PLAIN}\n"
+            echo -e "${YELLOW}Sub-Store 面板：http://$panel_host:$custom_port${PLAIN}"
+            echo -e "${YELLOW}后端地址：http://$panel_host:$custom_port/$secret_key${PLAIN}\n"
             echo "PORT=$custom_port" > "$SUBSTORE_INFO_PATH"
             echo "SECRET=$secret_key" >> "$SUBSTORE_INFO_PATH"
-            echo "IP=$public_ip" >> "$SUBSTORE_INFO_PATH"
+            echo "IP=$panel_host" >> "$SUBSTORE_INFO_PATH"
             return 0
         fi
         sleep 1
@@ -132,9 +149,9 @@ EOF
     echo -e "${YELLOW}警告: 服务似乎未能在预期时间内启动，但可能仍在进行中。${PLAIN}"
     echo "PORT=$custom_port" > "$SUBSTORE_INFO_PATH"
     echo "SECRET=$secret_key" >> "$SUBSTORE_INFO_PATH"
-    echo "IP=$public_ip" >> "$SUBSTORE_INFO_PATH"
-    echo -e "${YELLOW}Sub-Store 面板：http://$public_ip:$custom_port${PLAIN}"
-    echo -e "${YELLOW}后端地址：http://$public_ip:$custom_port/$secret_key${PLAIN}\n"
+    echo "IP=$panel_host" >> "$SUBSTORE_INFO_PATH"
+    echo -e "${YELLOW}Sub-Store 面板：http://$panel_host:$custom_port${PLAIN}"
+    echo -e "${YELLOW}后端地址：http://$panel_host:$custom_port/$secret_key${PLAIN}\n"
 }
 
 show_substore_info() {
@@ -152,9 +169,13 @@ restart_substore() {
         echo -e "${RED}未检测到 Sub-Store 配置，无法重启。${PLAIN}"
         return 1
     fi
-    cd /root/substore
-    docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store restart
-    echo -e "${GREEN}Sub-Store 已重启。${PLAIN}"
+    if command -v docker &>/dev/null; then
+        cd /root/substore
+        docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store restart
+        echo -e "${GREEN}Sub-Store 已重启。${PLAIN}"
+    else
+        echo -e "${RED}Docker 未安装，无法重启 Sub-Store。${PLAIN}"
+    fi
 }
 
 update_substore() {
@@ -162,22 +183,62 @@ update_substore() {
         echo -e "${RED}未检测到 Sub-Store 配置，无法更新。${PLAIN}"
         return 1
     fi
-    cd /root/substore
-    echo -e "${CYAN}拉取最新 Sub-Store 镜像...${PLAIN}"
-    docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store pull
-    echo -e "${CYAN}重启 Sub-Store...${PLAIN}"
-    docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store up -d
-    echo -e "${GREEN}Sub-Store 已更新并重启。${PLAIN}"
+    if command -v docker &>/dev/null; then
+        cd /root/substore
+        echo -e "${CYAN}拉取最新 Sub-Store 镜像...${PLAIN}"
+        docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store pull
+        echo -e "${CYAN}重启 Sub-Store...${PLAIN}"
+        docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store up -d
+        echo -e "${GREEN}Sub-Store 已更新并重启。${PLAIN}"
+    else
+        echo -e "${RED}Docker 未安装，无法更新 Sub-Store。${PLAIN}"
+    fi
 }
 
 delete_substore() {
-    echo -e "${RED}即将删除 Sub-Store 及其所有数据，是否继续? [y/N]${PLAIN}"
+    echo -e "${RED}即将彻底删除 Sub-Store、Docker 及其所有数据，是否继续? [y/N]${PLAIN}"
     read -r confirm
     if [[ "$confirm" =~ ^[yY]$ ]]; then
-        docker rm -f sub-store >/dev/null 2>&1 || true
-        docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store down >/dev/null 2>&1 || true
+        if command -v docker &>/dev/null; then
+            echo -e "${YELLOW}1. 停止并删除所有 Docker 容器...${PLAIN}"
+            docker rm -f $(docker ps -aq) 2>/dev/null || true
+
+            echo -e "${YELLOW}2. 删除所有 Docker 镜像...${PLAIN}"
+            docker rmi -f $(docker images -q) 2>/dev/null || true
+
+            echo -e "${YELLOW}3. 清理所有未使用的 Docker 网络...${PLAIN}"
+            docker network prune -f || true
+        fi
+
+        echo -e "${YELLOW}4. 卸载 Docker 及 Docker Compose...${PLAIN}"
+        if command -v apt &>/dev/null; then
+            apt-get remove -y docker docker-ce docker-ce-cli docker-compose
+            apt-get purge -y docker-ce docker-ce-cli docker-compose
+        elif command -v yum &>/dev/null; then
+            yum remove -y docker docker-ce docker-ce-cli docker-compose
+        elif command -v dnf &>/dev/null; then
+            dnf remove -y docker docker-ce docker-ce-cli docker-compose
+        elif command -v apk &>/dev/null; then
+            apk del docker docker-compose
+        fi
+
+        echo -e "${YELLOW}5. 删除 Docker 数据与配置目录...${PLAIN}"
+        rm -rf /var/lib/docker /etc/docker
+
+        echo -e "${YELLOW}6. 删除 Sub-Store 相关目录和数据...${PLAIN}"
         rm -rf /root/substore
-        echo -e "${GREEN}Sub-Store 及相关数据已删除。${PLAIN}"
+        rm -rf /root/substore/data
+        rm -rf /root/substore/info.txt
+
+        echo -e "${YELLOW}7. 删除残留 docker-compose 配置文件（如有）...${PLAIN}"
+        rm -rf /root/docker-compose.yml
+
+        echo -e "${YELLOW}8. 删除其他自定义目录（如有/home/nginx、/root/sub-store-data）...${PLAIN}"
+        rm -rf /home/nginx
+        rm -rf /root/sub-store-data
+
+        echo -e "${GREEN}Sub-Store、Docker 及相关数据已全部删除。${PLAIN}"
+        hash -r
     else
         echo -e "${YELLOW}已取消删除。${PLAIN}"
     fi
