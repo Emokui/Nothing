@@ -343,6 +343,16 @@ stop_proxy() {
     systemctl stop nginx && echo -e "${GREEN}✅ Nginx 已停止${NC}"
 }
 
+close_default_http() {
+    clear_screen
+    echo -e "${YELLOW}正在删除 Nginx 默认 HTTP 配置文件...${NC}"
+    rm -f /etc/nginx/conf.d/default.conf
+    rm -f /etc/nginx/sites-enabled/default
+    echo -e "${GREEN}已完成。${NC}"
+    nginx -t && systemctl reload nginx
+    read -p "按回车返回菜单..."
+}
+
 show_menu() {
     while true; do
         clear_screen
@@ -354,6 +364,7 @@ show_menu() {
         echo -e "${RED}5${NC}. 删除所有反代及Nginx"
         echo -e "${YELLOW}6${NC}. 重启所有反代"
         echo -e "${YELLOW}7${NC}. 停止所有反代"
+        echo -e "${BLUE}8${NC}. 关闭默认HTTP欢迎页"
         echo -e "${BLUE}0${NC}. 退出"
         echo -ne "${CYAN}请选择操作: ${NC}"
         read opt
@@ -366,6 +377,7 @@ show_menu() {
             5) remove_all_proxies; read -p "按回车返回菜单..." ;;
             6) restart_proxy; read -p "按回车返回菜单..." ;;
             7) stop_proxy; read -p "按回车返回菜单..." ;;
+            8) close_default_http ;;
             0) clear_screen; exit 0 ;;
             *) echo -e "${RED}请输入正确选项。${NC}"; sleep 1 ;;
         esac
