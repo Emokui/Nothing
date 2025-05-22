@@ -1,12 +1,16 @@
+## You Know What's This ##
+
+```
+El Psy Kongroo
+```
+
+
 ## install  ##
 
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
-**OR**
-```
-bash <(curl -sL https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/ssh.sh)
-```
+
 
 ![ssh](https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Mine/ssh.png "ssh")
 
