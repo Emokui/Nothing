@@ -187,6 +187,26 @@ install_mihomo() {
             ;;
     esac
 
+    # external-controller 配置
+    echo -e "${YELLOW}[*] 配置 external-controller 监听地址: ${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 开启公网访问 (0.0.0.0:port)"
+    echo -e "${GREEN}2.${PLAIN} 仅本机访问 (127.0.0.1:port)"
+    read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (默认2): ${PLAIN}")" ext_ctrl_choice
+    case "$ext_ctrl_choice" in
+        1)
+            ext_ctrl_addr="0.0.0.0"
+            ;;
+        *)
+            ext_ctrl_addr="127.0.0.1"
+            ;;
+    esac
+    read -e -p "$(echo -e \"${BLUE}请输入 external-controller 端口 [默认9090]: ${PLAIN}\")" ext_ctrl_port
+    ext_ctrl_port=${ext_ctrl_port:-9090}
+    external_controller="${ext_ctrl_addr}:${ext_ctrl_port}"
+
+    read -e -p "$(echo -e \"${BLUE}请输入 external-controller 密码（留空为无密码）: ${PLAIN}\")" ext_ctrl_secret
+    ext_ctrl_secret=${ext_ctrl_secret:-""}
+
     echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
     cat <<EOF > config.yaml
 tun:
@@ -208,6 +228,8 @@ find-process-mode: off
 allow-lan: true
 socks-port: $socks_port
 bind-address: "$bind_address"
+external-controller: "$external_controller"
+secret: "$ext_ctrl_secret"
 $(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
 mode: $mode
 log-level: warning
@@ -340,6 +362,8 @@ modify_mihomo_config() {
     port=$(yq e '.proxies[] | select(.name == "warp") | .port' "$CONFIG_PATH")
     public_key=$(yq e '.proxies[] | select(.name == "warp") | .public-key' "$CONFIG_PATH")
     mtu=$(yq e '.proxies[] | select(.name == "warp") | .mtu' "$CONFIG_PATH")
+    ext_ctrl=$(yq e '.external-controller' "$CONFIG_PATH" | tr -d '"')
+    ext_secret=$(yq e '.secret' "$CONFIG_PATH" | tr -d '"')
 
     while true; do
         clear
@@ -355,9 +379,11 @@ modify_mihomo_config() {
         echo -e "${GREEN}8.${PLAIN} WireGuard Port:        ${YELLOW}$port${PLAIN}"
         echo -e "${GREEN}9.${PLAIN} WireGuard Public-key:  ${YELLOW}$public_key${PLAIN}"
         echo -e "${GREEN}10.${PLAIN} WireGuard MTU:        ${YELLOW}$mtu${PLAIN}"
+        echo -e "${GREEN}11.${PLAIN} external-controller:   ${YELLOW}${ext_ctrl}${PLAIN}"
+        echo -e "${GREEN}12.${PLAIN} secret:                ${YELLOW}${ext_secret}${PLAIN}"
         echo -e "${GREEN}0.${PLAIN} 保存并重启 Mihomo 服务${PLAIN}"
         echo -e "${GREEN}q.${PLAIN} 放弃修改并返回${PLAIN}"
-        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-10/q]: ${PLAIN}")" modchoice
+        read -e -p "$(echo -e "${YELLOW}请选择要修改的项目 [0-12/q]: ${PLAIN}")" modchoice
 
         case $modchoice in
             1)
@@ -448,6 +474,27 @@ modify_mihomo_config() {
                 newval=${newval:-$mtu}
                 yq e '(.proxies[] | select(.name == "warp") ).mtu = '"$newval"'' -i "$CONFIG_PATH"
                 mtu="$newval"
+                ;;
+            11)
+                echo -e "${YELLOW}external-controller 配置:${PLAIN}"
+                echo -e "${GREEN}1.${PLAIN} 开启公网访问 (0.0.0.0:port)"
+                echo -e "${GREEN}2.${PLAIN} 仅本机访问 (127.0.0.1:port)"
+                read -e -p "$(echo -e "${BLUE}请输入选项 [1/2] (当前:${ext_ctrl:-127.0.0.1:9090}): ${PLAIN}")" ext_ctrl_choice
+                case "$ext_ctrl_choice" in
+                    1) ext_ctrl_addr="0.0.0.0" ;;
+                    *) ext_ctrl_addr="127.0.0.1" ;;
+                esac
+                curr_port=$(echo "$ext_ctrl" | awk -F: '{print $2}')
+                read -e -p "$(echo -e "${BLUE}请输入 external-controller 端口 [当前:${curr_port:-9090}]: ${PLAIN}")" ext_ctrl_port
+                ext_ctrl_port=${ext_ctrl_port:-${curr_port:-9090}}
+                ext_ctrl_val="${ext_ctrl_addr}:${ext_ctrl_port}"
+                yq e '.external-controller = "'"$ext_ctrl_val"'"' -i "$CONFIG_PATH"
+                ext_ctrl="$ext_ctrl_val"
+                ;;
+            12)
+                read -e -p "$(echo -e \"${BLUE}请输入 external-controller 密码（留空为无密码, 当前:${ext_secret}）: ${PLAIN}\")" new_secret
+                yq e '.secret = "'"$new_secret"'"' -i "$CONFIG_PATH"
+                ext_secret="$new_secret"
                 ;;
             0)
                 echo -e "${CYAN}[*] 保存并重启 Mihomo 服务...${PLAIN}"
