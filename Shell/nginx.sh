@@ -1,300 +1,276 @@
 #!/bin/bash
 
-set -e
+# 彩色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+CYAN='\033[1;36m'
+NC='\033[0m' # 无色
 
-NGINX_HOME="/home/nginx"
-NGINX_CONF="${NGINX_HOME}/nginx.conf"
-CERT_DIR="${NGINX_HOME}/certs"
-HTML_DIR="${NGINX_HOME}/html"
-ACME_SH="${HOME}/.acme.sh/acme.sh"
-DOCKER_IMAGE="nginx:latest"
+NGINX_CONF="/etc/nginx/conf.d/reverse_proxy.conf"
 
-color_info() { echo -e "\033[36m$1\033[0m"; }
-color_warn() { echo -e "\033[33m$1\033[0m"; }
-color_err()  { echo -e "\033[31m$1\033[0m"; }
-pause_and_clear() { read -r -p "按 Enter 鍵繼續..."; clear_screen; }
-clear_screen() { command -v clear &>/dev/null && clear || true; }
-
-if [ "$EUID" -ne 0 ]; then
-  color_err "請以 root 權限執行本腳本"
-  exit 1
-fi
-
-banner() {
-  color_info "————————————————————————————————"
-  color_info "命運石之門：反向代理 Nginx"
-  color_info "————————————————————————————————"
+clear_screen() {
+    # 兼容不同终端
+    command -v clear &>/dev/null && clear || printf "\033c"
 }
 
-validate_ip_port() {
-  local input=$1
-  if [[ $input =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}$ ]]; then
-    local ip=${input%:*}
-    local port=${input##*:}
-    IFS='.' read -r i1 i2 i3 i4 <<< "$ip"
-    if (( i1 <= 255 && i2 <= 255 && i3 <= 255 && i4 <= 255 && port >= 1 && port <= 65535 )); then
-      return 0
+setup_reverse_proxy() {
+    clear_screen
+    echo -e "${CYAN}\n===== 建立 Nginx 反代配置 =====\n${NC}"
+
+    local api_addr ext_port allowed_ip crt_path key_path proxy_pass_header ip_allow secret is_mihomo
+
+    read -p "請輸入後端服務地址 (如 127.0.0.1:9090): " api_addr
+
+    while true; do
+        read -p "請輸入外部訪問端口 (如 8443): " ext_port
+        if [[ ! "$ext_port" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}[X] 端口格式錯誤，請重新輸入數字。${NC}"
+            continue
+        fi
+        if ss -tuln | grep -q ":${ext_port}[[:space:]]"; then
+            echo -e "${RED}[X] 端口 ${ext_port} 已被佔用，請更換其他端口。${NC}"
+        else
+            break
+        fi
+    done
+
+    read -p "請輸入允許訪問的 IP（留空表示允許全部）: " allowed_ip
+
+    echo -e "${YELLOW}\n檢測 /root/cert/ 目錄中的憑證...${NC}"
+    crt_path=""
+    key_path=""
+    if [[ -d /root/cert/ ]]; then
+        mapfile -t certs < <(find /root/cert -type f -name "*.crt" | sort)
+        mapfile -t keys < <(find /root/cert -type f -name "*.key" | sort)
+        if [[ ${#certs[@]} -gt 0 && ${#keys[@]} -gt 0 ]]; then
+            echo -e "${GREEN}發現以下憑證：${NC}"
+            for i in "${!certs[@]}"; do
+                echo -e "${BLUE}$((i+1)). ${certs[i]}${NC}"
+            done
+            read -p "請選擇憑證序號（或按 Enter 手動輸入）: " cert_index
+            if [[ "$cert_index" =~ ^[0-9]+$ && "$cert_index" -ge 1 && "$cert_index" -le ${#certs[@]} ]]; then
+                crt_path="${certs[$((cert_index-1))]}"
+                key_guess="${crt_path%.crt}.key"
+                if [[ -f "$key_guess" ]]; then
+                    key_path="$key_guess"
+                else
+                    echo -e "${YELLOW}未找到與此 crt 同名的 key，請手動輸入 key 路徑。${NC}"
+                fi
+            fi
+        fi
     fi
-  fi
-  return 1
-}
 
-gen_server_block() {
-  domain=$1
-  proxy_target=$2
-  cat <<BLOCK
-  server {
-    listen 80;
-    server_name $domain;
-    return 301 https://\$host\$request_uri;
-  }
+    while [[ -z "$crt_path" ]]; do
+        read -p "請輸入 .crt 憑證完整路徑: " crt_path
+        [[ ! -f "$crt_path" ]] && echo -e "${RED}[X] 憑證文件不存在，請重試。${NC}" && crt_path=""
+    done
+    while [[ -z "$key_path" ]]; do
+        read -p "請輸入 .key 金鑰完整路徑: " key_path
+        [[ ! -f "$key_path" ]] && echo -e "${RED}[X] 金鑰文件不存在，請重試。${NC}" && key_path=""
+    done
 
-  server {
-    listen 443 ssl http2;
-    server_name $domain;
-    ssl_certificate /etc/nginx/certs/${domain}.crt;
-    ssl_certificate_key /etc/nginx/certs/${domain}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
+    read -p "是否反代 Mihomo API？(y/n): " is_mihomo
+    if [[ "${is_mihomo,,}" == "y" ]]; then
+        read -p "請輸入 Secret 值: " secret
+        proxy_pass_header="proxy_set_header Authorization \"Bearer $secret\";"
+    else
+        proxy_pass_header=""
+    fi
+
+    ip_allow=""
+    if [[ -n "$allowed_ip" ]]; then
+        ip_allow="allow $allowed_ip;
+        deny all;"
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo -e "${YELLOW}安裝 Nginx...${NC}"
+        if command -v apt >/dev/null 2>&1; then
+            apt update -y && apt install -y nginx
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y nginx
+        else
+            echo -e "${RED}[X] 未知包管理器，請手動安裝 Nginx。${NC}" && return 1
+        fi
+    fi
+
+    echo -e "${CYAN}建立反代配置...${NC}"
+
+    cat > "$NGINX_CONF" <<EOF
+server {
+    listen ${ext_port} ssl;
+    server_name localhost;
+
+    ssl_certificate ${crt_path};
+    ssl_certificate_key ${key_path};
 
     location / {
-      proxy_pass http://$proxy_target;
-      proxy_set_header Host \$host;
-      proxy_set_header X-Real-IP \$remote_addr;
-      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_pass http://${api_addr};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        ${proxy_pass_header}
+$( [[ -n "$ip_allow" ]] && echo "$ip_allow" )
     }
-  }
-BLOCK
-}
-
-ensure_acme() {
-  if [ ! -d "$HOME/.acme.sh" ]; then
-    color_info "[*] 安裝 acme.sh ..."
-    curl https://get.acme.sh | sh
-  fi
-  if [ ! -f "$ACME_SH" ]; then
-    color_err "[!] 未找到 acme.sh，請確認安裝已完成。"
-    exit 1
-  fi
-}
-
-ensure_cert_dir() { mkdir -p "$CERT_DIR"; }
-
-issue_cert() {
-  domain=$1
-  email=$2
-  ensure_acme
-  ensure_cert_dir
-  if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
-    color_info "[✓] 已檢測到 ${domain} 憑證，跳過簽發步驟。"
-    return
-  fi
-  $ACME_SH --register-account -m "$email" || true
-  color_info "[*] 正在簽發 $domain 憑證..."
-  $ACME_SH --issue -d "$domain" --standalone
-  if [ $? -ne 0 ]; then
-    color_err "[✘] 憑證簽發失敗，請確認 DNS 或 80 埠可用性。"
-    pause_and_clear
-    exit 1
-  fi
-  $ACME_SH --install-cert -d "$domain" \
-    --key-file "${CERT_DIR}/${domain}.key" \
-    --fullchain-file "${CERT_DIR}/${domain}.crt"
-}
-
-backup_nginx_conf() {
-  [ -f "$NGINX_CONF" ] && cp "$NGINX_CONF" "${NGINX_CONF}.$(date +%Y%m%d%H%M%S).bak"
-}
-
-append_server_block() {
-  domain=$1
-  proxy_target=$2
-  events_section=$(sed -n '/^events/,/^}/p' "$NGINX_CONF")
-  http_content=$(sed -n '/^http {/,/^}/p' "$NGINX_CONF" | sed '$d' | tail -n +2)
-  new_block=$(gen_server_block "$domain" "$proxy_target")
-  cat > "$NGINX_CONF" <<EOF
-$events_section
-http {
-$http_content
-$new_block
 }
 EOF
+
+    echo -e "${YELLOW}重新啟動 Nginx...${NC}"
+    nginx -t && systemctl restart nginx
+
+    if [[ $? -eq 0 ]]; then
+        echo -e "\n${GREEN}✅ 反代完成，可通過 https://[伺服器IP]:${ext_port} 訪問${NC}"
+    else
+        echo -e "\n${RED}[X] Nginx 配置有誤，請檢查。${NC}"
+    fi
 }
 
-ensure_docker_installed() {
-  if ! command -v docker &>/dev/null; then
-    color_info "[*] 安裝 Docker..."
-    curl -fsSL https://get.docker.com | sh
-  fi
-}
+view_and_modify_proxy() {
+    clear_screen
+    echo -e "${CYAN}\n==== 反代配置預覽 ====${NC}"
+    if [[ ! -f "$NGINX_CONF" ]]; then
+        echo -e "${RED}未找到反代配置${NC}"
+        return
+    fi
+    grep -E "listen|proxy_pass|ssl_certificate|allow|Authorization" "$NGINX_CONF"
 
-ensure_nginx_container() {
-  if docker ps -a --format '{{.Names}}' | grep -q '^nginx$'; then
-    color_warn "[*] 刪除舊 nginx 容器..."
-    docker rm -f nginx
-    sleep 1
-  fi
-}
-
-reload_nginx_container() {
-  if docker ps --format '{{.Names}}' | grep -q '^nginx$'; then
-    docker restart nginx
-  else
-    # 如果已存在同名容器（不管是否已停止），先移除
-    if docker ps -a --format '{{.Names}}' | grep -q '^nginx$'; then
-      color_warn "[*] 偵測到已存在 nginx 容器，將自動刪除..."
-      docker rm -f nginx
+    read -p "是否要修改当前反代配置？(y/n): " do_modify
+    if [[ "$do_modify" != "y" && "$do_modify" != "Y" ]]; then
+        return
     fi
 
-    docker run -d --name nginx \
-      -p 80:80 -p 443:443 \
-      --restart=always \
-      -v "$NGINX_CONF":/etc/nginx/nginx.conf \
-      -v "$CERT_DIR":/etc/nginx/certs \
-      -v "$HTML_DIR":/usr/share/nginx/html \
-      $DOCKER_IMAGE
-  fi
-}
+    current_port=$(grep -oP 'listen \K[0-9]+' "$NGINX_CONF")
+    current_backend=$(grep -oP 'proxy_pass http://\K[^;]+' "$NGINX_CONF")
+    current_crt=$(grep -oP 'ssl_certificate \K[^;]+' "$NGINX_CONF")
+    current_key=$(grep -oP 'ssl_certificate_key \K[^;]+' "$NGINX_CONF")
+    current_ip=$(grep -oP 'allow \K[^\;]+' "$NGINX_CONF" | head -n 1)
+    current_secret=$(grep -oP 'proxy_set_header Authorization "Bearer \K[^"]+' "$NGINX_CONF")
 
-install_or_add_proxy() {
-  # 如果 nginx.conf 不存在，先創建一個空白配置
-  if [ ! -f "$NGINX_CONF" ]; then
-    mkdir -p "$NGINX_HOME"
+    read -p "后端服务地址 [$current_backend]: " new_backend
+    [ -z "$new_backend" ] && new_backend="$current_backend"
+
+    while true; do
+        read -p "外部访问端口 [$current_port]: " new_port
+        [ -z "$new_port" ] && new_port="$current_port"
+        if [[ ! "$new_port" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}[X] 端口格式错误，请重新输入数字。${NC}"
+            continue
+        fi
+        if ss -tuln | grep -q ":${new_port}[[:space:]]" && [[ "$new_port" != "$current_port" ]]; then
+            echo -e "${RED}[X] 端口 ${new_port} 已被占用，请更换其他端口。${NC}"
+        else
+            break
+        fi
+    done
+
+    read -p "证书路径 [$current_crt]: " new_crt
+    [ -z "$new_crt" ] && new_crt="$current_crt"
+    while [[ ! -f "$new_crt" ]]; do
+        echo -e "${RED}[X] 证书文件不存在，请重新输入。${NC}"
+        read -p "证书路径 [$current_crt]: " new_crt
+        [ -z "$new_crt" ] && new_crt="$current_crt"
+    done
+
+    read -p "密钥路径 [$current_key]: " new_key
+    [ -z "$new_key" ] && new_key="$current_key"
+    while [[ ! -f "$new_key" ]]; do
+        echo -e "${RED}[X] 金钥文件不存在，请重新输入。${NC}"
+        read -p "密钥路径 [$current_key]: " new_key
+        [ -z "$new_key" ] && new_key="$current_key"
+    done
+
+    read -p "允许访问的 IP（留空允许全部） [$current_ip]: " new_ip
+    [ -z "$new_ip" ] && new_ip="$current_ip"
+
+    read -p "Mihomo Secret（如没有配置Mihomo API请留空）[$current_secret]: " new_secret
+    if [[ -n "$new_secret" ]]; then
+        proxy_pass_header="proxy_set_header Authorization \"Bearer $new_secret\";"
+    elif [[ -n "$current_secret" ]]; then
+        proxy_pass_header="proxy_set_header Authorization \"Bearer $current_secret\";"
+    else
+        proxy_pass_header=""
+    fi
+
+    ip_allow=""
+    if [[ -n "$new_ip" ]]; then
+        ip_allow="allow $new_ip;
+        deny all;"
+    fi
+
     cat > "$NGINX_CONF" <<EOF
-events {}
-http {}
-EOF
-    color_info "[*] 已自動建立空白 nginx.conf 配置檔。"
-  fi
+server {
+    listen ${new_port} ssl;
+    server_name localhost;
 
-  read -r -p "請輸入你的域名（例如 example.com）: " domain
-  while true; do
-    read -r -p "請輸入反向代理的 IP + 端口（例如 127.0.0.1:5212）: " proxy_target
-    if validate_ip_port "$proxy_target"; then break; fi
-    color_warn "[!] 格式錯誤，請輸入有效的 IPv4:Port"
-  done
-  read -r -p "請輸入你的 Email（ACME 使用，直接回車將隨機生成）: " email
-  if [ -z "$email" ]; then
-    email="$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)@gmail.com"
-    color_info "[!] 未輸入，已生成：$email"
-  fi
+    ssl_certificate ${new_crt};
+    ssl_certificate_key ${new_key};
 
-  ensure_docker_installed
-  mkdir -p "$CERT_DIR" "$HTML_DIR"
-
-  if [ -f "$NGINX_CONF" ] && grep -q "server_name" "$NGINX_CONF"; then
-    color_warn "[!] 已檢測到 nginx.conf 中存在反代設定，將自動視為新增反代，不覆蓋原有設定。"
-    backup_nginx_conf
-    docker stop nginx || true
-    issue_cert "$domain" "$email"
-    append_server_block "$domain" "$proxy_target"
-    reload_nginx_container
-    color_info "[✓] 已新增反代：$domain -> $proxy_target"
-    pause_and_clear
-    return
-  fi
-
-  ensure_nginx_container
-  backup_nginx_conf
-  ensure_acme
-  $ACME_SH --register-account -m "$email" || true
-  issue_cert "$domain" "$email"
-  color_info "[*] 生成 nginx.conf..."
-  new_block=$(gen_server_block "$domain" "$proxy_target")
-  cat > "$NGINX_CONF" <<EOF
-events {
-  worker_connections 1024;
-}
-http {
-  client_max_body_size 1000m;
-
-$new_block
+    location / {
+        proxy_pass http://${new_backend};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        ${proxy_pass_header}
+$( [[ -n "$ip_allow" ]] && echo "$ip_allow" )
+    }
 }
 EOF
 
-  reload_nginx_container
-  color_info "[✓] Nginx 部署完成，已啟動。"
-  docker ps | grep nginx
-  pause_and_clear
+    echo -e "${YELLOW}重新加载 Nginx...${NC}"
+    nginx -t && systemctl reload nginx && echo -e "${GREEN}✅ 配置已更新并重载${NC}"
 }
 
-manage_docker() {
-  while true; do
+restart_proxy() {
     clear_screen
-    color_info "=== Docker 管理選單 ==="
-    echo "1. 更新 compose 所有鏡像"
-    echo "2. 刪除 compose 所有鏡像"
-    echo "3. 刪除指定鏡像"
-    echo "4. 深度清理所有無用資源"
-    echo "5. 徹底卸載 Docker"
-    echo "0. 返回主選單"
-    read -r -p "請選擇操作 (0-5): " action
-    case $action in
-      1)
-        if command -v docker-compose &>/dev/null; then
-          docker-compose pull
-        else
-          color_err "未安裝 docker-compose"
-        fi
-        ;;
-      2)
-        if command -v docker-compose &>/dev/null; then
-          docker-compose down --rmi all
-        else
-          color_err "未安裝 docker-compose"
-        fi
-        ;;
-      3)
-        read -r -p "請輸入鏡像名稱或 ID: " image
-        if [ -n "$image" ]; then
-          docker image rm -f "$image"
-        else
-          color_warn "未輸入鏡像名稱"
-        fi
-        ;;
-      4) docker system prune -af --volumes ;;
-      5)
-        color_warn "[*] 開始卸載..."
-        docker rm $(docker ps -aq) 2>/dev/null || true
-        docker rmi $(docker images -q) 2>/dev/null || true
-        docker network prune -f
-        if command -v apt &>/dev/null; then
-          apt-get remove -y docker docker-ce docker-ce-cli
-          apt-get purge -y docker-ce docker-ce-cli
-        elif command -v yum &>/dev/null; then
-          yum remove -y docker docker-ce docker-ce-cli
-        elif command -v dnf &>/dev/null; then
-          dnf remove -y docker docker-ce docker-ce-cli
-        elif command -v apk &>/dev/null; then
-          apk del docker
-        fi
-        rm -rf /var/lib/docker /etc/docker
-        # 新增自定義檔案與資料夾清理
-        rm -rf /home/nginx
-        rm -rf /root/docker-compose.yml
-        rm -rf /root/sub-store-data
-        color_info "[✓] Docker 及 nginx 配置與自定義檔案已清除。"
-        ;;
-      0) break ;;
-      *) color_warn "無效選項。";;
-    esac
-    pause_and_clear
-  done
+    echo -e "${CYAN}重啟 Nginx...${NC}"
+    systemctl restart nginx && echo -e "${GREEN}✅ Nginx 已重啟${NC}"
 }
 
-while true; do
-  clear_screen
-  banner
-  echo "1. 安裝/新增反向代理"
-  echo "2. Docker 管理"
-  echo "0. 離開世界線"
-  read -r -p "請選擇操作 (0-2): " choice
-  case "$choice" in
-    1) install_or_add_proxy ;;
-    2) manage_docker ;;
-    0) color_info "觀測者離線，世界線收束。"; exit 0 ;;
-    *) color_warn "你觸碰了未知的 Reading Steiner。"; pause_and_clear ;;
-  esac
-done
+stop_proxy() {
+    clear_screen
+    echo -e "${YELLOW}停止 Nginx...${NC}"
+    systemctl stop nginx && echo -e "${GREEN}✅ Nginx 已停止${NC}"
+}
+
+remove_proxy() {
+    clear_screen
+    echo -e "${RED}移除 Nginx 反代...${NC}"
+    rm -f "$NGINX_CONF"
+    if command -v apt >/dev/null 2>&1; then
+        apt purge -y nginx nginx-common && apt autoremove -y
+    elif command -v yum >/dev/null 2>&1; then
+        yum remove -y nginx
+    fi
+    echo -e "${GREEN}✅ Nginx 及反代已完全移除${NC}"
+}
+
+show_menu() {
+    while true; do
+        clear_screen
+        echo -e "${CYAN}===== Nginx 反代菜單 =====${NC}"
+        echo -e "${GREEN}1${NC}. 建立反代"
+        echo -e "${GREEN}2${NC}. 查看及修改反代配置"
+        echo -e "${YELLOW}3${NC}. 停止反代"
+        echo -e "${YELLOW}4${NC}. 重啟反代"
+        echo -e "${RED}5${NC}. 卸載反代與 Nginx"
+        echo -e "${BLUE}0${NC}. 退出"
+        echo -ne "${CYAN}請選擇操作: ${NC}"
+        read opt
+
+        case "$opt" in
+            1) setup_reverse_proxy ;;
+            2) view_and_modify_proxy ;;
+            3) stop_proxy ;;
+            4) restart_proxy ;;
+            5) remove_proxy ;;
+            0) clear_screen; exit 0 ;;
+            *) echo -e "${RED}請輸入正確選項。${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+show_menu
