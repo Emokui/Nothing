@@ -348,24 +348,24 @@ show_menu() {
         clear_screen
         echo -e "${CYAN}===== Nginx 多反代管理菜单 =====${NC}"
         echo -e "${GREEN}1${NC}. 新建反代"
-        echo -e "${GREEN}2${NC}. 查看及修改反代配置"
-        echo -e "${YELLOW}3${NC}. 列出所有反代"
+        echo -e "${YELLOW}2${NC}. 列出所有反代"
+        echo -e "${GREEN}3${NC}. 查看及修改反代配置"
         echo -e "${RED}4${NC}. 删除反代"
         echo -e "${RED}5${NC}. 删除所有反代及Nginx"
-        echo -e "${YELLOW}6${NC}. 停止所有反代"
-        echo -e "${YELLOW}7${NC}. 重启所有反代"
+        echo -e "${YELLOW}6${NC}. 重启所有反代"
+        echo -e "${YELLOW}7${NC}. 停止所有反代"
         echo -e "${BLUE}0${NC}. 退出"
         echo -ne "${CYAN}请选择操作: ${NC}"
         read opt
 
         case "$opt" in
             1) setup_reverse_proxy ;;
-            2) view_and_modify_proxy ;;
-            3) clear_screen; echo -e "${CYAN}当前所有反代：${NC}"; list_proxies; read -p "按回车返回菜单..." ;;
+            2) clear_screen; echo -e "${CYAN}当前所有反代：${NC}"; list_proxies; read -p "按回车返回菜单..." ;;
+            3) view_and_modify_proxy ;;
             4) remove_proxy ;;
             5) remove_all_proxies; read -p "按回车返回菜单..." ;;
-            6) stop_proxy; read -p "按回车返回菜单..." ;;
-            7) restart_proxy; read -p "按回车返回菜单..." ;;
+            6) restart_proxy; read -p "按回车返回菜单..." ;;
+            7) stop_proxy; read -p "按回车返回菜单..." ;;
             0) clear_screen; exit 0 ;;
             *) echo -e "${RED}请输入正确选项。${NC}"; sleep 1 ;;
         esac
