@@ -1,11 +1,11 @@
-## Fuck me ##
+## 𝐅𝐮𝐜𝐤 𝐦𝐞 ##
 
 ```
 El Psy Kongroo
 ```
 
 
-## Install  ##
+## 𝐈𝐧𝐬𝐭𝐚𝐥𝐥  ##
 
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
@@ -15,15 +15,15 @@ bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.
 ![ssh](https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Mine/ssh.png "ssh")
 
 
-## Blog ##
+## 𝐁𝐥𝐨𝐠 ##
 https://snell.pages.dev
 
 
-## Cloud ##
+## 𝐂𝐥𝐨𝐮𝐝 ##
 https://noho.pages.dev
 
 
-## Rule ##
+## 𝐑𝐮𝐥𝐞 ##
 
 https://github.com/Emokui/Rule
 
