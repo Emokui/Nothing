@@ -124,8 +124,9 @@ setup_reverse_proxy() {
 
     ip_allow=""
     if [[ -n "$allowed_ip" ]]; then
+        # 将 allow/deny 每行对齐
         ip_allow="allow $allowed_ip;
-        deny all;"
+deny all;"
     fi
 
     if ! command -v nginx >/dev/null 2>&1; then
@@ -141,6 +142,25 @@ setup_reverse_proxy() {
 
     echo -e "${CYAN}生成反代配置...${NC}"
 
+    # 生成 location / 的内容，并保证所有指令对齐
+    location_block="        proxy_pass http://${api_addr};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \"upgrade\";"
+    if [[ -n "$proxy_pass_header" ]]; then
+        location_block="${location_block}
+        ${proxy_pass_header}"
+    fi
+    if [[ -n "$ip_allow" ]]; then
+        while read -r line; do
+            location_block="${location_block}
+        $line"
+        done <<< "$ip_allow"
+    fi
+
     cat > "$conf_file" <<EOF
 server {
     listen ${ext_port} ssl;
@@ -150,13 +170,7 @@ server {
     ssl_certificate_key ${key_path};
 
     location / {
-        proxy_pass http://${api_addr};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        ${proxy_pass_header}
-$( [[ -n "$ip_allow" ]] && echo "$ip_allow" )
+${location_block}
     }
 }
 EOF
@@ -177,7 +191,7 @@ view_and_modify_proxy() {
     conf_file="$CHOSEN_CONF"
 
     echo -e "${CYAN}\n==== 反代配置预览 ====${NC}"
-    grep -E "server_name|listen|proxy_pass|ssl_certificate|allow|Authorization" "$conf_file"
+    grep -E "server_name|listen|proxy_pass|ssl_certificate|allow|Authorization|Upgrade|Connection" "$conf_file"
 
     read -p "是否要修改当前反代配置？(y/n): " do_modify
     if [[ "$do_modify" != "y" && "$do_modify" != "Y" ]]; then
@@ -248,7 +262,26 @@ view_and_modify_proxy() {
     ip_allow=""
     if [[ -n "$new_ip" ]]; then
         ip_allow="allow $new_ip;
-        deny all;"
+deny all;"
+    fi
+
+    # 统一生成 location / 块内容并缩进
+    location_block="        proxy_pass http://${new_backend};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \"upgrade\";"
+    if [[ -n "$proxy_pass_header" ]]; then
+        location_block="${location_block}
+        ${proxy_pass_header}"
+    fi
+    if [[ -n "$ip_allow" ]]; then
+        while read -r line; do
+            location_block="${location_block}
+        $line"
+        done <<< "$ip_allow"
     fi
 
     cat > "$new_conf_file" <<EOF
@@ -260,13 +293,7 @@ server {
     ssl_certificate_key ${new_key};
 
     location / {
-        proxy_pass http://${new_backend};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        ${proxy_pass_header}
-$( [[ -n "$ip_allow" ]] && echo "$ip_allow" )
+${location_block}
     }
 }
 EOF
