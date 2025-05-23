@@ -687,7 +687,7 @@ main_menu() {
     while true; do
         clear
         echo
-        echo -e "${LIGHTCYAN}==== Steins Gate - 凤凰院凶真 Ver.2.0 ==== ${WHITE}"
+        echo -e "${LIGHTCYAN}==== Steins Gate - 凤凰院凶真 Ver.2.1 ==== ${WHITE}"
         echo -e "${GREEN}01.${WHITE} 系统更新"
         echo -e "${GREEN}02.${WHITE} 系统清理"
         echo -e "${GREEN}03.${WHITE} 设置时区"
