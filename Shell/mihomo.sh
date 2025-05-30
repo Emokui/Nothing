@@ -211,9 +211,9 @@ install_mihomo() {
     cat <<EOF > config.yaml
 tun:
   enable: $tun_enable
-  stack: mixed
+  stack: system
   dns-hijack:
-    - any:53
+    - 0.0.0.0:53
   strict_route: true
   auto-route: true
   auto-redirect: true
@@ -226,6 +226,8 @@ geo-update-interval: 24
 tcp-concurrent: true
 find-process-mode: off
 allow-lan: true
+skip-auth-prefixes:
+  - 127.0.0.1/8
 socks-port: $socks_port
 bind-address: "$bind_address"
 external-controller: "$external_controller"
@@ -235,12 +237,14 @@ mode: $mode
 log-level: warning
 ipv6: false
 profile:
+  store-selected: true
   store-fake-ip: true
 sniffer:
   enable: false
 dns:
+  cache-algorithm: arc
   enable: true
-  listen: any:53
+  listen: 0.0.0.0:53
   ipv6: false
   nameserver:
     - 8.8.8.8
