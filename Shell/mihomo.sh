@@ -242,7 +242,6 @@ profile:
 sniffer:
   enable: false
 dns:
-  cache-algorithm: arc
   enable: true
   listen: 0.0.0.0:53
   ipv6: false
@@ -252,8 +251,7 @@ dns:
     - 1.1.1.1
   direct-nameserver:
     - system
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
+  enhanced-mode: redir-host
 
 proxies:
   - name: "warp"
