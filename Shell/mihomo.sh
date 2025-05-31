@@ -253,12 +253,7 @@ dns:
   direct-nameserver:
     - system
   enhanced-mode: fake-ip
-
   fake-ip-range: 198.18.0.1/16
-  fake-ip-filter:
-    - '*'
-    - '+.lan'
-    - '+.local'
 
 proxies:
   - name: "warp"
@@ -273,24 +268,24 @@ proxies:
     mtu: $mtu
 
 rule-providers:
-  Ai:
+  OpenAI:
     type: http
     behavior: classical
     format: text
-    path: ./AI
-    url: https://raw.githubusercontent.com/Emokui/Rule/list/Mihomo/AI
+    path: ./Rule/OpenAI
+    url: https://raw.githubusercontent.com/Emokui/Nothing/Zero/Rule/OpenAI
     interval: 86400
   YouTube:
     type: http
     behavior: classical
     format: text
-    path: ./YouTube
-    url: https://raw.githubusercontent.com/Emokui/Rule/list/Mihomo/YouTube
+    path: ./Rule/YouTube
+    url: https://raw.githubusercontent.com/Emokui/Nothing/Zero/Rule/YouTube
     interval: 86400
 
 rules:
   - RULE-SET,YouTube,warp,no-resolve
-  - RULE-SET,Ai,warp,no-resolve
+  - RULE-SET,OpenAI,warp,no-resolve
   - MATCH,DIRECT
 EOF
     check_status "创建配置文件"
