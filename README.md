@@ -25,13 +25,13 @@ https://noho.pages.dev
 
 ## 𝐑𝐮𝐥𝐞 ##
 
-https://github.com/Emokui/Rule
-
-
 https://github.com/SukkaW/Surge
 
 
 https://github.com/luestr/ShuntRules
+
+
+https://github.com/Emokui/Nothing/tree/Zero/Rule
 
 
 https://github.com/blackmatrix7/ios_rule_script/tree/master/rule
