@@ -396,18 +396,18 @@ run_install_script() {
     press_any_key_to_continue
 }
 
-install_acme()      { send_stats "配置Acme";      run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/acme.sh"; }
-install_snell()     { send_stats "配置Snell";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell.sh"; }
-install_mihomo()    { send_stats "配置Mihomo";    run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/mihomo.sh"; }
-install_trojan()    { send_stats "配置Trojan";    run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/trojan.sh"; }
-install_hysteria()  { send_stats "配置Hysteria";  run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/hysteria.sh"; }
-install_substore()  { send_stats "配置SubStore";  run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/substore.sh"; }
-install_install()   { send_stats "一键DDSystem";  run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/Install.sh"; }
-install_nginx()     { send_stats "反代Nginx";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/nginx.sh"; }
-install_snell-pro() { send_stats "超级Snell";     run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/snell-pro.sh"; }
+install_acme()      { send_stats "配置Acme";      run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh"; }
+install_snell()     { send_stats "配置Snell";     run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell.sh"; }
+install_mihomo()    { send_stats "配置Mihomo";    run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/mihomo.sh"; }
+install_trojan()    { send_stats "配置Trojan";    run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/trojan.sh"; }
+install_hysteria()  { send_stats "配置Hysteria";  run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/hysteria.sh"; }
+install_substore()  { send_stats "配置SubStore";  run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/substore.sh"; }
+install_install()   { send_stats "一键DDSystem";  run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/Install.sh"; }
+install_nginx()     { send_stats "反代Nginx";     run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/nginx.sh"; }
+install_snell-pro() { send_stats "超级Snell";     run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell-pro.sh"; }
 bbr_menu()          { send_stats "管理BBR";       run_install_script "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh"; }
 warp_menu()         { send_stats "管理WARP";      run_install_script "https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh"; }
-install_wireguard() { send_stats "提取WireGuard"; run_install_script "https://csnm.pages.dev/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
+install_wireguard() { send_stats "提取WireGuard"; run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
 
 
 
