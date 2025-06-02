@@ -44,7 +44,7 @@ banner() {
     echo -e "${CYAN}${BOLD}"
     echo "======================================"
     echo "        凤凰院凶真 - Trojan-Go"
-    echo "        El Psy Kongroo. Version 1.4"
+    echo "        El Psy Kongroo. Version 1.5"
     echo "======================================"
     echo -e "${PLAIN}"
 }
