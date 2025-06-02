@@ -18,6 +18,34 @@ pause_and_return() {
     clear
 }
 
+# 检测系统架构
+get_arch() {
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        armv7l) echo "armv7" ;;
+        i386|i686) echo "386" ;;
+        *) echo "$arch" ;;
+    esac
+}
+
+# 获取最新版下载地址
+get_latest_download_url() {
+    local arch="$1"
+    local api_url="https://api.github.com/repos/apernet/hysteria/releases/latest"
+    local asset_name
+    case "$arch" in
+        amd64) asset_name="hysteria-linux-amd64" ;;
+        arm64) asset_name="hysteria-linux-arm64" ;;
+        armv7) asset_name="hysteria-linux-armv7" ;;
+        386)   asset_name="hysteria-linux-386" ;;
+        *) asset_name="hysteria-linux-$arch" ;;
+    esac
+    curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4
+}
+
 generate_self_signed_cert() {
     echo ""
     yellow "开始生成自签名证书..."
@@ -400,8 +428,15 @@ while true; do
 
         mkdir -p "$HY2_DIR"
 
-        echo -e "${CYAN}正在下载最新版本的 Hysteria 内核...${PLAIN}"
-        wget -O "${EXEC_PATH}" "https://download.hysteria.network/app/latest/hysteria-linux-amd64"
+        ARCH=$(get_arch)
+        echo -e "${CYAN}检测到系统架构: $ARCH${PLAIN}"
+        DOWNLOAD_URL=$(get_latest_download_url "$ARCH")
+        if [ -z "$DOWNLOAD_URL" ]; then
+            red "未找到适用于架构 $ARCH 的 Hysteria 内核，请手动安装。"
+            exit 1
+        fi
+        echo -e "${CYAN}正在下载最新版本的 Hysteria ($ARCH)...${PLAIN}"
+        wget -O "${EXEC_PATH}" "$DOWNLOAD_URL"
 
         if [ ! -s "$EXEC_PATH" ]; then
             red "下载的文件为空，请检查网络或下载链接是否正确。"
@@ -641,13 +676,21 @@ EOF2
                     ;;
                 6)
                     echo -e "${CYAN}正在更新 Hysteria 内核...${PLAIN}"
-                    LATEST_TAG=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-                    DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_TAG}/hysteria-linux-amd64"
-                    wget "$DOWNLOAD_URL" -O "$EXEC_PATH"
+                    echo -e "${CYAN}先停止 Hysteria 服务...${PLAIN}"
+                    sudo systemctl stop $SERVICE_NAME
+                    ARCH=$(get_arch)
+                    echo -e "${CYAN}检测到系统架构: $ARCH${PLAIN}"
+                    DOWNLOAD_URL=$(get_latest_download_url "$ARCH")
+                    if [ -z "$DOWNLOAD_URL" ]; then
+                        red "未找到适用于架构 $ARCH 的 Hysteria 内核，请手动安装。"
+                        pause_and_return
+                        continue
+                    fi
+                    wget -O "$EXEC_PATH" "$DOWNLOAD_URL"
                     chmod +x "$EXEC_PATH"
                     echo -e "${CYAN}内核已更新，重启服务中...${PLAIN}"
                     sudo systemctl daemon-reload
-                    sudo systemctl restart $SERVICE_NAME
+                    sudo systemctl start $SERVICE_NAME
                     pause_and_return
                     ;;
                 7)
