@@ -519,13 +519,12 @@ EOF
             clear
             echo -e "${BLUE}请选择你的命运石之门:${PLAIN}"
             echo -e "${GREEN}1.${PLAIN} 查看 Hysteria 状态"
-            echo -e "${GREEN}2.${PLAIN} 启动 Hysteria 服务"
+            echo -e "${GREEN}2.${PLAIN} 查看 Hysteria 配置"
             echo -e "${GREEN}3.${PLAIN} 停止 Hysteria 服务"
             echo -e "${GREEN}4.${PLAIN} 重启 Hysteria 服务"
-            echo -e "${GREEN}5.${PLAIN} 更新 Hysteria 内核"
-            echo -e "${GREEN}6.${PLAIN} 删除 Hysteria 服务"
-            echo -e "${GREEN}7.${PLAIN} 修改 Hysteria 配置"
-            echo -e "${GREEN}8.${PLAIN} 查看 Hysteria 配置"
+            echo -e "${GREEN}5.${PLAIN} 修改 Hysteria 配置"
+            echo -e "${GREEN}6.${PLAIN} 更新 Hysteria 内核"
+            echo -e "${GREEN}7.${PLAIN} 删除 Hysteria 服务"
             echo -e "${GREEN}0.${PLAIN} 返回主菜单"
             read -p "$(echo -e "${YELLOW}选择操作 (0-8): ${PLAIN}")" ACTION
 
@@ -536,10 +535,7 @@ EOF
                     pause_and_return
                     ;;
                 2)
-                    echo -e "${CYAN}正在启动 Hysteria 服务...${PLAIN}"
-                    sudo systemctl start $SERVICE_NAME
-                    echo -e "${GREEN}已启动${PLAIN}"
-                    pause_and_return
+                    show_hysteria_config
                     ;;
                 3)
                     echo -e "${CYAN}正在停止 Hysteria 服务...${PLAIN}"
@@ -554,34 +550,6 @@ EOF
                     pause_and_return
                     ;;
                 5)
-                    echo -e "${CYAN}正在更新 Hysteria 内核...${PLAIN}"
-                    LATEST_TAG=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-                    DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_TAG}/hysteria-linux-amd64"
-                    wget "$DOWNLOAD_URL" -O "$EXEC_PATH"
-                    chmod +x "$EXEC_PATH"
-                    echo -e "${CYAN}内核已更新，重启服务中...${PLAIN}"
-                    sudo systemctl daemon-reload
-                    sudo systemctl restart $SERVICE_NAME
-                    pause_and_return
-                    ;;
-                6)
-                    echo -e "${CYAN}正在删除 Hysteria 相关资源...${PLAIN}"
-                    sudo systemctl stop $SERVICE_NAME
-                    sudo systemctl disable $SERVICE_NAME
-                    sudo rm -f $SERVICE_FILE
-                    sudo rm -rf $HY2_DIR
-                    sudo rm -f $CERT_DIR/server.key
-                    sudo rm -f $CERT_DIR/server.crt
-                    if [ -f "$PORT_JUMP_SERVICE" ]; then
-                        sudo systemctl stop port-jump.service
-                        sudo systemctl disable port-jump.service
-                        sudo rm -f "$PORT_JUMP_SERVICE"
-                    fi
-                    sudo systemctl daemon-reload
-                    green "所有 Hysteria 相关资源已删除"
-                    pause_and_return
-                    ;;
-                7)
                     if [ ! -f "$CONFIG_PATH" ]; then
                         red "未检测到配置文件: $CONFIG_PATH"
                         pause_and_return
@@ -671,8 +639,33 @@ EOF2
                     sudo systemctl status $SERVICE_NAME
                     pause_and_return
                     ;;
-                8)
-                    show_hysteria_config
+                6)
+                    echo -e "${CYAN}正在更新 Hysteria 内核...${PLAIN}"
+                    LATEST_TAG=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+                    DOWNLOAD_URL="https://github.com/apernet/hysteria/releases/download/${LATEST_TAG}/hysteria-linux-amd64"
+                    wget "$DOWNLOAD_URL" -O "$EXEC_PATH"
+                    chmod +x "$EXEC_PATH"
+                    echo -e "${CYAN}内核已更新，重启服务中...${PLAIN}"
+                    sudo systemctl daemon-reload
+                    sudo systemctl restart $SERVICE_NAME
+                    pause_and_return
+                    ;;
+                7)
+                    echo -e "${CYAN}正在删除 Hysteria 相关资源...${PLAIN}"
+                    sudo systemctl stop $SERVICE_NAME
+                    sudo systemctl disable $SERVICE_NAME
+                    sudo rm -f $SERVICE_FILE
+                    sudo rm -rf $HY2_DIR
+                    sudo rm -f $CERT_DIR/server.key
+                    sudo rm -f $CERT_DIR/server.crt
+                    if [ -f "$PORT_JUMP_SERVICE" ]; then
+                        sudo systemctl stop port-jump.service
+                        sudo systemctl disable port-jump.service
+                        sudo rm -f "$PORT_JUMP_SERVICE"
+                    fi
+                    sudo systemctl daemon-reload
+                    green "所有 Hysteria 相关资源已删除"
+                    pause_and_return
                     ;;
                 0)
                     clear
