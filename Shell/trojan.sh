@@ -39,6 +39,8 @@ show_trojan_config() {
 
 uninstall_acme() {
     echo -e "${RED}${BOLD}正在卸载 acme.sh 及相关证书...${PLAIN}"
+
+    # 卸载 acme.sh
     if [ -d ~/.acme.sh ]; then
         ~/.acme.sh/acme.sh --uninstall
         rm -rf ~/.acme.sh
@@ -47,12 +49,25 @@ uninstall_acme() {
         echo -e "${YELLOW}未检测到 acme.sh，无需卸载。${PLAIN}"
     fi
 
-    read -p "$(echo -e "${YELLOW}是否同时删除 /root/cert 目录下所有证书？(y/n): ${PLAIN}")" del_cert
-    if [[ "$del_cert" == "y" || "$del_cert" == "Y" ]]; then
-        rm -rf /root/cert
-        echo -e "${GREEN}/root/cert 目录及证书已删除。${PLAIN}"
+    CERT_DIR="/root/cert"
+    # 检查证书目录
+    if [ -d "$CERT_DIR" ]; then
+        echo -e "${YELLOW}检测到证书目录 $CERT_DIR${PLAIN}"
+        read -p "$(echo -e "${YELLOW}是否删除该目录下所有证书文件？(y/N): ${PLAIN}")" del_cert
+        if [[ "$del_cert" =~ ^[Yy]$ ]]; then
+            # 二次确认，只有输入 yes（小写）才会真正删除
+            read -p "$(echo -e "${RED}确定要删除 $CERT_DIR 下的所有证书文件吗？此操作不可恢复！(yes/NO): ${PLAIN}")" double_check
+            if [[ "$double_check" == "yes" ]]; then
+                rm -rf "$CERT_DIR"
+                echo -e "${GREEN}$CERT_DIR 目录及证书已删除。${PLAIN}"
+            else
+                echo -e "${YELLOW}已取消删除证书操作，$CERT_DIR 保持不变。${PLAIN}"
+            fi
+        else
+            echo -e "${YELLOW}$CERT_DIR 目录保持不变。${PLAIN}"
+        fi
     else
-        echo -e "${YELLOW}/root/cert 目录保持不变。${PLAIN}"
+        echo -e "${YELLOW}未检测到 $CERT_DIR，无需删除。${PLAIN}"
     fi
     pause_and_return
 }
@@ -275,60 +290,88 @@ restart_trojan_go() {
 
 issue_acme_cert() {
     CERT_DIR="/root/cert"
+    ACME_SH=~/.acme.sh/acme.sh
 
-    read -p "$(echo -e "${CYAN}请输入你的域名（例如 example.com）: ${PLAIN}")" domain
-    if [[ -z "$domain" ]]; then
-        echo -e "${RED}请输入域名参数，操作中止。${PLAIN}"
-        pause_and_return
-        return 1
+    # 检查 acme.sh 是否已安装
+    if [[ ! -f "$ACME_SH" ]]; then
+        echo -e "${YELLOW}正在安装 acme.sh ...${PLAIN}"
+        apt update -y && apt install -y curl wget socat openssl dnsutils
+        curl https://get.acme.sh | sh
+        source ~/.bashrc
+        bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     fi
 
-    read -p "$(echo -e "${CYAN}请输入你的 Email（ACME 使用，直接回车将随机生成）: ${PLAIN}")" email
-    if [ -z "$email" ]; then
-        email="$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)@gmail.com"
-        echo -e "${YELLOW}[!] 未输入，已生成：$email${PLAIN}"
+    # 强制切换为 Let's Encrypt
+    $ACME_SH --set-default-ca --server letsencrypt
+
+    # 自动生成虚拟邮箱
+    auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
+    $ACME_SH --register-account -m "$auto_email"
+
+    # 检查 80 端口占用
+    if [[ -z $(type -P lsof) ]]; then
+        apt update -y && apt install -y lsof
+    fi
+    echo -e "${YELLOW}检测 80 端口占用...${PLAIN}"
+    if [[ $(lsof -i:"80" | grep -i -c "listen") -ne 0 ]]; then
+        echo -e "${RED}80 端口被占用，以下是占用程序：${PLAIN}"
+        lsof -i:"80"
+        read -p "$(echo -e "${YELLOW}是否结束占用进程？[y/N]: ${PLAIN}")" yn
+        if [[ $yn =~ [Yy] ]]; then
+            lsof -i:"80" | awk '{print $2}' | grep -v "PID" | xargs kill -9
+        else
+            echo -e "${RED}申请中止。${PLAIN}"
+            pause_and_return
+            return
+        fi
+    fi
+
+    # 获取本机IP
+    ipv4=$(curl -s4m8 ip.sb -k | sed -n 1p)
+    ipv6=$(curl -s6m8 ip.sb -k | sed -n 1p)
+
+    # 域名输入及校验
+    echo -e "${YELLOW}请输入需要申请证书的域名，域名需解析到本机IP！${PLAIN}"
+    read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
+    [[ -z $domain ]] && echo -e "${RED}未输入域名，操作中止。${PLAIN}" && pause_and_return && return
+
+    # 检查域名是否解析到本机IP
+    domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
+    if [[ -z $domainIP ]]; then
+        domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$domain" 2>/dev/null | sed -n 1p)
+    fi
+    if [[ $domainIP != $ipv4 && $domainIP != $ipv6 ]]; then
+        echo -e "${RED}域名解析 IP 与本机 IP 不符。${PLAIN}"
+        echo -e "${YELLOW}域名解析IP: $domainIP, 本机IPv4: $ipv4, IPv6: $ipv6${PLAIN}"
+        echo -e "${YELLOW}请检查域名解析后重试。${PLAIN}"
+        pause_and_return
+        return
     fi
 
     mkdir -p "$CERT_DIR"
+    $ACME_SH --issue -d "${domain}" --standalone -k ec-256 --insecure
+    $ACME_SH --install-cert -d "${domain}" --key-file "${CERT_DIR}/${domain}.key" --fullchain-file "${CERT_DIR}/${domain}.crt" --ecc
 
     if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
-        echo -e "${GREEN}[✓] 已检测到 ${domain} 证书，跳过签发步骤。${PLAIN}"
-        pause_and_return
-        return 0
+        echo -e "${GREEN}证书申请成功！${PLAIN}"
+        echo -e "${YELLOW}证书: ${CERT_DIR}/${domain}.crt${PLAIN}"
+        echo -e "${YELLOW}私钥: ${CERT_DIR}/${domain}.key${PLAIN}"
+        echo -e "${YELLOW}注册邮箱: $auto_email${PLAIN}"
+    else
+        echo -e "${RED}证书申请失败，请检查网络和域名解析！${PLAIN}"
     fi
-
-    if ! command -v curl &>/dev/null; then
-        echo -e "${YELLOW}安装 curl...${PLAIN}"
-        apt update -y && apt install -y curl
-    fi
-
-    if ! command -v socat &>/dev/null; then
-        echo -e "${YELLOW}安装 socat...${PLAIN}"
-        apt update -y && apt install -y socat
-    fi
-
-    if [ ! -d ~/.acme.sh ]; then
-        echo -e "${YELLOW}[*] 安装 acme.sh ...${PLAIN}"
-        curl https://get.acme.sh | sh
-    fi
-
-    ~/.acme.sh/acme.sh --register-account -m "$email"
-    ~/.acme.sh/acme.sh --issue -d "$domain" --standalone
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}[✘] 证书签发失败，请确认 DNS 或 80 端口可用性。${PLAIN}"
-        pause_and_return
-        return 2
-    fi
-
-    ~/.acme.sh/acme.sh --install-cert -d "$domain" \
-        --key-file "${CERT_DIR}/${domain}.key" \
-        --fullchain-file "${CERT_DIR}/${domain}.crt"
-
-    echo -e "${GREEN}[✓] 证书已申请并保存于 ${CERT_DIR}/${PLAIN}"
     pause_and_return
 }
 
 install_trojan_go() {
+    # 检查是否已安装且配置文件存在
+    if [ -f "/root/trojan/trojan-go" ] && [ -f "/root/trojan/config.json" ]; then
+        echo -e "${YELLOW}${BOLD}检测到已安装并存在配置文件，无需重复安装。${PLAIN}"
+        echo -e "${CYAN}如需修改配置，请选择主菜单的【3. 管理 Trojan-Go】${PLAIN}"
+        pause_and_return
+        return
+    fi
+
     echo -e "${GREEN}${BOLD}准备安装 Trojan-Go 并设置配置……${PLAIN}"
     mkdir -p /root/trojan && cd /root/trojan
 
