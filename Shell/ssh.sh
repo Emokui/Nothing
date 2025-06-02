@@ -68,9 +68,15 @@ linux_clean() {
     send_stats "系统清理"
     echo -e "${YELLOW}正在清理系统垃圾...${WHITE}"
 
+    # ------ 权限检查 ------
+    if [ "$(id -u)" -ne 0 ]; then
+        echo -e "${RED}请以root权限运行本脚本以获得最佳清理效果！${WHITE}"
+        return 1
+    fi
+
     # ------ 包管理器缓存清理 ------
     if command -v apt &>/dev/null; then
-        apt autoremove -y && apt autoclean -y
+        apt autoremove -y && apt autoclean -y && apt clean
     elif command -v dnf &>/dev/null; then
         dnf autoremove -y && dnf clean all
     elif command -v yum &>/dev/null; then
@@ -82,19 +88,30 @@ linux_clean() {
         if [[ -n "$orphans" ]]; then
             pacman -Rns $orphans --noconfirm
         fi
+        pacman -Scc --noconfirm
     elif command -v zypper &>/dev/null; then
-        zypper clean
+        zypper clean --all
+    elif command -v emerge &>/dev/null; then
+        emerge --depclean && eclean-dist --deep
     else
         echo -e "${RED}未知的包管理器!${WHITE}"
-        return 1
     fi
 
-    # ------ 清理系统日志（全部删除） ------
-    echo -e "${YELLOW}正在清理所有日志文件...${WHITE}"
-    if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=1s
+    # ------ 清理Docker垃圾 ------
+    if command -v docker &>/dev/null; then
+        echo -e "${YELLOW}清理Docker垃圾...${WHITE}"
+        docker system prune -af
+        docker volume prune -f
     fi
-    find /var/log -type f -name "*.log" -exec rm -f {} \;
+
+    # ------ 清理系统日志（保留3天） ------
+    echo -e "${YELLOW}正在清理系统日志...${WHITE}"
+    if command -v journalctl &>/dev/null; then
+        journalctl --vacuum-time=3d --vacuum-size=100M
+    fi
+    find /var/log -type f -name "*.log" -mtime +3 -exec rm -f {} \;
+    find /var/log -type f -name "*.gz" -mtime +3 -exec rm -f {} \;
+    find /var/log -type f -name "*.1" -mtime +3 -exec rm -f {} \;
 
     # ------ 清理临时目录 ------
     echo -e "${YELLOW}正在清理临时目录...${WHITE}"
@@ -105,6 +122,10 @@ linux_clean() {
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
     fi
+    #------ 清理非root用户缓存 ------
+    for uhome in /home/*; do
+        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
+    done
 
     echo -e "${GREEN}系统清理完成${WHITE}"
     press_any_key_to_continue
