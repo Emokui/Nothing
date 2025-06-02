@@ -626,7 +626,7 @@ manage_service() {
 while true; do
     clear
     echo -e "${BLUE}==============================================${PLAIN}"
-    echo -e "${BLUE}====      Steins Gate - mihomo Ver.1.0     ====${PLAIN}"
+    echo -e "${BLUE}====      Steins Gate - mihomo Ver.1.1     ====${PLAIN}"
     echo -e "${BLUE}==============================================${PLAIN}"
     echo -e "${CYAN}请选择操作：${PLAIN}"
     echo -e "${GREEN}1.${PLAIN} 安装 Mihomo"
