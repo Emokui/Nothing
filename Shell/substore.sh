@@ -25,15 +25,37 @@ install_packages() {
     hash -r
     if ! command -v docker &> /dev/null; then
         echo -e "${YELLOW}正在安装 Docker 和 Docker Compose...${PLAIN}"
-        if ! curl -fsSL https://get.docker.com | bash; then
+        (
+            if ! curl -fsSL https://get.docker.com | bash; then
+                exit 10
+            fi
+            if ! apt-get update && apt-get install -y docker-compose; then
+                exit 11
+            fi
+        ) &
+        install_pid=$!
+        spin='-\|/'
+        i=0
+        while kill -0 $install_pid 2>/dev/null; do
+            i=$(( (i+1) %4 ))
+            printf "\r${CYAN}安装中，请稍候... ${spin:$i:1}${PLAIN}"
+            sleep 0.3
+        done
+        wait $install_pid
+        install_status=$?
+        echo -ne "\r"
+        if [[ $install_status -eq 0 ]]; then
+            echo -e "${GREEN}Docker 和 Docker Compose 安装完成。${PLAIN}"
+        elif [[ $install_status -eq 10 ]]; then
             echo -e "${RED}Docker 安装失败${PLAIN}" >&2
             exit 1
-        fi
-        if ! apt-get update && apt-get install -y docker-compose; then
+        elif [[ $install_status -eq 11 ]]; then
             echo -e "${RED}Docker Compose 安装失败${PLAIN}" >&2
             exit 1
+        else
+            echo -e "${RED}未知错误，安装失败${PLAIN}" >&2
+            exit 1
         fi
-        echo -e "${GREEN}Docker 和 Docker Compose 安装完成。${PLAIN}"
     else
         echo -e "${GREEN}Docker 和 Docker Compose 已安装。${PLAIN}"
     fi
@@ -58,6 +80,14 @@ get_public_ip() {
 }
 
 install_substore() {
+    # 新增：检测是否已安装并配置过
+    if [[ -f "$SUBSTORE_COMPOSE_PATH" && -f "$SUBSTORE_INFO_PATH" ]]; then
+        echo -e "${GREEN}Sub-Store 已经安装并配置过。${PLAIN}"
+        echo -e "${YELLOW}如需修改配置，请选择 2. 管理 Sub-Store。${PLAIN}"
+        read -p "按回车键返回主菜单..." 
+        return 0
+    fi
+
     install_packages
     local public_ip
     public_ip=$(get_public_ip)
@@ -266,6 +296,94 @@ substore_manage_menu() {
     done
 }
 
+substore_manage_menu() {
+    while true; do
+        clear
+        echo -e "${MAGENTA}============== Sub-Store 管理 ==============${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN} 查看当前 Sub-Store 地址及后端"
+        echo -e "${GREEN}2.${PLAIN} 重启 Sub-Store"
+        echo -e "${GREEN}3.${PLAIN} 更新 Sub-Store"
+        echo -e "${GREEN}4.${PLAIN} 修改 Sub-Store 配置"
+        echo -e "${GREEN}5.${PLAIN} 删除 Sub-Store 及相关"        
+        echo -e "${GREEN}0.${PLAIN} 返回主菜单"
+        read -p "请选择操作：" sub_choice
+        case $sub_choice in
+            1) show_substore_info; read -p "按回车键返回管理菜单..." ;;
+            2) restart_substore; read -p "按回车键返回管理菜单..." ;;
+            3) update_substore; read -p "按回车键返回管理菜单..." ;;
+            4) modify_substore_config; read -p "按回车键返回管理菜单..." ;;
+            5) delete_substore; read -p "按回车键返回管理菜单..." ;;
+            0) break ;;
+            *) echo -e "${RED}无效选项，请重新选择。${PLAIN}"; read -p "按回车键返回管理菜单..." ;;
+        esac
+        clear
+    done
+}
+
+modify_substore_config() {
+    if [[ ! -f "$SUBSTORE_COMPOSE_PATH" || ! -f "$SUBSTORE_INFO_PATH" ]]; then
+        echo -e "${RED}未检测到 Sub-Store 配置，请先安装。${PLAIN}"
+        return 1
+    fi
+
+    source "$SUBSTORE_INFO_PATH"
+    echo -e "${CYAN}当前配置:${PLAIN}"
+    echo -e "1. 端口号: ${YELLOW}${PORT}${PLAIN}"
+    echo -e "2. 密钥:   ${YELLOW}${SECRET}${PLAIN}"
+    echo -e "3. 访问IP: ${YELLOW}${IP}${PLAIN}"
+    echo -e "${YELLOW}如需修改端口或密钥，将重新生成 docker-compose 配置，并重启服务。${PLAIN}"
+
+    read -p "请输入新端口号（回车保留当前: $PORT）: " new_port
+    new_port="${new_port:-$PORT}"
+    if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
+        echo -e "${RED}无效端口号，保留当前端口。${PLAIN}"
+        new_port=$PORT
+    fi
+
+    read -p "请输入新的后台密钥（回车保留当前: $SECRET）: " new_secret
+    new_secret="${new_secret:-$SECRET}"
+
+    echo -e "${YELLOW}请选择访问方式：${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN} 公网访问（所有设备可访问）"
+    echo -e "${GREEN}2.${PLAIN} 仅本机访问（127.0.0.1，仅本机可访问）"
+    read -p "请输入选项 [1/2]，默认与当前一致: " access_choice
+    access_choice="${access_choice:-1}"
+    if [[ "$access_choice" == "2" ]]; then
+        port_mapping="127.0.0.1:${new_port}:3001"
+        new_ip="127.0.0.1"
+    else
+        port_mapping="${new_port}:3001"
+        new_ip=$(get_public_ip)
+    fi
+
+    cat <<EOF > "$SUBSTORE_COMPOSE_PATH"
+name: sub-store-app
+services:
+  sub-store:
+    image: xream/sub-store
+    container_name: sub-store
+    restart: always
+    environment:
+      - SUB_STORE_BACKEND_UPLOAD_CRON=55 23 * * *
+      - SUB_STORE_FRONTEND_BACKEND_PATH=/$new_secret
+    ports:
+      - "$port_mapping"
+    volumes:
+      - $SUBSTORE_DATA_PATH:/opt/app/data
+EOF
+
+    echo "PORT=$new_port" > "$SUBSTORE_INFO_PATH"
+    echo "SECRET=$new_secret" >> "$SUBSTORE_INFO_PATH"
+    echo "IP=$new_ip" >> "$SUBSTORE_INFO_PATH"
+
+    cd /root/substore
+    echo -e "${CYAN}重启 Sub-Store 服务以应用新配置...${PLAIN}"
+    docker compose -f "$SUBSTORE_COMPOSE_PATH" -p sub-store up -d
+
+    echo -e "${GREEN}配置已更新！新面板地址: ${CYAN}http://$new_ip:$new_port${PLAIN}"
+    echo -e "${GREEN}新后端路径: ${CYAN}http://$new_ip:$new_port/$new_secret${PLAIN}"
+}
+
 main_menu() {
     while true; do
         clear
@@ -277,7 +395,7 @@ main_menu() {
         echo -e "${YELLOW}0.${PLAIN} 退出"
         read -p "请选择操作：" main_choice
         case $main_choice in
-            1) install_substore; read -p "按回车键返回菜单..." ;;
+            1) install_substore ;;  # 修改：去掉多余的 read，install_substore 里已处理
             2) substore_manage_menu ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项，请重新选择。${PLAIN}"; read -p "按回车键返回菜单..." ;;
