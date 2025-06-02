@@ -9,6 +9,31 @@ CYAN="\033[1;36m"
 PLAIN='\033[0m'
 BOLD="\033[1m"
 
+# 检查依赖
+check_dependencies() {
+    local missing=()
+    for bin in jq dig lsof curl wget socat openssl; do
+        if ! command -v $bin >/dev/null 2>&1; then
+            missing+=($bin)
+        fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${YELLOW}检测到缺少依赖：${missing[*]}，正在自动安装...${PLAIN}"
+        apt update -y
+        for dep in "${missing[@]}"; do
+            case $dep in
+                jq) apt install -y jq ;;
+                dig) apt install -y dnsutils ;;
+                lsof) apt install -y lsof ;;
+                curl) apt install -y curl ;;
+                wget) apt install -y wget ;;
+                socat) apt install -y socat ;;
+                openssl) apt install -y openssl ;;
+            esac
+        done
+    fi
+}
+
 pause_and_return() {
     echo ""
     read -p "$(echo -e "${BLUE}请按回车键返回上一层...${PLAIN}")" temp
@@ -304,9 +329,14 @@ issue_acme_cert() {
     # 强制切换为 Let's Encrypt
     $ACME_SH --set-default-ca --server letsencrypt
 
-    # 自动生成虚拟邮箱
-    auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
-    $ACME_SH --register-account -m "$auto_email"
+    # 判断是否已注册邮箱，只在未注册时自动注册
+    if ! $ACME_SH --list-account 2>/dev/null | grep -q letsencrypt; then
+        auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
+        $ACME_SH --register-account -m "$auto_email"
+    else
+        # 获取已注册邮箱
+        auto_email="$($ACME_SH --list-account 2>/dev/null | grep Registered | grep letsencrypt | awk '{print $4}')"
+    fi
 
     # 检查 80 端口占用
     if [[ -z $(type -P lsof) ]]; then
@@ -316,7 +346,7 @@ issue_acme_cert() {
     if [[ $(lsof -i:"80" | grep -i -c "listen") -ne 0 ]]; then
         echo -e "${RED}80 端口被占用，以下是占用程序：${PLAIN}"
         lsof -i:"80"
-        read -p "$(echo -e "${YELLOW}是否结束占用进程？[y/N]: ${PLAIN}")" yn
+        read -p "$(echo -e "${YELLOW}是否结束占用进程？(y/N): ${PLAIN}")" yn
         if [[ $yn =~ [Yy] ]]; then
             lsof -i:"80" | awk '{print $2}' | grep -v "PID" | xargs kill -9
         else
@@ -340,7 +370,16 @@ issue_acme_cert() {
     if [[ -z $domainIP ]]; then
         domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$domain" 2>/dev/null | sed -n 1p)
     fi
-    if [[ $domainIP != $ipv4 && $domainIP != $ipv6 ]]; then
+    
+    ip_match=false
+    if [[ -n "$ipv4" && "$domainIP" == "$ipv4" ]]; then
+        ip_match=true
+    fi
+    if [[ -n "$ipv6" && "$domainIP" == "$ipv6" ]]; then
+        ip_match=true
+    fi
+
+    if [[ "$ip_match" != "true" ]]; then
         echo -e "${RED}域名解析 IP 与本机 IP 不符。${PLAIN}"
         echo -e "${YELLOW}域名解析IP: $domainIP, 本机IPv4: $ipv4, IPv6: $ipv6${PLAIN}"
         echo -e "${YELLOW}请检查域名解析后重试。${PLAIN}"
