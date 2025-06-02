@@ -88,6 +88,14 @@ get_latest_mihomo_url() {
 }
 
 install_mihomo() {
+ # 如已安装直接返回主菜单并提示
+    if [ -f "$MIHOMO_PATH" ] && [ -f "$CONFIG_PATH" ]; then
+        echo -e "${YELLOW}[!] 检测到已安装 Mihomo 且已存在配置文件，无需重复安装。${PLAIN}"
+        echo -e "${CYAN}如需修改配置，请选择主菜单的【2. 管理 Mihomo】${PLAIN}"
+        read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键返回主菜单...${PLAIN}")"
+        clear
+        return
+    fi
     echo -e "${CYAN}[*] 开始安装并配置 Mihomo...${PLAIN}"
     mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
 
