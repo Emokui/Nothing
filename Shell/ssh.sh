@@ -137,7 +137,15 @@ swapfile_path="/swapfile"
 set_swap_menu() {
     while true; do
         clear
+        # 获取当前 Swap 总大小（MB）
+        current_swap=$(free -m | awk '/Swap:/ {print $2}')
+        swap_info="无"
+        if (( current_swap > 0 )); then
+            swap_info="${current_swap} MB"
+        fi
         echo -e "${LIGHTCYAN}========= 虚拟内存（Swap）管理 =========${WHITE}"
+        echo -e "${YELLOW}当前虚拟内存（Swap）大小：$swap_info${WHITE}"
+        echo
         echo -e "${GREEN}1.${WHITE} 设置为 1024 MB (1GB)"
         echo -e "${GREEN}2.${WHITE} 设置为 2048 MB (2GB)"
         echo -e "${GREEN}3.${WHITE} 手动输入 MB 大小"
