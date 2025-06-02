@@ -56,46 +56,74 @@ generate_self_signed_cert() {
 issue_acme_cert() {
     CERT_DIR="/root/cert"
     ACME_SH="$HOME/.acme.sh/acme.sh"
-    ACME_ACCOUNT_CONF="$HOME/.acme.sh/account.conf"
 
-    # 自动安装 curl
-    if ! command -v curl &>/dev/null; then
-        echo -e "${YELLOW}安装 curl...${PLAIN}"
-        apt update -y && apt install -y curl
-    fi
-
-    # 自动安装 socat
-    if ! command -v socat &>/dev/null; then
-        echo -e "${YELLOW}安装 socat...${PLAIN}"
-        apt update -y && apt install -y socat
-    fi
+    # 检查依赖
+    for bin in jq dig lsof curl wget socat openssl; do
+        if ! command -v $bin >/dev/null 2>&1; then
+            echo -e "${YELLOW}缺少依赖 $bin，正在安装...${PLAIN}"
+            apt update -y
+            case $bin in
+                jq) apt install -y jq ;;
+                dig) apt install -y dnsutils ;;
+                lsof) apt install -y lsof ;;
+                curl) apt install -y curl ;;
+                wget) apt install -y wget ;;
+                socat) apt install -y socat ;;
+                openssl) apt install -y openssl ;;
+            esac
+        fi
+    done
 
     # 自动安装 acme.sh
     if [ ! -f "$ACME_SH" ]; then
         echo -e "${YELLOW}[*] 正在安装 acme.sh ...${PLAIN}"
         curl https://get.acme.sh | sh
+        source ~/.bashrc
+        bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     fi
 
-    # 检查邮箱是否已注册
-    if [ ! -f "$ACME_ACCOUNT_CONF" ] || ! grep -q "ACCOUNT_EMAIL=" "$ACME_ACCOUNT_CONF"; then
-        read -p "$(echo -e "${YELLOW}请输入Email,回车随机生成）: ${PLAIN}")" email
-        if [ -z "$email" ]; then
-            email="$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)@gmail.com"
-            echo -e "${YELLOW}[!] 未输入，已生成：$email${PLAIN}"
-        fi
-        ~/.acme.sh/acme.sh --register-account -m "$email"
+    # 强制切换为 Let's Encrypt
+    $ACME_SH --set-default-ca --server letsencrypt
+
+    # 判断是否已注册邮箱，只在未注册时自动注册
+    if ! $ACME_SH --list-account 2>/dev/null | grep -q letsencrypt; then
+        auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
+        $ACME_SH --register-account -m "$auto_email"
     else
-        email=$(grep ACCOUNT_EMAIL "$ACME_ACCOUNT_CONF" | cut -d= -f2 | tr -d '"')
-        echo -e "${GREEN}已检测到已注册邮箱：$email，将自动使用。${PLAIN}"
+        # 获取已注册邮箱
+        auto_email="$($ACME_SH --list-account 2>/dev/null | grep Registered | grep letsencrypt | awk '{print $4}')"
     fi
 
     mkdir -p "$CERT_DIR"
 
-    read -p "$(echo -e "${YELLOW}请输入你的域名${PLAIN}（请解析到本机IP）: ")" domain
-    if [[ -z "$domain" ]]; then
-        echo -e "${RED}请输入域名参数，操作中止。${PLAIN}"
+    # 获取本机IP
+    ipv4=$(curl -s4m8 ip.sb -k | sed -n 1p)
+    ipv6=$(curl -s6m8 ip.sb -k | sed -n 1p)
+
+    echo -e "${YELLOW}请输入需要申请证书的域名，域名需解析到本机IP！${PLAIN}"
+    read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
+    [[ -z $domain ]] && echo -e "${RED}未输入域名，操作中止。${PLAIN}" && pause_and_return && return
+
+    # 检查域名是否解析到本机IP
+    domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
+    if [[ -z $domainIP ]]; then
+        domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$domain" 2>/dev/null | sed -n 1p)
+    fi
+
+    ip_match=false
+    if [[ -n "$ipv4" && "$domainIP" == "$ipv4" ]]; then
+        ip_match=true
+    fi
+    if [[ -n "$ipv6" && "$domainIP" == "$ipv6" ]]; then
+        ip_match=true
+    fi
+
+    if [[ "$ip_match" != "true" ]]; then
+        echo -e "${RED}域名解析 IP 与本机 IP 不符。${PLAIN}"
+        echo -e "${YELLOW}域名解析IP: $domainIP, 本机IPv4: $ipv4, IPv6: $ipv6${PLAIN}"
+        echo -e "${YELLOW}请检查域名解析后重试。${PLAIN}"
         pause_and_return
-        return 1
+        return
     fi
 
     if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
@@ -104,18 +132,17 @@ issue_acme_cert() {
         return 0
     fi
 
-    ~/.acme.sh/acme.sh --issue -d "$domain" --standalone
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}[✘] 证书签发失败，请确认 DNS 或 80 端口可用性。${PLAIN}"
-        pause_and_return
-        return 2
+    $ACME_SH --issue -d "${domain}" --standalone -k ec-256 --insecure
+    $ACME_SH --install-cert -d "${domain}" --key-file "${CERT_DIR}/${domain}.key" --fullchain-file "${CERT_DIR}/${domain}.crt" --ecc
+
+    if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
+        echo -e "${GREEN}证书申请成功！${PLAIN}"
+        echo -e "${YELLOW}证书: ${CERT_DIR}/${domain}.crt${PLAIN}"
+        echo -e "${YELLOW}私钥: ${CERT_DIR}/${domain}.key${PLAIN}"
+        echo -e "${YELLOW}注册邮箱: $auto_email${PLAIN}"
+    else
+        echo -e "${RED}证书申请失败，请检查网络和域名解析！${PLAIN}"
     fi
-
-    ~/.acme.sh/acme.sh --install-cert -d "$domain" \
-        --key-file "${CERT_DIR}/${domain}.key" \
-        --fullchain-file "${CERT_DIR}/${domain}.crt"
-
-    echo -e "${GREEN}[✓] 证书已申请并保存于 ${CERT_DIR}/${PLAIN}"
     pause_and_return
 }
 
@@ -211,6 +238,134 @@ select_cert_for_hysteria() {
     return 0
 }
 
+port_jump_set() {
+    echo -e "${CYAN}检查 iptables 是否已安装...${PLAIN}"
+    if ! command -v iptables &> /dev/null; then
+        yellow "未检测到 iptables，正在安装中..."
+        if [ -f /etc/debian_version ]; then
+            sudo apt-get update
+            sudo apt-get install -y iptables
+        elif [ -f /etc/redhat-release ]; then
+            sudo yum install -y iptables
+        else
+            red "无法识别的系统，请手动安装 iptables！中止任务！"
+            return 1
+        fi
+    fi
+
+    interface=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n 1)
+    if [ -z "$interface" ]; then
+        red "未检测到有效的网卡，请检查网络配置。"
+        return 1
+    fi
+    echo -e "${CYAN}检测到的网卡名称为: ${YELLOW}$interface${PLAIN}"
+    echo -e "${YELLOW}如果需要更改网卡名称，请手动输入，默认为 $interface${PLAIN}"
+    read -r user_interface
+    user_interface=${user_interface:-$interface}
+
+    read -p "$(echo -e "${YELLOW}请输入端口范围 (默认 18443:28444): ${PLAIN}")" port_range
+    port_range=${port_range:-18443:28444}
+
+    CONFIG_PATH="/root/hysteria/config.yaml"
+    default_port=""
+    if [[ -f "$CONFIG_PATH" ]]; then
+        cfg_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/^://')
+        if [[ -n "$cfg_port" ]]; then
+            default_port="$cfg_port"
+        fi
+    fi
+    if [[ -z "$default_port" ]]; then
+        red "未检测到 Hysteria 配置文件或未设置 listen 端口，请先安装并配置 Hysteria 后再设置端口跳跃。"
+        pause_and_return
+        return
+    fi
+    read -p "$(echo -e "${YELLOW}请输入HY端口 (默认:${default_port}): ${PLAIN}")" target_port
+    target_port=${target_port:-$default_port}
+
+    echo -e "${CYAN}正在设置端口跳跃规则...${PLAIN}"
+    sudo iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port
+
+    echo -e "${CYAN}以下是当前的 iptables 规则：${PLAIN}"
+    sudo iptables -t nat -L -n
+
+    echo -e "${CYAN}创建 systemd 自启服务: port-jump.service${PLAIN}"
+    cat > /etc/systemd/system/port-jump.service << EOF
+[Unit]
+Description=UDP Port Jumping NAT Rule
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable port-jump.service
+    sudo systemctl start port-jump.service
+
+    green "端口跳跃规则已启用并设置为开机自动启动"
+    pause_and_return
+}
+
+port_jump_modify() {
+    echo -e "${CYAN}正在修改端口跳跃规则...${PLAIN}"
+    sudo systemctl stop port-jump.service 2>/dev/null
+    sudo systemctl disable port-jump.service 2>/dev/null
+    sudo rm -f /etc/systemd/system/port-jump.service
+    sudo iptables -t nat -F PREROUTING
+    sudo systemctl daemon-reload
+    port_jump_set
+}
+
+port_jump_view() {
+    echo -e "${CYAN}当前 iptables 端口跳跃规则：${PLAIN}"
+    sudo iptables -t nat -L -n --line-numbers | grep REDIRECT
+    echo ""
+    echo -e "${CYAN}当前 systemd port-jump.service 配置：${PLAIN}"
+    if [ -f /etc/systemd/system/port-jump.service ]; then
+        cat /etc/systemd/system/port-jump.service
+    else
+        yellow "未检测到 systemd 端口跳跃服务"
+    fi
+    pause_and_return
+}
+
+port_jump_delete() {
+    echo -e "${CYAN}正在删除端口跳跃规则...${PLAIN}"
+    sudo systemctl stop port-jump.service 2>/dev/null
+    sudo systemctl disable port-jump.service 2>/dev/null
+    sudo rm -f /etc/systemd/system/port-jump.service
+    sudo iptables -t nat -F PREROUTING
+    sudo systemctl daemon-reload
+    green "端口跳跃规则已删除"
+    pause_and_return
+}
+
+port_jump_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}========= 端口跳跃设置 =========${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN} 设置端口跳跃"
+        echo -e "${GREEN}2.${PLAIN} 修改端口跳跃"
+        echo -e "${GREEN}3.${PLAIN} 查看端口跳跃"
+        echo -e "${GREEN}4.${PLAIN} 删除端口跳跃"
+        echo -e "${GREEN}0.${PLAIN} 返回主菜单"
+        read -p "$(echo -e "${YELLOW}请选择操作: ${PLAIN}")" pjopt
+        case "$pjopt" in
+            1) port_jump_set ;;
+            2) port_jump_modify ;;
+            3) port_jump_view ;;
+            4) port_jump_delete ;;
+            0) break ;;
+            *) red "无效选项，请重新输入。"; pause_and_return ;;
+        esac
+    done
+}
+
 while true; do
     clear
     echo -e "${BLUE}==============================================${PLAIN}"
@@ -234,6 +389,14 @@ while true; do
     elif [ "$option" -eq 2 ]; then
         HY2_DIR="/root/hysteria"
         EXEC_PATH="${HY2_DIR}/hysteria"
+        CONFIG_PATH="${HY2_DIR}/config.yaml"
+
+        if [[ -f "$EXEC_PATH" && -f "$CONFIG_PATH" ]]; then
+            yellow "检测到已安装且存在配置文件，无需重复安装。"
+            echo -e "${CYAN}如需修改配置，请选择主菜单的【3. 管理 Hysteria】${PLAIN}"
+            pause_and_return
+            continue
+        fi
 
         mkdir -p "$HY2_DIR"
 
@@ -523,82 +686,6 @@ EOF2
         done
 
     elif [ "$option" -eq 4 ]; then
-        echo -e "${CYAN}检查 iptables 是否已安装...${PLAIN}"
-        if ! command -v iptables &> /dev/null; then
-            yellow "未检测到 iptables，正在安装中..."
-            if [ -f /etc/debian_version ]; then
-                sudo apt-get update
-                sudo apt-get install -y iptables
-            elif [ -f /etc/redhat-release ]; then
-                sudo yum install -y iptables
-            else
-                red "无法识别的系统，请手动安装 iptables！中止任务！"
-                exit 1
-            fi
-        else
-            echo -e "${GREEN}iptables 已安装，进入跳跃准备阶段...${PLAIN}"
-        fi
-
-        interface=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n 1)
-
-        if [ -z "$interface" ]; then
-            red "未检测到有效的网卡，请检查网络配置。"
-            exit 1
-        fi
-
-        echo -e "${CYAN}检测到的网卡名称为: ${YELLOW}$interface${PLAIN}"
-        echo -e "${YELLOW}如果需要更改网卡名称，请手动输入，默认为 $interface${PLAIN}"
-
-        read -r user_interface
-        user_interface=${user_interface:-$interface}
-
-        read -p "$(echo -e "${YELLOW}请输入端口范围 (默认 18443:28444): ${PLAIN}")" port_range
-        port_range=${port_range:-18443:28444}
-
-        CONFIG_PATH="/root/hysteria/config.yaml"
-        default_port=""
-        if [[ -f "$CONFIG_PATH" ]]; then
-            cfg_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/^://')
-            if [[ -n "$cfg_port" ]]; then
-                default_port="$cfg_port"
-            fi
-        fi
-
-        if [[ -z "$default_port" ]]; then
-            red "未检测到 Hysteria 配置文件或未设置 listen 端口，请先安装并配置 Hysteria 后再设置端口跳跃。"
-            pause_and_return
-            continue
-        fi
-
-        read -p "$(echo -e "${YELLOW}请输入HY端口 (默认:${default_port}): ${PLAIN}")" target_port
-        target_port=${target_port:-$default_port}
-
-        echo -e "${CYAN}正在设置端口跳跃规则...${PLAIN}"
-        sudo iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port
-
-        echo -e "${CYAN}以下是当前的 iptables 规则：${PLAIN}"
-        sudo iptables -t nat -L -n
-
-        echo -e "${CYAN}创建 systemd 自启服务: port-jump.service${PLAIN}"
-        cat > /etc/systemd/system/port-jump.service << EOF
-[Unit]
-Description=UDP Port Jumping NAT Rule
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/sbin/iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-        sudo systemctl daemon-reload
-        sudo systemctl enable port-jump.service
-        sudo systemctl start port-jump.service
-
-        green "端口跳跃规则已启用并设置为开机自动启动"
-        pause_and_return
+        port_jump_menu
     fi
 done
