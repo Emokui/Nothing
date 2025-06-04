@@ -42,9 +42,9 @@ pause_and_return() {
 
 banner() {
     echo -e "${CYAN}${BOLD}"
-    echo "======================================"
-    echo "        Version 1.5 - Trojan-Go"
-    echo "======================================"
+    echo "================================================="
+    echo "====      Steins Gate - Trojan-Go Ver.1.5    ===="
+    echo "================================================="
     echo -e "${PLAIN}"
 }
 
@@ -505,8 +505,8 @@ install_trojan_go() {
         ws_host=${ws_host:-$domain}
     else
         ws_enabled=false
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
-        ws_path=${ws_path:-/}
+    # 关闭WebSocket时，无需交互，直接设定为默认或证书域名
+        ws_path="/"
         ws_host="$domain"
     fi
 
