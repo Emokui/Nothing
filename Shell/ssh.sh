@@ -21,8 +21,13 @@ BOLD='\033[1m'
 LIGHTCYAN='\033[96m'
 GRAY='\033[37m'
 
-# ====== 通用工具函数 ======
+# 计数API参数
+count_api_url="https://count.emokui.workers.dev"
+count_api_pwd="duwwuD-wojmok-9vikpa"
+count_api_key="ssh_sh"
+RUN_COUNT=$(curl -s "${count_api_url}/?key=${count_api_key}&pwd=${count_api_pwd}" | grep -o '"count":[0-9]*' | grep -o '[0-9]*')
 
+# ====== 通用工具函数 ======
 press_any_key_to_continue() {
     if [ -t 0 ]; then
         local msg="${1:-按任意键返回菜单...}"
@@ -39,7 +44,6 @@ send_stats() {
 }
 
 # ====== 系统管理功能 ======
-
 linux_update() {
     send_stats "系统更新"
     echo -e "${YELLOW}正在更新系统...${WHITE}"
@@ -62,7 +66,6 @@ linux_update() {
     echo -e "${GREEN}系统更新完成${WHITE}"
     press_any_key_to_continue
 }
-
 
 linux_clean() {
     send_stats "系统清理"
@@ -208,7 +211,6 @@ set_swap() {
 }
 
 # ====== SSH 管理 ======
-
 enable_root_login() {
     send_stats "开启root登录并设置密码"
 
@@ -263,7 +265,6 @@ change_ssh_port() {
 
 
 # ====== 时区管理 ======
-
 change_timezone() {
     send_stats "更改时区"
     if ! command -v timedatectl >/dev/null; then
@@ -365,7 +366,6 @@ change_timezone() {
 
 
 # ====== 基础工具安装 ======
-
 install_base_tools() {
     send_stats "安装wget unzip"
     if command -v apt &>/dev/null; then
@@ -388,7 +388,6 @@ install_base_tools() {
 
 
 # ====== 第三方工具/服务安装 ======
-
 run_install_script() {
     set +e
     bash <(curl -sL "$1")
@@ -413,7 +412,6 @@ install_wireguard() { send_stats "提取WireGuard"; run_install_script "https://
 
 
 # ====== VPS 重启 ======
-
 reboot_vps() {
     send_stats "重启VPS"
     echo "即将重启系统..."
@@ -422,7 +420,6 @@ reboot_vps() {
 
 
 # ====== 防火墙配置 ======
-
 configure_firewall() {
     echo -e "${BLUE}[*] 检查 iptables 是否安装...${RESET}"
     if ! command -v iptables &>/dev/null; then
@@ -567,7 +564,6 @@ configure_firewall() {
     done
 }
 
-
 # ====== 安全修改 /etc/resolv.conf 工具函数 ======
 safe_update_resolv_conf() {
     local primary_dns="$1"
@@ -584,7 +580,6 @@ safe_update_resolv_conf() {
 }
 
 # ====== DNS 配置 ======
-
 detect_network_manager() {
     if command -v systemctl > /dev/null && systemctl is-active --quiet systemd-resolved; then
         echo "systemd-resolved"
@@ -709,14 +704,11 @@ dns_config_menu() {
     done
 }
 
-
 # ====== 主菜单 ======
-
 main_menu() {
     while true; do
         clear
-        echo
-        echo -e "${LIGHTCYAN}==== Steins Gate - 凤凰院凶真 Ver.2.1 ==== ${WHITE}"
+        echo -e "${LIGHTCYAN}✦ Steins Gate - Ver 2.1 ✦${WHITE}"
         echo -e "${GREEN}01.${WHITE} 系统更新"
         echo -e "${GREEN}02.${WHITE} 系统清理"
         echo -e "${GREEN}03.${WHITE} 设置时区"
@@ -741,6 +733,7 @@ main_menu() {
         echo -e "${GREEN}22.${WHITE} 一键 DDsystem"
         echo -e "${GREEN}23.${WHITE} 提取 WireGuard"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
+        echo -e "${LIGHTCYAN}脚本累计运行次数: ${WHITE}${RUN_COUNT} ${LIGHTCYAN}${WHITE}"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
