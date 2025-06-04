@@ -397,7 +397,7 @@ port_jump_menu() {
 while true; do
     clear
     echo -e "${BLUE}==============================================${PLAIN}"
-    echo -e "${BLUE}====      Steins Gate - hysteria Ver.1.1    ==${PLAIN}"
+    echo -e "${BLUE}====      Steins Gate - hysteria Ver.1.1   ===${PLAIN}"
     echo -e "${BLUE}==============================================${PLAIN}"
     echo -e "${CYAN}请选择你的命运石之门:${PLAIN}"
     echo -e "${GREEN}1.${PLAIN} 申请证书或自签证书"
