@@ -119,7 +119,6 @@ modify_trojan_config() {
     old_ws_path=$(jq -r '.websocket.path' "$CONFIG" 2>/dev/null)
     old_ws_host=$(jq -r '.websocket.host' "$CONFIG" 2>/dev/null)
 
-    old_domain=$(jq -r '.ssl.sni' "$CONFIG" 2>/dev/null)
     old_cert=$(jq -r '.ssl.cert' "$CONFIG" 2>/dev/null)
     old_key=$(jq -r '.ssl.key' "$CONFIG" 2>/dev/null)
 
@@ -130,7 +129,7 @@ modify_trojan_config() {
     old_fp_username=$(jq -r '.forward_proxy.username' "$CONFIG" 2>/dev/null)
     old_fp_password=$(jq -r '.forward_proxy.password' "$CONFIG" 2>/dev/null)
 
-    read -p "$(echo -e "${CYAN}请输入本地监听端口 (节点端口) [默认: $old_local_port]: ${PLAIN}")" local_port
+    read -p "$(echo -e "${CYAN}请输入节点端口 [默认: $old_local_port]: ${PLAIN}")" local_port
     local_port=${local_port:-$old_local_port}
 
     read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认: $old_remote_addr]: ${PLAIN}")" remote_addr
@@ -146,31 +145,6 @@ modify_trojan_config() {
             password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
             echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
         fi
-    fi
-
-    # WebSocket 启用交互
-    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: $( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
-    if [[ -z "$enable_ws" ]]; then
-        if [[ "$old_ws_enabled" == "true" ]]; then
-            ws_enabled="true"
-        else
-            ws_enabled="false"
-        fi
-    elif [[ "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
-        ws_enabled="true"
-    else
-        ws_enabled="false"
-    fi
-
-    if [[ "$ws_enabled" == "true" ]]; then
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
-        ws_path=${ws_path:-$old_ws_path}
-        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
-        ws_host=${ws_host:-$old_ws_host}
-    else
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
-        ws_path=${ws_path:-$old_ws_path}
-        ws_host="$old_domain"
     fi
 
     cert_dir="/root/cert"
@@ -195,21 +169,45 @@ modify_trojan_config() {
         key_path=${key_path:-$old_key}
     fi
 
+    # 统一证书域名自动提取（sni）
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
     if [[ -z "$detected_domain" ]]; then
         detected_domain=$(openssl x509 -in "$cert_path" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | grep -oE "DNS:[^, ]+" | head -n 1 | cut -d ":" -f2)
     fi
+    domain="$detected_domain"
 
-    if [[ -z "$detected_domain" ]]; then
-        read -p "$(echo -e "${CYAN}请输入你的域名 (证书域名) [默认: $old_domain]: ${PLAIN}")" domain
-        domain=${domain:-$old_domain}
+    if [[ -z "$domain" ]]; then
+        echo -e "${RED}无法从证书中提取域名，请检查证书文件！${PLAIN}"
+        pause_and_return
+        return
     else
-        read -p "$(echo -e "${CYAN}请输入你的域名 (证书域名) [默认: $detected_domain]: ${PLAIN}")" domain
-        domain=${domain:-$detected_domain}
+        echo -e "${GREEN}证书域名自动识别为: $domain（sni自动设置）${PLAIN}"
     fi
 
-    read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $ws_host]: ${PLAIN}")" ws_host
-    ws_host=${ws_host:-$domain}
+    # WebSocket 启用交互
+    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: $( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
+    if [[ -z "$enable_ws" ]]; then
+        if [[ "$old_ws_enabled" == "true" ]]; then
+            ws_enabled=true
+        else
+            ws_enabled=false
+        fi
+    elif [[ "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
+        ws_enabled=true
+    else
+        ws_enabled=false
+    fi
+
+    if [[ "$ws_enabled" == true ]]; then
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-$old_ws_path}
+        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
+        ws_host=${ws_host:-$domain}
+    else
+    # 若关闭 WebSocket，直接用旧值或默认 /
+        ws_path="${old_ws_path:-/}"
+        ws_host="$domain"
+    fi
 
     # forward_proxy 交互
     default_fp_text="n"
@@ -221,7 +219,7 @@ modify_trojan_config() {
         enable_fp=$default_fp_text
     fi
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
-        fp_enabled="true"
+        fp_enabled=true
         read -p "$(echo -e "${CYAN}请输入代理地址 [默认: ${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-${old_fp_addr:-127.0.0.1}}
         read -p "$(echo -e "${CYAN}请输入代理端口 [默认: ${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
@@ -231,7 +229,7 @@ modify_trojan_config() {
         read -p "$(echo -e "${CYAN}请输入代理密码（可留空） [默认: $old_fp_password]: ${PLAIN}")" fp_password
         fp_password=${fp_password:-$old_fp_password}
     else
-        fp_enabled="false"
+        fp_enabled=false
         proxy_addr="127.0.0.1"
         proxy_port="18443"
         fp_username=""
@@ -300,8 +298,7 @@ remove_trojan_go() {
 
     read -p "$(echo -e "${YELLOW}是否删除 SSL 证书及私钥？(y/n): ${PLAIN}")" delete_ssl
     if [[ "$delete_ssl" == "y" || "$delete_ssl" == "Y" ]]; then
-        rm -f /root/cert.crt
-        rm -f /root/private.key
+        rm -rf /root/cert
         rm -f /root/trojan/config.json
         echo -e "${RED}SSL 证书与私钥已被删除。${PLAIN}"
     else
@@ -449,7 +446,7 @@ install_trojan_go() {
 
     echo -e "${YELLOW}请根据提示设置 Trojan-Go 配置${PLAIN}"
 
-    read -p "$(echo -e "${CYAN}请输入本地监听端口 (节点端口) [默认: 443]: ${PLAIN}")" local_port
+    read -p "$(echo -e "${CYAN}请输入节点端口 [默认: 443]: ${PLAIN}")" local_port
     local_port=${local_port:-443}
 
     read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认: speedtest.tele2.net]: ${PLAIN}")" remote_addr
@@ -458,25 +455,10 @@ install_trojan_go() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认: 80]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-80}
 
-    read -p "$(echo -e "${CYAN}请输入密码 (回车随机8位数字字母，建议更改): ${PLAIN}")" password
+    read -p "$(echo -e "${CYAN}请输入密码 (回车随机): ${PLAIN}")" password
     if [ -z "$password" ]; then
         password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
         echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
-    fi
-
-    # WebSocket 启用交互
-    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: y]: ${PLAIN}")" enable_ws
-    if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
-        ws_enabled="true"
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
-        ws_path=${ws_path:-/}
-        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名）: ${PLAIN}")" ws_host
-        ws_host=${ws_host:-$domain}
-    else
-        ws_enabled="false"
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
-        ws_path=${ws_path:-/}
-        ws_host="$domain"
     fi
 
     cert_dir="/root/cert"
@@ -500,26 +482,40 @@ install_trojan_go() {
         read -p "$(echo -e "${CYAN}请输入私钥 key 路径:${PLAIN}")" key_path
     fi
 
+    # 统一证书域名自动提取
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
     if [[ -z "$detected_domain" ]]; then
         detected_domain=$(openssl x509 -in "$cert_path" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | grep -oE "DNS:[^, ]+" | head -n 1 | cut -d ":" -f2)
     fi
+    domain="$detected_domain"
 
-    if [[ -z "$detected_domain" ]]; then
-        echo -e "${YELLOW}⚠️ 无法自动从证书中提取域名，请手动输入.${PLAIN}"
-        read -p "$(echo -e "${CYAN}请输入你的域名 (证书域名): ${PLAIN}")" domain
+    if [[ -z "$domain" ]]; then
+        echo -e "${RED}无法从证书中提取域名，请检查证书文件！${PLAIN}"
+        pause_and_return
+        return
     else
-        read -p "$(echo -e "${CYAN}请输入你的域名 (证书域名) [默认: $detected_domain]: ${PLAIN}")" domain
-        domain=${domain:-$detected_domain}
+        echo -e "${GREEN}证书域名自动识别为: $domain${PLAIN}"
     fi
 
-    read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名）: ${PLAIN}")" ws_host
-    ws_host=${ws_host:-$domain}
+    # WebSocket交互
+    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: y]: ${PLAIN}")" enable_ws
+    if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
+        ws_enabled=true
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-/}
+        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名）: ${PLAIN}")" ws_host
+        ws_host=${ws_host:-$domain}
+    else
+        ws_enabled=false
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-/}
+        ws_host="$domain"
+    fi
 
     # forward_proxy 交互
     read -p "$(echo -e "${CYAN}是否启用 forward_proxy 转发代理？(y/n) [默认: n]: ${PLAIN}")" enable_fp
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
-        fp_enabled="true"
+        fp_enabled=true
         read -p "$(echo -e "${CYAN}请输入代理地址 [默认: 127.0.0.1]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-127.0.0.1}
         read -p "$(echo -e "${CYAN}请输入代理端口 [默认: 18443]: ${PLAIN}")" proxy_port
@@ -527,7 +523,7 @@ install_trojan_go() {
         read -p "$(echo -e "${CYAN}请输入代理用户名（可留空）: ${PLAIN}")" fp_username
         read -p "$(echo -e "${CYAN}请输入代理密码（可留空）: ${PLAIN}")" fp_password
     else
-        fp_enabled="false"
+        fp_enabled=false
         proxy_addr="127.0.0.1"
         proxy_port="18443"
         fp_username=""
@@ -588,7 +584,6 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reexec
     systemctl daemon-reload
     systemctl enable --now trojan-go
     echo -e "${GREEN}✅ Trojan-Go 已安装并设置开机自启！${PLAIN}"
