@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # 彩色定义
@@ -80,7 +79,7 @@ uninstall_acme() {
         echo -e "${YELLOW}检测到证书目录 $CERT_DIR${PLAIN}"
         read -p "$(echo -e "${YELLOW}是否删除该目录下所有证书文件？(y/N): ${PLAIN}")" del_cert
         if [[ "$del_cert" =~ ^[Yy]$ ]]; then
-            # 二次确认，只有输入 yes（小写）才会真正删除
+            # 二次确认
             read -p "$(echo -e "${RED}确定要删除 $CERT_DIR 下的所有证书文件吗？此操作不可恢复！(yes/NO): ${PLAIN}")" double_check
             if [[ "$double_check" == "yes" ]]; then
                 rm -rf "$CERT_DIR"
@@ -184,7 +183,7 @@ modify_trojan_config() {
         echo -e "${GREEN}证书域名自动识别为: $domain（sni自动设置）${PLAIN}"
     fi
 
-    # WebSocket 启用交互
+    # WebSocket 交互
     read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: $( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" ]]; then
         if [[ "$old_ws_enabled" == "true" ]]; then
@@ -204,7 +203,6 @@ modify_trojan_config() {
         read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$domain}
     else
-    # 若关闭 WebSocket，直接用旧值或默认 /
         ws_path="${old_ws_path:-/}"
         ws_host="$domain"
     fi
@@ -349,10 +347,10 @@ issue_acme_cert() {
         bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     fi
 
-    # 强制切换为 Let's Encrypt
+    # 切换为 Let's Encrypt
     $ACME_SH --set-default-ca --server letsencrypt
 
-    # 判断是否已注册邮箱，只在未注册时自动注册
+    # 判断是否已注册邮箱
     if ! $ACME_SH --list-account 2>/dev/null | grep -q letsencrypt; then
         auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
         $ACME_SH --register-account -m "$auto_email"
@@ -482,7 +480,7 @@ install_trojan_go() {
         read -p "$(echo -e "${CYAN}请输入私钥 key 路径:${PLAIN}")" key_path
     fi
 
-    # 统一证书域名自动提取
+    # 证书域名自动提取
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
     if [[ -z "$detected_domain" ]]; then
         detected_domain=$(openssl x509 -in "$cert_path" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | grep -oE "DNS:[^, ]+" | head -n 1 | cut -d ":" -f2)
