@@ -1,9 +1,10 @@
+
 #!/bin/bash
 
 # 彩色定义
-RED="\033[31m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
+RED="\033[31m\033[01m"
+GREEN="\033[32m\033[01m"
+YELLOW="\033[33m\033[01m"
 BLUE="\033[1;34m"
 CYAN="\033[1;36m"
 PLAIN='\033[0m'
@@ -43,8 +44,7 @@ pause_and_return() {
 banner() {
     echo -e "${CYAN}${BOLD}"
     echo "======================================"
-    echo "        凤凰院凶真 - Trojan-Go"
-    echo "        El Psy Kongroo. Version 1.5"
+    echo "        Version 1.5 - Trojan-Go"
     echo "======================================"
     echo -e "${PLAIN}"
 }
@@ -114,7 +114,11 @@ modify_trojan_config() {
     old_remote_addr=$(jq -r '.remote_addr' "$CONFIG" 2>/dev/null)
     old_remote_port=$(jq -r '.remote_port' "$CONFIG" 2>/dev/null)
     old_password=$(jq -r '.password[0]' "$CONFIG" 2>/dev/null)
+
+    old_ws_enabled=$(jq -r '.websocket.enabled' "$CONFIG" 2>/dev/null)
     old_ws_path=$(jq -r '.websocket.path' "$CONFIG" 2>/dev/null)
+    old_ws_host=$(jq -r '.websocket.host' "$CONFIG" 2>/dev/null)
+
     old_domain=$(jq -r '.ssl.sni' "$CONFIG" 2>/dev/null)
     old_cert=$(jq -r '.ssl.cert' "$CONFIG" 2>/dev/null)
     old_key=$(jq -r '.ssl.key' "$CONFIG" 2>/dev/null)
@@ -144,8 +148,30 @@ modify_trojan_config() {
         fi
     fi
 
-    read -p "$(echo -e "${CYAN}请输入路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
-    ws_path=${ws_path:-$old_ws_path}
+    # WebSocket 启用交互
+    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: $( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
+    if [[ -z "$enable_ws" ]]; then
+        if [[ "$old_ws_enabled" == "true" ]]; then
+            ws_enabled="true"
+        else
+            ws_enabled="false"
+        fi
+    elif [[ "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
+        ws_enabled="true"
+    else
+        ws_enabled="false"
+    fi
+
+    if [[ "$ws_enabled" == "true" ]]; then
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-$old_ws_path}
+        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
+        ws_host=${ws_host:-$old_ws_host}
+    else
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-$old_ws_path}
+        ws_host="$old_domain"
+    fi
 
     cert_dir="/root/cert"
     certs=($(ls $cert_dir/*.crt 2>/dev/null))
@@ -182,7 +208,7 @@ modify_trojan_config() {
         domain=${domain:-$detected_domain}
     fi
 
-    read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $domain]: ${PLAIN}")" ws_host
+    read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $ws_host]: ${PLAIN}")" ws_host
     ws_host=${ws_host:-$domain}
 
     # forward_proxy 交互
@@ -223,7 +249,7 @@ modify_trojan_config() {
         "$password"
     ],
     "websocket": {
-        "enabled": true,
+        "enabled": $ws_enabled,
         "path": "$ws_path",
         "host": "$ws_host"
     },
@@ -438,8 +464,20 @@ install_trojan_go() {
         echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
     fi
 
-    read -p "$(echo -e "${CYAN}请输入路径 [默认: /]: ${PLAIN}")" ws_path
-    ws_path=${ws_path:-/}
+    # WebSocket 启用交互
+    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: y]: ${PLAIN}")" enable_ws
+    if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
+        ws_enabled="true"
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-/}
+        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名）: ${PLAIN}")" ws_host
+        ws_host=${ws_host:-$domain}
+    else
+        ws_enabled="false"
+        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
+        ws_path=${ws_path:-/}
+        ws_host="$domain"
+    fi
 
     cert_dir="/root/cert"
     certs=($(ls $cert_dir/*.crt 2>/dev/null))
@@ -507,7 +545,7 @@ install_trojan_go() {
         "$password"
     ],
     "websocket": {
-        "enabled": true,
+        "enabled": $ws_enabled,
         "path": "$ws_path",
         "host": "$ws_host"
     },
@@ -585,7 +623,6 @@ main_menu() {
     while true; do
         clear
         banner
-        echo -e "${BOLD}${BLUE}========== 主菜单 ==========${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} Acme证书申请"
         echo -e "${GREEN}2.${PLAIN} 安装 Trojan-Go"
         echo -e "${GREEN}3.${PLAIN} 管理 Trojan-Go"
