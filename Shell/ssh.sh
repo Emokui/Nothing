@@ -733,7 +733,7 @@ main_menu() {
         echo -e "${GREEN}22.${WHITE} 一键 DDsystem"
         echo -e "${GREEN}23.${WHITE} 提取 WireGuard"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
-        echo -e "${LIGHTCYAN}脚本累计运行次数: ${WHITE}${RUN_COUNT} ${LIGHTCYAN}${WHITE}"
+        echo -e "${LIGHTCYAN}✦ 脚本累计运行次数: ${WHITE}${RUN_COUNT} ${LIGHTCYAN}✦${WHITE}"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
