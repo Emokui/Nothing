@@ -140,12 +140,12 @@ set_swap_menu() {
         if (( current_swap > 0 )); then
             swap_info="${current_swap} MB"
         fi
-        echo -e "${LIGHTCYAN}========= 虚拟内存（Swap）管理 =========${WHITE}"
+        echo -e "${LIGHTCYAN}========= 虚拟内存(Swap)管理 =========${WHITE}"
         echo -e "${YELLOW}当前虚拟内存（Swap）大小：$swap_info${WHITE}"
         echo
         echo -e "${GREEN}1.${WHITE} 设置为 1024 MB (1GB)"
         echo -e "${GREEN}2.${WHITE} 设置为 2048 MB (2GB)"
-        echo -e "${GREEN}3.${WHITE} 手动输入 MB 大小"
+        echo -e "${GREEN}3.${WHITE} 手动输入 Swap 大小"
         echo -e "${YELLOW}0.${WHITE} 返回主菜单"
         echo
         read -rp "请输入选项 [0-3]: " opt
@@ -402,16 +402,12 @@ bbr_menu()          { send_stats "管理BBR";       run_install_script "https://
 warp_menu()         { send_stats "管理WARP";      run_install_script "https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh"; }
 install_wireguard() { send_stats "提取WireGuard"; run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
 
-
-
-
 # ====== VPS 重启 ======
 reboot_vps() {
     send_stats "重启VPS"
     echo "即将重启系统..."
     reboot
 }
-
 
 # ====== 防火墙配置 ======
 configure_firewall() {
@@ -459,7 +455,7 @@ configure_firewall() {
         [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
             1|2)
-                read -rp "请输入端口（如 22 443 或 1000-2000）: " ports
+                read -rp "请输入端口（如 443 或 1000-2000）: " ports
                 for port in $ports; do
                     if [[ "$port" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                         start_port=${BASH_REMATCH[1]}
@@ -474,7 +470,7 @@ configure_firewall() {
                             iptables -A INPUT -p udp --dport $start_port:$end_port -j ACCEPT
                             echo -e "${GREEN}[✓] 端口范围 $port 已开启${RESET}"
                         else
-                            [[ "$start_port" -le 22 && "$end_port" -ge 22 ]] && { echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)，已跳过。${RESET}"; continue; }
+                            [[ "$start_port" -le 22 && "$end_port" -ge 22 ]] && { echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${RESET}"; continue; }
                             iptables -A INPUT -p tcp --dport $start_port:$end_port -j DROP
                             iptables -A INPUT -p udp --dport $start_port:$end_port -j DROP
                             echo -e "${RED}[✓] 端口范围 $port 已关闭${RESET}"
@@ -485,7 +481,7 @@ configure_firewall() {
                             continue
                         fi
                         if [[ "$port" == "22" && "$action_choice" == "2" ]]; then
-                            echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)，跳过${RESET}"
+                            echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${RESET}"
                             continue
                         fi
                         # 先删除旧规则（tcp/udp）
@@ -542,7 +538,7 @@ configure_firewall() {
                 elif command -v service &>/dev/null && service iptables save &>/dev/null; then
                     service iptables save
                 fi
-                echo -e "${RED}[✓] 所有端口已关闭 (SSH 端口除外)${RESET}"
+                echo -e "${RED}[✓] 所有端口已关闭 (22端口除外)${RESET}"
                 press_any_key_to_continue
                 ;;
             5)
