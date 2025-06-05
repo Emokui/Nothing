@@ -21,12 +21,6 @@ BOLD='\033[1m'
 LIGHTCYAN='\033[96m'
 GRAY='\033[37m'
 
-# 计数API参数
-count_api_url="https://count.emokui.workers.dev"
-count_api_pwd="duwwuD-wojmok-9vikpa"
-count_api_key="ssh_sh"
-RUN_COUNT=$(curl -s "${count_api_url}/?key=${count_api_key}&pwd=${count_api_pwd}" | grep -o '"count":[0-9]*' | grep -o '[0-9]*')
-
 # ====== 通用工具函数 ======
 press_any_key_to_continue() {
     if [ -t 0 ]; then
@@ -733,7 +727,6 @@ main_menu() {
         echo -e "${GREEN}22.${WHITE} 一键 DDsystem"
         echo -e "${GREEN}23.${WHITE} 提取 WireGuard"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
-        echo -e "${LIGHTCYAN}✦ 脚本累计运行次数: ${WHITE}${RUN_COUNT} ${LIGHTCYAN}✦${WHITE}"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
