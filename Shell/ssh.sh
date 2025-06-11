@@ -38,9 +38,25 @@ send_stats() {
 }
 
 # ====== 系统管理功能 ======
+is_gcp_instance() {
+    org=$(curl -s --max-time 3 https://ipinfo.io/org)
+    if [[ -z "$org" ]]; then
+        return 1
+    fi
+    grep -qi 'Google' <<< "$org"
+}
+
 linux_update() {
     send_stats "系统更新"
     echo -e "${YELLOW}正在更新系统...${WHITE}"
+
+    if is_gcp_instance; then
+        echo -e "${BLUE}检测为GCP实例,跳过更新。${WHITE}"
+        read -n 1 -s -r -p "按任意键继续..."
+        echo ""
+        return 0
+    fi
+
     if command -v apt &>/dev/null; then
         apt update && apt upgrade -y
     elif command -v dnf &>/dev/null; then
@@ -57,6 +73,7 @@ linux_update() {
         echo -e "${RED}未知的包管理器!${WHITE}"
         return 1
     fi
+
     echo -e "${GREEN}系统更新完成${WHITE}"
     press_any_key_to_continue
 }
