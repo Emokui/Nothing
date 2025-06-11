@@ -601,9 +601,7 @@ detect_network_manager() {
 
 show_current_dns() {
     echo -e "${YELLOW}当前DNS配置:${WHITE}"
-    echo "================="
     grep "nameserver" /etc/resolv.conf || echo "未找到DNS配置"
-    echo "================="
     network_manager=$(detect_network_manager)
     case $network_manager in
         "NetworkManager")
@@ -692,13 +690,13 @@ set_manual_dns() {
 dns_config_menu() {
     while true; do
         clear
-        echo -e "${LIGHTCYAN}DNS配置工具${WHITE}"
-        echo "================="
+        echo -e "${BOLD}${CYAN}======== DNS配置工具 =======${RESET}"
         show_current_dns
         echo -e "${YELLOW}请选择操作:${WHITE}"
-        echo "1. 修改DNS为8.8.8.8和1.1.1.1"
-        echo "2. 手动修改DNS"
-        echo -e "0. 返回主菜单"
+        echo -e "${GREEN}1.${WHITE} 修改DNS为8.8.8.8和1.1.1.1"
+        echo -e "${GREEN}2.${WHITE} 手动修改DNS"
+        echo -e "${YELLOW}0.${WHITE} 返回主菜单"
+        echo -e "${BOLD}${CYAN}============================${RESET}"
         read -rp "请选择操作: " option
         option=$(echo "$option" | xargs)
         case "$option" in
