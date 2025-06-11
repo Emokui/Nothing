@@ -298,7 +298,7 @@ change_timezone() {
 
     while true; do
         clear
-        echo -e "${LIGHTCYAN}========= 更改时区 =========${WHITE}"
+        echo -e "${LIGHTCYAN}✦ 更改时区 ✦${WHITE}"
         echo -e "${YELLOW}当前系统时间: $(date)${WHITE}"
         echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
         echo -e "${GREEN}1.${WHITE} 推荐时区 (${YELLOW}$current_tz${WHITE})"
