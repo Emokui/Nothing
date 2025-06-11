@@ -208,11 +208,11 @@ install_mihomo() {
             ext_ctrl_addr="127.0.0.1"
             ;;
     esac
-    read -e -p "$(echo -e \"${BLUE}请输入 external-controller 端口 [默认9090]: ${PLAIN}\")" ext_ctrl_port
+    read -e -p "$(echo -e "${BLUE}请输入 external-controller 端口 [默认9090]: ${PLAIN}")" ext_ctrl_port
     ext_ctrl_port=${ext_ctrl_port:-9090}
     external_controller="${ext_ctrl_addr}:${ext_ctrl_port}"
 
-    read -e -p "$(echo -e \"${BLUE}请输入 external-controller 密码（留空为无密码）: ${PLAIN}\")" ext_ctrl_secret
+    read -e -p "$(echo -e "${BLUE}请输入 external-controller 密码（留空为无密码）: ${PLAIN}")" ext_ctrl_secret
     ext_ctrl_secret=${ext_ctrl_secret:-""}
 
     echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
@@ -497,7 +497,7 @@ modify_mihomo_config() {
                 ext_ctrl="$ext_ctrl_val"
                 ;;
             12)
-                read -e -p "$(echo -e \"${BLUE}请输入 external-controller 密码（留空为无密码, 当前:${ext_secret}）: ${PLAIN}\")" new_secret
+                read -e -p "$(echo -e "${BLUE}请输入 external-controller 密码（留空为无密码, 当前:${ext_secret}）: ${PLAIN}")" new_secret
                 yq e '.secret = "'"$new_secret"'"' -i "$CONFIG_PATH"
                 ext_secret="$new_secret"
                 ;;
