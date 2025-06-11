@@ -626,9 +626,9 @@ manage_service() {
 while true; do
     clear
     echo -e "${BLUE}==============================================${PLAIN}"
-    echo -e "${BLUE}====      Steins Gate - mihomo Ver.1.1     ====${PLAIN}"
+    echo -e "${BLUE}===       Steins Gate - mihomo Ver.1.1     ===${PLAIN}"
     echo -e "${BLUE}==============================================${PLAIN}"
-    echo -e "${CYAN}请选择操作：${PLAIN}"
+    echo -e "${CYAN}请选择命运石之门：${PLAIN}"
     echo -e "${GREEN}1.${PLAIN} 安装 Mihomo"
     echo -e "${GREEN}2.${PLAIN} 管理 Mihomo"
     echo -e "${GREEN}3.${PLAIN} 更新 Mihomo"
