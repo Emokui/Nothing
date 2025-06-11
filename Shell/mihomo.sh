@@ -563,6 +563,7 @@ delete_mihomo() {
 # 管理 Mihomo systemd 服务
 manage_service() {
     while true; do
+        clear
         echo -e "${BLUE}============== Mihomo 服务管理菜单 ==============${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 停止 Mihomo"
         echo -e "${GREEN}2.${PLAIN} 启动 Mihomo"
