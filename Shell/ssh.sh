@@ -157,14 +157,13 @@ set_swap_menu() {
         if (( current_swap > 0 )); then
             swap_info="${current_swap} MB"
         fi
-        echo -e "${LIGHTCYAN}========= 虚拟内存(Swap)管理 =========${WHITE}"
+        echo -e "${BOLD}${CYAN}======== 虚拟内存(Swap)管理 =======${RESET}"
         echo -e "${YELLOW}当前虚拟内存（Swap）大小：$swap_info${WHITE}"
-        echo
         echo -e "${GREEN}1.${WHITE} 设置为 1024 MB (1GB)"
         echo -e "${GREEN}2.${WHITE} 设置为 2048 MB (2GB)"
         echo -e "${GREEN}3.${WHITE} 手动输入 Swap 大小"
         echo -e "${YELLOW}0.${WHITE} 返回主菜单"
-        echo
+        echo -e "${BOLD}${CYAN}===================================${RESET}"
         read -rp "请输入选项 [0-3]: " opt
         opt=$(echo "$opt" | xargs)
         case "$opt" in
@@ -298,12 +297,13 @@ change_timezone() {
 
     while true; do
         clear
-        echo -e "${LIGHTCYAN}✦ 更改时区 ✦${WHITE}"
-        echo -e "${YELLOW}当前系统时间: $(date)${WHITE}"
-        echo -e "${YELLOW}当前时区: $(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
+        echo -e "${BOLD}${CYAN}=============== 更改时区 ==============${RESET}"
+        echo -e "${YELLOW}当前系统时间:$(date)${WHITE}"
+        echo -e "${YELLOW}当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${WHITE}"
         echo -e "${GREEN}1.${WHITE} 推荐时区 (${YELLOW}$current_tz${WHITE})"
         echo -e "${GREEN}2.${WHITE} 按国家代码选择"
         echo -e "${YELLOW}0.${WHITE} 返回主菜单"
+        echo -e "${BOLD}${CYAN}=======================================${RESET}"
         read -rp "请选择: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
