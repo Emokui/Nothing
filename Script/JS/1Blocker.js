@@ -1,72 +1,83 @@
-// 1Blocker Premium Unlock Script
-// Target: RevenueCat API responses
+// 1Blocker Premium Unlock Script (Deobfuscated)
+// Target: RevenueCat API v1/v2 endpoints
 
-// 应用与产品标识符的映射关系
-const mapping = {
-  '1Blocker': ['premium']
-};
-
-// 获取请求头中的User-Agent
-var ua = $request.headers['User-Agent'] || $request.headers['user-agent'];
-
-// 解析RevenueCat API的响应体
-var obj = JSON.parse($response.body);
-
-// 设置request_date为当前时间戳
-obj.request_date = '2022-09-08T01:04:17Z';
-
-// 创建订阅信息对象
-var subscriptionInfo = {
-  is_sandbox: false,
-  ownership_type: 'PURCHASED',
-  billing_issues_detected_at: null,
-  period_type: 'normal',
-  expires_date: '2099-12-18T01:04:17Z',
-  grace_period_expires_date: null,
-  unsubscribe_detected_at: null,
-  original_purchase_date: '2022-09-08T01:04:17Z',
-  purchase_date: '2022-09-08T01:04:17Z',
-  store: 'app_store'
-};
-
-// 创建权限信息对象
-var entitlementInfo = {
-  grace_period_expires_date: null,
-  purchase_date: '2022-09-08T01:04:17Z',
-  product_identifier: 'premium',
-  expires_date: '2099-12-18T01:04:17Z'
-};
-
-// 根据User-Agent匹配对应的应用
-const match = Object.keys(mapping).find(key => ua.includes(key));
-
-if (match) {
-  const [key, product_id] = [match, mapping[match][0]];
-  
-  if (product_id) {
-    entitlementInfo.product_identifier = product_id;
-    obj.subscriber.subscriptions[product_id] = subscriptionInfo;
-  } else {
-    obj.subscriber.subscriptions['premium'] = subscriptionInfo;
+const appMapping = {
+  '1Blocker': { 
+    productID: 'premium',
+    entitlements: ['premium']
   }
-  
-  // 初始化权限对象
-  obj.subscriber.entitlements = {};
-  
-  // 处理多个权限（用&分隔）
-  if (key.includes('&')) {
-    let parts = key.split('&');
-    parts.forEach(part => {
-      obj.subscriber.entitlements[part] = entitlementInfo;
-    });
-  } else {
-    obj.subscriber.entitlements[key] = entitlementInfo;
+};
+
+// 核心响应修改逻辑
+function modifyResponse(originalResponse) {
+  try {
+    const response = JSON.parse(originalResponse.body);
+    
+    // 基础订阅信息模板
+    const baseSubscription = {
+      is_sandbox: false,
+      ownership_type: "PURCHASED",
+      period_type: "normal",
+      expires_date: "2099-12-31T23:59:59Z",
+      purchase_date: new Date().toISOString(),
+      original_purchase_date: "2022-09-08T00:00:00Z",
+      store: "app_store"
+    };
+
+    // 高级权限模板
+    const premiumEntitlement = {
+      product_identifier: "premium",
+      expires_date: "2099-12-31T23:59:59Z",
+      purchase_date: new Date().toISOString(),
+      is_sandbox: false
+    };
+
+    // 获取User-Agent识别应用
+    const userAgent = $request.headers['User-Agent'] || $request.headers['user-agent'];
+    const matchedApp = Object.keys(appMapping).find(app => userAgent.includes(app));
+
+    if (matchedApp) {
+      const { productID, entitlements } = appMapping[matchedApp];
+      
+      // 更新订阅信息
+      response.subscriber.subscriptions = {
+        [productID]: { ...baseSubscription }
+      };
+
+      // 设置权限
+      response.subscriber.entitlements = entitlements.reduce((acc, entitlement) => {
+        acc[entitlement] = { ...premiumEntitlement };
+        return acc;
+      }, {});
+    } else {
+      // 默认配置
+      response.subscriber.subscriptions = {
+        'premium': { ...baseSubscription }
+      };
+      response.subscriber.entitlements = {
+        'premium': { ...premiumEntitlement }
+      };
+    }
+
+    // 修复时间戳验证
+    response.request_date = new Date().toISOString();
+    response.subscriber.original_application_version = "1.0";
+    response.subscriber.original_purchase_date = "2022-09-08T00:00:00Z";
+    
+    return { body: JSON.stringify(response) };
+    
+  } catch (error) {
+    console.log(`处理错误: ${error}`);
+    return { body: originalResponse.body };
   }
-} else {
-  // 默认设置
-  obj.subscriber.subscriptions['premium'] = subscriptionInfo;
-  obj.subscriber.entitlements['premium'] = entitlementInfo;
 }
 
-// 返回修改后的响应
-$done({body: JSON.stringify(obj)});
+// MITM处理逻辑
+const isTargetRequest = 
+  /^https:\/\/api\.(revenuecat|rc-backup)\.com\/v[12]\/.+\/(receipts|subscribers)/.test($request.url);
+
+if (isTargetRequest) {
+  $done(modifyResponse($response));
+} else {
+  $done({});
+}
