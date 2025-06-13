@@ -1,5 +1,5 @@
 #### 1Blocker ####
-*https://csnm.pages.de/Emokui/Nothing/Zero/Script/Surge/1Blocker.sgmodule*
+*https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Surge/1Blocker.sgmodule*
 
 
 源自: https://github.com/ddgksf2013
