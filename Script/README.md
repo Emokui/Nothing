@@ -1,8 +1,8 @@
 ### CDNURL ###
 
 
-#### Unlock ####
-*https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Unlock.sgmodule*
+#### 1Blocker ####
+*https://csnm.pages.de/Emokui/Nothing/Zero/Script/1Blocker.sgmodule*
 
 
 
