@@ -3,7 +3,7 @@
 #!arguments= PROXY:PROXY,DIRECT:DIRECT
 #!arguments-desc= Customize PROXY or DIRECT
 [Script]
-𝗔𝗱𝗕𝗹𝗼𝗰𝗸_𝗧𝗮𝗹𝗸𝗮𝘁𝗼𝗻𝗲 = type=http-response, pattern=^https:\/\/.*\/ads\/(topbanner|middlebanner|bottombanner), requires-body=1, max-size=0, script-path=https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Talkatone.js
+𝗔𝗱𝗕𝗹𝗼𝗰𝗸 = type=http-response, pattern=^https:\/\/.*\/ads\/(topbanner|middlebanner|bottombanner), requires-body=1, max-size=0, script-path=https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/JS/Talkatone.js
 [Rule]
 DOMAIN,googleads.g.doubleclick.net,DIRECT-DROP
 DOMAIN,wv.inner-active.mobi,DIRECT-DROP
