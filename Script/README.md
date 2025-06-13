@@ -24,3 +24,10 @@
 
 
 源自: https://github.com/Maasea
+
+
+#### Script-Hub ####
+*https://csnm.pages.dev/Emokui/Nothing/Zero/Script/Surge/Script-Hub.sgmodule*
+
+
+源自: https://github.com/Script-Hub-Org
