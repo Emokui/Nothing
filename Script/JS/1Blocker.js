@@ -1,5 +1,16 @@
-// 1Blocker Premium Unlock Script (Deobfuscated)
-// Target: RevenueCat API v1/v2 endpoints
+/***********************************
+
+> ScriptName 1Blocker
+> Author @neko
+
+[rewrite_local]
+^https:\/\/api\.(revenuecat|rc-backup)\.com\/.+\/(receipts$|subscribers\/[^/]+$) url script-response-body https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/1Blocker.js
+^https:\/\/api\.(revenuecat|rc-backup)\.com\/.+\/(receipts|subscribers) url script-request-header https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/deleteheader.js
+
+[mitm]
+hostname=api.revenuecat.com, api.rc-backup.com
+
+***********************************/
 
 const appMapping = {
   '1Blocker': { 
