@@ -93,6 +93,7 @@ install_trojan_go() {
         echo -e "${GREEN}trojan-go 已下载。${PLAIN}"
     fi
 
+    clear
     read -p "$(echo -e "${CYAN}请输入节点端口 [默认: 443]: ${PLAIN}")" local_port
     local_port=${local_port:-443}
 
@@ -267,6 +268,7 @@ EOF
 
     systemctl daemon-reload
     systemctl enable --now trojan-go
+    clear
     echo -e "${GREEN} Trojan-Go 已安装并设置开机自启 ${PLAIN}"
 
     password="$password"
