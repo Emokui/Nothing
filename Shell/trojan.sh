@@ -43,7 +43,7 @@ pause_and_return() {
 
 banner() {
     echo -e "${CYAN}${BOLD}"
-    echo "✦ Trojan Go - Ver 1.5 ✦"
+    echo "✦ Trojan Go - Ver 1.6 ✦"
 }
 
 # ======== 3. Trojan-Go 功能相关 ========
@@ -62,7 +62,35 @@ install_trojan_go() {
     if [ -f ./trojan-go ]; then
         echo -e "${YELLOW}检测到 trojan-go 已存在，跳过下载。${PLAIN}"
     else
-        wget https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/trojan-go && chmod +x trojan-go
+        echo -e "${YELLOW}正在检测并下载安装适合当前系统的 Trojan-Go ...${PLAIN}"
+        arch=""
+        uname_arch=$(uname -m)
+        case "$uname_arch" in
+          x86_64) arch="linux-amd64" ;;
+          aarch64 | arm64) arch="linux-arm64" ;;
+          armv7l) arch="linux-armv7" ;;
+          i386 | i686) arch="linux-386" ;;
+          *) echo "不支持的架构: $uname_arch"; exit 1 ;;
+        esac
+
+        repo="gfw-report/trojan-go"
+        api_url="https://api.github.com/repos/$repo/releases/latest"
+        asset_url=$(curl -s $api_url \
+          | jq -r --arg arch "$arch" '.assets[] | select(.name|test($arch+".zip$")) | .browser_download_url' | head -n 1)
+
+        if [ -z "$asset_url" ]; then
+            echo "找不到适合 $arch 的trojan-go release！"
+            exit 1
+        fi
+
+        wget -O trojan-go.zip "$asset_url"
+        unzip -o trojan-go.zip
+        rm trojan-go.zip
+        if [ -f trojan-go/trojan-go ]; then
+            mv trojan-go/trojan-go ./trojan-go
+            rm -rf trojan-go
+        fi
+        chmod +x trojan-go
         echo -e "${GREEN}trojan-go 已下载。${PLAIN}"
     fi
 
