@@ -45,7 +45,7 @@ banner() {
     echo "================================================="
     echo "====      Steins Gate - Trojan-Go Ver.1.5    ===="
     echo "================================================="
-    echo -e "${PLAIN}"
+    echo -e "${CYAN}请选择命运石之门：${PLAIN}"
 }
 
 show_trojan_config() {
