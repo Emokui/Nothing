@@ -305,6 +305,7 @@ get_latest_mihomo_url_and_version() {
 }
 
 update_mihomo() {
+    clear
     echo -e "${CYAN}[*] 开始更新 Mihomo...${PLAIN}"
     cd "$MIHOMO_DIR" || { echo -e "${RED}[!] 无法进入 $MIHOMO_DIR 目录。${PLAIN}"; exit 1; }
     result=$(get_latest_mihomo_url_and_version)
@@ -323,10 +324,11 @@ update_mihomo() {
         exit 1
     fi
 
+    clear
     echo -e "${CYAN}[*] 重启 Mihomo systemd 服务...${PLAIN}"
     sudo systemctl restart ${SERVICE_NAME}.service
     sleep 2
-    sudo systemctl status ${SERVICE_NAME}.service
+    sudo systemctl status --no-pager ${SERVICE_NAME}.service
 
     read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
     clear
@@ -487,10 +489,11 @@ modify_mihomo_config() {
                 ext_secret="$new_secret"
                 ;;
             0)
+                clear
                 echo -e "${CYAN}[*] 保存并重启 Mihomo 服务...${PLAIN}"
                 sudo systemctl restart ${SERVICE_NAME}.service
                 sleep 2
-                sudo systemctl status ${SERVICE_NAME}.service
+                sudo systemctl status --no-pager ${SERVICE_NAME}.service
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键返回主菜单...${PLAIN}")"
                 clear
                 break
@@ -583,7 +586,7 @@ manage_service() {
             4)
                 clear
                 echo -e "${CYAN}[*] systemd 查看 Mihomo 状态...${PLAIN}"
-                sudo systemctl status ${SERVICE_NAME}.service
+                sudo systemctl status --no-pager ${SERVICE_NAME}.service
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
                 ;;
