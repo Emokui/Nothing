@@ -569,14 +569,14 @@ manage_trojan_go() {
     while true; do
         clear
         echo -e "${BLUE}${BOLD}✦ Trojan-Go Menu ✦${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 启动 Trojan"
-        echo -e "${GREEN}2.${PLAIN} 停止 Trojan"
-        echo -e "${GREEN}3.${PLAIN} 重启 Trojan"
-        echo -e "${GREEN}4.${PLAIN} 查看 Trojan 配置"
-        echo -e "${GREEN}5.${PLAIN} 修改 Trojan 配置"
-        echo -e "${GREEN}6.${PLAIN} 删除 Trojan"
-        echo -e "${GREEN}0.${PLAIN} 返回 El Psy Kongroo"
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ [0-6]: ${PLAIN}")" choice
+        echo -e "${GREEN}  1.${PLAIN}启动 Trojan"
+        echo -e "${GREEN}  2.${PLAIN}停止 Trojan"
+        echo -e "${GREEN}  3.${PLAIN}重启 Trojan"
+        echo -e "${GREEN}  4.${PLAIN}查看 Trojan 配置"
+        echo -e "${GREEN}  5.${PLAIN}修改 Trojan 配置"
+        echo -e "${GREEN}  6.${PLAIN}删除 Trojan"
+        echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
         case "$choice" in
             1) start_trojan_go ;;
             2) stop_trojan_go ;;
@@ -594,12 +594,12 @@ main_menu() {
     while true; do
         clear
         banner
-        echo -e "${GREEN}1.${PLAIN} Acme 证书申请"
-        echo -e "${GREEN}2.${PLAIN} 安装 Trojan-Go"
-        echo -e "${GREEN}3.${PLAIN} 管理 Trojan-Go"
-        echo -e "${GREEN}4.${PLAIN} 卸载 Acme及证书"
-        echo -e "${GREEN}0.${PLAIN} 离开 El Psy Kongroo"
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ [0-4]: ${PLAIN}")" choice
+        echo -e "${GREEN}  1.${PLAIN}Acme 证书申请"
+        echo -e "${GREEN}  2.${PLAIN}安装 Trojan-Go"
+        echo -e "${GREEN}  3.${PLAIN}管理 Trojan-Go"
+        echo -e "${GREEN}  4.${PLAIN}卸载 Acme及证书"
+        echo -e "${GREEN}  0.${PLAIN}离开 El Psy Kongroo"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
             1) issue_acme_cert ;;
