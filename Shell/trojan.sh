@@ -590,6 +590,7 @@ EOF
 
 manage_trojan_go() {
     while true; do
+        clear
         echo -e "${BLUE}${BOLD}========== Trojan-Go 管理菜单 ==========${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 启动 Trojan-Go"
         echo -e "${GREEN}2.${PLAIN} 停止 Trojan-Go"
