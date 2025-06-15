@@ -3,13 +3,13 @@
 # 彩色定义
 RED="\033[31m\033[01m"
 GREEN="\033[32m\033[01m"
+PURPLE='\033[35m\033[01m'
 YELLOW="\033[33m\033[01m"
 BLUE="\033[1;34m"
 CYAN="\033[1;36m"
 PLAIN='\033[0m'
 BOLD="\033[1m"
 
-# 检查依赖
 check_dependencies() {
     local missing=()
     for bin in jq dig lsof curl wget socat openssl; do
@@ -42,10 +42,7 @@ pause_and_return() {
 
 banner() {
     echo -e "${CYAN}${BOLD}"
-    echo "========================="
-    echo "===  Trojan-Go v.1.5  ==="
-    echo "========================="
-    echo -e "${CYAN}请选择命运石之门：${PLAIN}"
+    echo "✦ Trojan Go - Ver 1.5 ✦"
 }
 
 show_trojan_config() {
@@ -64,7 +61,6 @@ show_trojan_config() {
 uninstall_acme() {
     echo -e "${RED}${BOLD}正在卸载 acme.sh 及相关证书...${PLAIN}"
 
-    # 卸载 acme.sh
     if [ -d ~/.acme.sh ]; then
         ~/.acme.sh/acme.sh --uninstall
         rm -rf ~/.acme.sh
@@ -74,12 +70,10 @@ uninstall_acme() {
     fi
 
     CERT_DIR="/root/cert"
-    # 检查证书目录
     if [ -d "$CERT_DIR" ]; then
         echo -e "${YELLOW}检测到证书目录 $CERT_DIR${PLAIN}"
         read -p "$(echo -e "${YELLOW}是否删除该目录下所有证书文件？(y/N): ${PLAIN}")" del_cert
         if [[ "$del_cert" =~ ^[Yy]$ ]]; then
-            # 二次确认
             read -p "$(echo -e "${RED}确定要删除 $CERT_DIR 下的所有证书文件吗？此操作不可恢复！(yes/NO): ${PLAIN}")" double_check
             if [[ "$double_check" == "yes" ]]; then
                 rm -rf "$CERT_DIR"
@@ -121,7 +115,6 @@ modify_trojan_config() {
     old_cert=$(jq -r '.ssl.cert' "$CONFIG" 2>/dev/null)
     old_key=$(jq -r '.ssl.key' "$CONFIG" 2>/dev/null)
 
-    # forward_proxy 旧值提取
     old_fp_enabled=$(jq -r '.forward_proxy.enabled' "$CONFIG" 2>/dev/null)
     old_fp_addr=$(jq -r '.forward_proxy.proxy_addr' "$CONFIG" 2>/dev/null)
     old_fp_port=$(jq -r '.forward_proxy.proxy_port' "$CONFIG" 2>/dev/null)
@@ -168,7 +161,6 @@ modify_trojan_config() {
         key_path=${key_path:-$old_key}
     fi
 
-    # 统一证书域名自动提取（sni）
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
     if [[ -z "$detected_domain" ]]; then
         detected_domain=$(openssl x509 -in "$cert_path" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | grep -oE "DNS:[^, ]+" | head -n 1 | cut -d ":" -f2)
@@ -183,7 +175,6 @@ modify_trojan_config() {
         echo -e "${GREEN}证书域名自动识别为: $domain（sni自动设置）${PLAIN}"
     fi
 
-    # WebSocket 交互
     read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: $( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" ]]; then
         if [[ "$old_ws_enabled" == "true" ]]; then
@@ -207,7 +198,6 @@ modify_trojan_config() {
         ws_host="$domain"
     fi
 
-    # forward_proxy 交互
     default_fp_text="n"
     if [[ "$old_fp_enabled" == "true" ]]; then
         default_fp_text="y"
@@ -338,7 +328,6 @@ issue_acme_cert() {
     CERT_DIR="/root/cert"
     ACME_SH=~/.acme.sh/acme.sh
 
-    # 检查 acme.sh 是否已安装
     if [[ ! -f "$ACME_SH" ]]; then
         echo -e "${YELLOW}正在安装 acme.sh ...${PLAIN}"
         apt update -y && apt install -y curl wget socat openssl dnsutils
@@ -347,19 +336,15 @@ issue_acme_cert() {
         bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     fi
 
-    # 切换为 Let's Encrypt
     $ACME_SH --set-default-ca --server letsencrypt
 
-    # 判断是否已注册邮箱
     if ! $ACME_SH --list-account 2>/dev/null | grep -q letsencrypt; then
         auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
         $ACME_SH --register-account -m "$auto_email"
     else
-        # 获取已注册邮箱
         auto_email="$($ACME_SH --list-account 2>/dev/null | grep Registered | grep letsencrypt | awk '{print $4}')"
     fi
 
-    # 检查 80 端口占用
     if [[ -z $(type -P lsof) ]]; then
         apt update -y && apt install -y lsof
     fi
@@ -377,16 +362,13 @@ issue_acme_cert() {
         fi
     fi
 
-    # 获取本机IP
     ipv4=$(curl -s4m8 ip.sb -k | sed -n 1p)
     ipv6=$(curl -s6m8 ip.sb -k | sed -n 1p)
 
-    # 域名输入及校验
     echo -e "${YELLOW}请输入需要申请证书的域名，域名需解析到本机IP！${PLAIN}"
     read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
     [[ -z $domain ]] && echo -e "${RED}未输入域名，操作中止。${PLAIN}" && pause_and_return && return
 
-    # 检查域名是否解析到本机IP
     domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
     if [[ -z $domainIP ]]; then
         domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$domain" 2>/dev/null | sed -n 1p)
@@ -424,7 +406,6 @@ issue_acme_cert() {
 }
 
 install_trojan_go() {
-    # 检查是否已安装且配置文件存在
     if [ -f "/root/trojan/trojan-go" ] && [ -f "/root/trojan/config.json" ]; then
         echo -e "${YELLOW}${BOLD}检测到已安装并存在配置文件，无需重复安装。${PLAIN}"
         echo -e "${CYAN}如需修改配置，请选择主菜单的【3. 管理 Trojan-Go】${PLAIN}"
@@ -442,7 +423,7 @@ install_trojan_go() {
         echo -e "${GREEN}trojan-go 已下载。${PLAIN}"
     fi
 
-    echo -e "${YELLOW}请根据提示设置 Trojan-Go 配置${PLAIN}"
+    echo -e "${YELLOW}请设置 Trojan-Go 配置${PLAIN}"
 
     read -p "$(echo -e "${CYAN}请输入节点端口 [默认: 443]: ${PLAIN}")" local_port
     local_port=${local_port:-443}
@@ -462,7 +443,7 @@ install_trojan_go() {
     cert_dir="/root/cert"
     certs=($(ls $cert_dir/*.crt 2>/dev/null))
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${YELLOW}检测到以下域名证书，请选择：${PLAIN}"
+        echo -e "${YELLOW}检测到以下域名证书,请选择：${PLAIN}"
         select cert_path in "${certs[@]}"; do
             if [[ -n "$cert_path" ]]; then
                 domain_base=$(basename "$cert_path" .crt)
@@ -470,17 +451,16 @@ install_trojan_go() {
                 if [[ -f "$key_path" ]]; then
                     break
                 else
-                    echo -e "${RED}未找到对应私钥：$key_path，请重新选择。${PLAIN}"
+                    echo -e "${RED}未找到对应私钥：$key_path，请重新选择 ${PLAIN}"
                 fi
             fi
         done
     else
-        echo -e "${YELLOW}⚠️ 未在 $cert_dir 中找到 .crt 文件，请手动输入证书路径。${PLAIN}"
+        echo -e "${YELLOW} 未在 $cert_dir 中找到 .crt 文件,请手动输入证书路径 ${PLAIN}"
         read -p "$(echo -e "${CYAN}请输入证书 cert 路径:${PLAIN}")" cert_path
         read -p "$(echo -e "${CYAN}请输入私钥 key 路径:${PLAIN}")" key_path
     fi
 
-    # 证书域名自动提取
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
     if [[ -z "$detected_domain" ]]; then
         detected_domain=$(openssl x509 -in "$cert_path" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | grep -oE "DNS:[^, ]+" | head -n 1 | cut -d ":" -f2)
@@ -495,7 +475,6 @@ install_trojan_go() {
         echo -e "${GREEN}证书域名自动识别为: $domain${PLAIN}"
     fi
 
-    # WebSocket交互
     read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: y]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
         ws_enabled=true
@@ -505,12 +484,10 @@ install_trojan_go() {
         ws_host=${ws_host:-$domain}
     else
         ws_enabled=false
-    # 关闭WebSocket时，无需交互，直接设定为默认或证书域名
         ws_path="/"
         ws_host="$domain"
     fi
 
-    # forward_proxy 交互
     read -p "$(echo -e "${CYAN}是否启用 forward_proxy 转发代理？(y/n) [默认: n]: ${PLAIN}")" enable_fp
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
@@ -584,22 +561,22 @@ EOF
 
     systemctl daemon-reload
     systemctl enable --now trojan-go
-    echo -e "${GREEN}✅ Trojan-Go 已安装并设置开机自启！${PLAIN}"
+    echo -e "${GREEN} Trojan-Go 已安装并设置开机自启 ${PLAIN}"
     pause_and_return
 }
 
 manage_trojan_go() {
     while true; do
         clear
-        echo -e "${BLUE}${BOLD}========== Trojan-Go 管理菜单 ==========${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 启动 Trojan-Go"
-        echo -e "${GREEN}2.${PLAIN} 停止 Trojan-Go"
-        echo -e "${GREEN}3.${PLAIN} 重启 Trojan-Go"
-        echo -e "${GREEN}4.${PLAIN} 查看 Trojan-Go 配置"
-        echo -e "${GREEN}5.${PLAIN} 修改 Trojan-Go 配置"
-        echo -e "${GREEN}6.${PLAIN} 删除 Trojan-Go"
-        echo -e "${GREEN}0.${PLAIN} 返回主菜单"
-        read -p "$(echo -e "${YELLOW}请选择操作 [0-6]: ${PLAIN}")" choice
+        echo -e "${BLUE}${BOLD}✦ Trojan-Go Menu ✦${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN} 启动 Trojan"
+        echo -e "${GREEN}2.${PLAIN} 停止 Trojan"
+        echo -e "${GREEN}3.${PLAIN} 重启 Trojan"
+        echo -e "${GREEN}4.${PLAIN} 查看 Trojan 配置"
+        echo -e "${GREEN}5.${PLAIN} 修改 Trojan 配置"
+        echo -e "${GREEN}6.${PLAIN} 删除 Trojan"
+        echo -e "${GREEN}0.${PLAIN} 返回 El Psy Kongroo"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ [0-6]: ${PLAIN}")" choice
         case "$choice" in
             1) start_trojan_go ;;
             2) stop_trojan_go ;;
@@ -617,20 +594,20 @@ main_menu() {
     while true; do
         clear
         banner
-        echo -e "${GREEN}1.${PLAIN} Acme证书申请"
+        echo -e "${GREEN}1.${PLAIN} Acme 证书申请"
         echo -e "${GREEN}2.${PLAIN} 安装 Trojan-Go"
         echo -e "${GREEN}3.${PLAIN} 管理 Trojan-Go"
-        echo -e "${GREEN}4.${PLAIN} 卸载 Acme 及证书"
-        echo -e "${GREEN}0.${PLAIN} 离开命运石之门"
-        read -p "$(echo -e "${YELLOW}请输入选项 [0-4]: ${PLAIN}")" choice
+        echo -e "${GREEN}4.${PLAIN} 卸载 Acme及证书"
+        echo -e "${GREEN}0.${PLAIN} 离开 El Psy Kongroo"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ [0-4]: ${PLAIN}")" choice
 
         case "$choice" in
             1) issue_acme_cert ;;
             2) install_trojan_go ;;
             3) manage_trojan_go ;;
             4) uninstall_acme ;;
-            0) clear; echo -e "${CYAN}命运已中断，回归现实世界……${PLAIN}" && exit 0 ;;
-            *) echo -e "${RED}错误的命运选择。请重新启动世界线。${PLAIN}"; pause_and_return ;;
+            0) clear; echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 1; clear; exit 0 ;;
+            *) echo -e "${RED}错误的命运抉择,请重新寻觅世界线。${PLAIN}"; pause_and_return ;;
         esac
     done
 }
