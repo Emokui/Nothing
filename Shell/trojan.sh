@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# 脚本下载的执行文件来自此仓库,是原仓库的一个分支,升级了utls,版本为v1.2.0 
+# https://github.com/gfw-report/trojan-go
+
 # ======== 1. 全局变量和设置 ========
 RED="\033[31m\033[01m"
 GREEN="\033[32m\033[01m"
