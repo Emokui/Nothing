@@ -42,9 +42,9 @@ pause_and_return() {
 
 banner() {
     echo -e "${CYAN}${BOLD}"
-    echo "======================================"
-    echo "===  Steins Gate - Trojan Go v1.5  ==="
-    echo "======================================"
+    echo "========================="
+    echo "===  Trojan-Go v.1.5  ==="
+    echo "========================="
     echo -e "${CYAN}请选择命运石之门：${PLAIN}"
 }
 
