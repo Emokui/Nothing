@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# 彩色定义
 RED="\033[31m\033[01m"
 GREEN="\033[32m\033[01m"
 PURPLE='\033[35m\033[01m'
@@ -46,8 +45,9 @@ banner() {
 }
 
 show_trojan_config() {
+    clear
     CONFIG="/root/trojan/config.json"
-    echo -e "${YELLOW}${BOLD}当前 Trojan-Go 配置如下:${PLAIN}"
+    echo -e "${YELLOW}${BOLD}当前 Trojan 配置如下:${PLAIN}"
     if [ -f "$CONFIG" ]; then
         echo -e "${CYAN}------------------------------------------------"
         cat "$CONFIG"
@@ -91,18 +91,14 @@ uninstall_acme() {
 }
 
 modify_trojan_config() {
+    clear
     CONFIG="/root/trojan/config.json"
     if [ ! -f "$CONFIG" ]; then
         echo -e "${RED}未检测到配置文件: $CONFIG${PLAIN}"
         pause_and_return
         return
     fi
-    echo -e "${YELLOW}${BOLD}当前 Trojan-Go 配置如下:${PLAIN}"
-    echo -e "${CYAN}------------------------------------------------"
-    cat "$CONFIG"
-    echo -e "------------------------------------------------${PLAIN}"
     echo -e "${YELLOW}请交互输入新配置项（直接回车为保留原值）：${PLAIN}"
-
     old_local_port=$(jq -r '.local_port' "$CONFIG" 2>/dev/null)
     old_remote_addr=$(jq -r '.remote_addr' "$CONFIG" 2>/dev/null)
     old_remote_port=$(jq -r '.remote_port' "$CONFIG" 2>/dev/null)
@@ -130,28 +126,59 @@ modify_trojan_config() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认: $old_remote_port]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-$old_remote_port}
 
-    read -p "$(echo -e "${CYAN}请输入密码 [默认: $old_password]: ${PLAIN}")" password
-    if [ -z "$password" ]; then
+    read -p "$(echo -e "${CYAN}请输入新密码 [回车保持不变,输入r/R随机生成]: ${PLAIN}")" password
+    if [[ "$password" == "r" || "$password" == "R" ]]; then
+        password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
+        echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
+    elif [ -z "$password" ]; then
         password=$old_password
-        if [ -z "$password" ]; then
-            password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
-            echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
-        fi
+        echo -e "${YELLOW}密码保持不变${PLAIN}"
+    else
+        echo -e "${GREEN}密码已修改${PLAIN}"
     fi
 
     cert_dir="/root/cert"
-    certs=($(ls $cert_dir/*.crt 2>/dev/null))
+    certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
+
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${YELLOW}检测到以下域名证书，请选择：${PLAIN}"
-        select cert_path in "${certs[@]}"; do
-            if [[ -n "$cert_path" ]]; then
-                domain_base=$(basename "$cert_path" .crt)
-                key_path="$cert_dir/${domain_base}.key"
-                if [[ -f "$key_path" ]]; then
-                    break
+        echo -e "${GREEN}检测到以下域名证书，请选择：${PLAIN}"
+        echo -e "${GREEN}0.${PLAIN} 手动输入证书路径"
+        for i in "${!certs[@]}"; do
+            num=$((i+1))
+            echo -e "${YELLOW}${num}.${PLAIN} ${certs[$i]}"
+        done
+
+        while true; do
+            echo -ne "${GREEN}请输入序号: ${PLAIN}"
+            read choice
+            if [[ "$choice" =~ ^[0-9]+$ ]]; then
+                if [[ "$choice" == "0" ]]; then
+                    read -p "请输入完整证书路径: " cert_path
+                    if [[ -f "$cert_path" ]]; then
+                        domain_base=$(basename "$cert_path" .crt)
+                        key_path="$cert_dir/${domain_base}.key"
+                        if [[ -f "$key_path" ]]; then
+                            break
+                        else
+                           echo -e "${RED}未找到对应私钥：$key_path,请重新输入${PLAIN}"
+                        fi
+                    else
+                        echo -e "${RED}证书文件不存在,请重新输入${PLAIN}"
+                    fi
+                elif (( choice >= 1 && choice <= ${#certs[@]} )); then
+                    cert_path="${certs[$((choice-1))]}"
+                    domain_base=$(basename "$cert_path" .crt)
+                    key_path="$cert_dir/${domain_base}.key"
+                    if [[ -f "$key_path" ]]; then
+                        break
+                    else
+                        echo -e "${RED}未找到对应私钥：$key_path,请重新选择${PLAIN}"
+                    fi
                 else
-                    echo -e "${RED}未找到对应私钥：$key_path，请重新选择。${PLAIN}"
+                    echo -e "${RED}输入无效,请重新输入${PLAIN}"
                 fi
+            else
+                echo -e "${RED}输入无效,请重新输入${PLAIN}"
             fi
         done
     else
@@ -259,16 +286,15 @@ modify_trojan_config() {
 }
 EOF
 
+    clear
     echo -e "${GREEN}新配置已保存，将重启 Trojan-Go 服务...${PLAIN}"
-    echo -e "${CYAN}------------------------------------------------"
-    cat "$CONFIG"
-    echo -e "------------------------------------------------${PLAIN}"
     systemctl restart trojan-go
     systemctl status trojan-go --no-pager
     pause_and_return
 }
 
 remove_trojan_go() {
+    clear
     echo -e "${RED}${BOLD}准备彻底删除 Trojan-Go 及相关配置……${PLAIN}"
     systemctl stop trojan-go 2>/dev/null
     systemctl disable trojan-go 2>/dev/null
@@ -298,6 +324,7 @@ remove_trojan_go() {
 }
 
 start_trojan_go() {
+    clear
     echo -e "${GREEN}${BOLD}正在启动 Trojan-Go……${PLAIN}"
     systemctl start trojan-go
     systemctl status trojan-go --no-pager
@@ -307,6 +334,7 @@ start_trojan_go() {
 }
 
 stop_trojan_go() {
+    clear
     echo -e "${YELLOW}${BOLD}正在停止 Trojan-Go……${PLAIN}"
     systemctl stop trojan-go
     systemctl status trojan-go --no-pager
@@ -316,6 +344,7 @@ stop_trojan_go() {
 }
 
 restart_trojan_go() {
+    clear
     echo -e "${GREEN}${BOLD}正在重启 Trojan-Go……${PLAIN}"
     systemctl restart trojan-go
     systemctl status trojan-go --no-pager
@@ -325,6 +354,7 @@ restart_trojan_go() {
 }
 
 issue_acme_cert() {
+    clear
     CERT_DIR="/root/cert"
     ACME_SH=~/.acme.sh/acme.sh
 
@@ -365,7 +395,7 @@ issue_acme_cert() {
     ipv4=$(curl -s4m8 ip.sb -k | sed -n 1p)
     ipv6=$(curl -s6m8 ip.sb -k | sed -n 1p)
 
-    echo -e "${YELLOW}请输入需要申请证书的域名，域名需解析到本机IP！${PLAIN}"
+    echo -e "${YELLOW}请输入需要申请证书的域名(直接回车退出申请)${PLAIN}"
     read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
     [[ -z $domain ]] && echo -e "${RED}未输入域名，操作中止。${PLAIN}" && pause_and_return && return
 
@@ -441,18 +471,47 @@ install_trojan_go() {
     fi
 
     cert_dir="/root/cert"
-    certs=($(ls $cert_dir/*.crt 2>/dev/null))
+    certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
+
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${YELLOW}检测到以下域名证书,请选择：${PLAIN}"
-        select cert_path in "${certs[@]}"; do
-            if [[ -n "$cert_path" ]]; then
-                domain_base=$(basename "$cert_path" .crt)
-                key_path="$cert_dir/${domain_base}.key"
-                if [[ -f "$key_path" ]]; then
-                    break
+        echo -e "${GREEN}检测到以下域名证书，请选择：${PLAIN}"
+        echo -e "${GREEN}0.${PLAIN} 手动输入证书路径"
+        for i in "${!certs[@]}"; do
+            num=$((i+1))
+            echo -e "${YELLOW}${num}.${PLAIN} ${certs[$i]}"
+        done
+
+        while true; do
+            echo -ne "${GREEN}请输入序号: ${PLAIN}"
+            read choice
+            if [[ "$choice" =~ ^[0-9]+$ ]]; then
+                if [[ "$choice" == "0" ]]; then
+                    read -p "请输入完整证书路径: " cert_path
+                    if [[ -f "$cert_path" ]]; then
+                        domain_base=$(basename "$cert_path" .crt)
+                        key_path="$cert_dir/${domain_base}.key"
+                        if [[ -f "$key_path" ]]; then
+                            break
+                        else
+                           echo -e "${RED}未找到对应私钥：$key_path,请重新输入${PLAIN}"
+                        fi
+                    else
+                        echo -e "${RED}证书文件不存在,请重新输入${PLAIN}"
+                    fi
+                elif (( choice >= 1 && choice <= ${#certs[@]} )); then
+                    cert_path="${certs[$((choice-1))]}"
+                    domain_base=$(basename "$cert_path" .crt)
+                    key_path="$cert_dir/${domain_base}.key"
+                    if [[ -f "$key_path" ]]; then
+                        break
+                    else
+                        echo -e "${RED}未找到对应私钥：$key_path,请重新选择${PLAIN}"
+                    fi
                 else
-                    echo -e "${RED}未找到对应私钥：$key_path，请重新选择 ${PLAIN}"
+                    echo -e "${RED}输入无效,请重新输入${PLAIN}"
                 fi
+            else
+                echo -e "${RED}输入无效,请重新输入${PLAIN}"
             fi
         done
     else
