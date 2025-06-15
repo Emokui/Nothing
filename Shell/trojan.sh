@@ -622,7 +622,6 @@ main_menu() {
         echo -e "${GREEN}3.${PLAIN} 管理 Trojan-Go"
         echo -e "${GREEN}4.${PLAIN} 卸载 Acme 及证书"
         echo -e "${GREEN}0.${PLAIN} 离开命运石之门"
-        echo ""
         read -p "$(echo -e "${YELLOW}请输入选项 [0-4]: ${PLAIN}")" choice
 
         case "$choice" in
