@@ -94,6 +94,8 @@ install_trojan_go() {
             rm -rf trojan-go
         fi
         chmod +x trojan-go
+        
+        find . -maxdepth 1 ! -name 'trojan-go' ! -name '.' -exec rm -rf {} +
         echo -e "${GREEN}trojan-go 已下载。${PLAIN}"
     fi
 
@@ -272,6 +274,26 @@ EOF
     systemctl daemon-reload
     systemctl enable --now trojan-go
     echo -e "${GREEN} Trojan-Go 已安装并设置开机自启 ${PLAIN}"
+
+    password="$password"
+    local_port="$local_port"
+    sni="$domain"
+    ws_enabled="$ws_enabled"
+    ws_path="$ws_path"
+    ws_host="$ws_host"
+    node_ip=$(curl -s4m6 ip.sb)
+    if [[ -z "$node_ip" ]]; then
+        node_ip=$(hostname -I | awk '{print $1}')
+    fi
+    ws_path_enc=$(echo -n "$ws_path" | sed 's/\//%2F/g')
+    if [[ "$ws_enabled" == "true" ]]; then
+        node_link="trojan://$password@$node_ip:$local_port?sni=$sni&type=ws&path=$ws_path_enc&host=$ws_host#Trojan"
+    else
+        node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
+    fi
+    echo -e "${CYAN}您的 Trojan 节点链接：${PLAIN}"
+    echo -e "${GREEN}$node_link${PLAIN}"
+
     pause_and_return
 }
 
@@ -496,6 +518,29 @@ show_trojan_config() {
         echo -e "${CYAN}------------------------------------------------"
         cat "$CONFIG"
         echo -e "------------------------------------------------${PLAIN}"
+
+        password=$(jq -r '.password[0]' "$CONFIG")
+        local_port=$(jq -r '.local_port' "$CONFIG")
+        sni=$(jq -r '.ssl.sni' "$CONFIG")
+        ws_enabled=$(jq -r '.websocket.enabled' "$CONFIG")
+        ws_path=$(jq -r '.websocket.path' "$CONFIG")
+        ws_host=$(jq -r '.websocket.host' "$CONFIG")
+
+        node_ip=$(curl -s4m6 ip.sb)
+        if [[ -z "$node_ip" ]]; then
+            node_ip=$(hostname -I | awk '{print $1}')
+        fi
+
+        ws_path_enc=$(echo -n "$ws_path" | sed 's/\//%2F/g')
+
+        if [[ "$ws_enabled" == "true" ]]; then
+            node_link="trojan://$password@$node_ip:$local_port?sni=$sni&type=ws&path=$ws_path_enc&host=$ws_host#Trojan"
+        else
+            node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
+        fi
+        echo -e "${CYAN}您的 Trojan 节点链接：${PLAIN}"
+        echo -e "${GREEN}$node_link${PLAIN}"
+        # ---------------------------------
     else
         echo -e "${RED}未检测到配置文件: $CONFIG${PLAIN}"
     fi
