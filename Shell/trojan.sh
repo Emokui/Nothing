@@ -87,15 +87,9 @@ install_trojan_go() {
         fi
 
         wget -O trojan-go.zip "$asset_url"
-        unzip -o trojan-go.zip
-        rm trojan-go.zip
-        if [ -f trojan-go/trojan-go ]; then
-            mv trojan-go/trojan-go ./trojan-go
-            rm -rf trojan-go
-        fi
+        unzip -j trojan-go.zip 'trojan-go/trojan-go' -d . 2>/dev/null || unzip -j trojan-go.zip 'trojan-go' -d .
         chmod +x trojan-go
-        
-        find . -maxdepth 1 ! -name 'trojan-go' ! -name '.' -exec rm -rf {} +
+        rm -f trojan-go.zip
         echo -e "${GREEN}trojan-go 已下载。${PLAIN}"
     fi
 
