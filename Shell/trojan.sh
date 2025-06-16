@@ -39,7 +39,6 @@ check_dependencies() {
 }
 
 pause_and_return() {
-    echo ""
     read -p "$(echo -e "${BLUE}请按回车键返回上一层...${PLAIN}")" temp
     clear
 }
@@ -509,7 +508,6 @@ modify_trojan_config() {
 show_trojan_config() {
     clear
     CONFIG="/root/trojan/config.json"
-    echo -e "${YELLOW}${BOLD}当前 Trojan 配置如下:${PLAIN}"
     if [ -f "$CONFIG" ]; then
         echo -e "${CYAN}------------------------------------------------"
         cat "$CONFIG"
@@ -585,11 +583,11 @@ start_trojan_go() {
 
 stop_trojan_go() {
     clear
-    echo -e "${YELLOW}${BOLD}正在停止 Trojan-Go……${PLAIN}"
+    echo -e "${RED}${BOLD}正在停止 Trojan-Go……${PLAIN}"
     systemctl stop trojan-go
     systemctl status trojan-go --no-pager
     echo ""
-    echo -e "${YELLOW}Trojan-Go 已经停止运行！${PLAIN}"
+    echo -e "${RED}Trojan-Go 已经停止运行！${PLAIN}"
     pause_and_return
 }
 
@@ -660,6 +658,7 @@ issue_acme_cert() {
     if [[ -z $(type -P lsof) ]]; then
         apt update -y && apt install -y lsof
     fi
+    clear
     echo -e "${YELLOW}检测 80 端口占用...${PLAIN}"
     if [[ $(lsof -i:"80" | grep -i -c "listen") -ne 0 ]]; then
         echo -e "${RED}80 端口被占用，以下是占用程序：${PLAIN}"
@@ -707,6 +706,7 @@ issue_acme_cert() {
     $ACME_SH --install-cert -d "${domain}" --key-file "${CERT_DIR}/${domain}.key" --fullchain-file "${CERT_DIR}/${domain}.crt" --ecc
 
     if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
+        clear
         echo -e "${GREEN}证书申请成功！${PLAIN}"
         echo -e "${YELLOW}证书: ${CERT_DIR}/${domain}.crt${PLAIN}"
         echo -e "${YELLOW}私钥: ${CERT_DIR}/${domain}.key${PLAIN}"
@@ -718,6 +718,7 @@ issue_acme_cert() {
 }
 
 uninstall_acme() {
+    clear
     echo -e "${RED}${BOLD}正在卸载 acme.sh 及相关证书...${PLAIN}"
 
     if [ -d ~/.acme.sh ]; then
