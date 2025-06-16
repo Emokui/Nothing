@@ -606,13 +606,13 @@ EOF
             while true; do
                 clear
                 echo -e "${BLUE}✦ Hysteria Menu ✦${PLAIN}"
-                echo -e "${GREEN}  1.${PLAIN}查看 Hysteria 状态"
-                echo -e "${GREEN}  2.${PLAIN}查看 Hysteria 配置"
-                echo -e "${GREEN}  3.${PLAIN}停止 Hysteria 服务"
-                echo -e "${GREEN}  4.${PLAIN}重启 Hysteria 服务"
-                echo -e "${GREEN}  5.${PLAIN}修改 Hysteria 配置"
-                echo -e "${GREEN}  6.${PLAIN}更新 Hysteria 内核"
-                echo -e "${GREEN}  7.${PLAIN}删除 Hysteria 服务"
+                echo -e "${GREEN}  1.${PLAIN}查看 HY状态"
+                echo -e "${GREEN}  2.${PLAIN}查看 HY配置"
+                echo -e "${GREEN}  3.${PLAIN}停止 HY服务"
+                echo -e "${GREEN}  4.${PLAIN}重启 HY服务"
+                echo -e "${GREEN}  5.${PLAIN}修改 HY配置"
+                echo -e "${GREEN}  6.${PLAIN}更新 HY内核"
+                echo -e "${GREEN}  7.${PLAIN}删除 HY服务"
                 echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
                 read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
 
