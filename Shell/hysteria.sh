@@ -15,6 +15,14 @@ pause_and_return() {
     clear
 }
 
+get_local_ip() {
+    ip=$(curl -s4 ip.sb 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+    if [[ -z "$ip" ]]; then
+        ip=$(hostname -I | awk '{print $1}')
+    fi
+    echo "$ip"
+}
+
 get_arch() {
     local arch
     arch=$(uname -m)
@@ -254,9 +262,26 @@ show_hysteria_config() {
     HY2_DIR="/root/hysteria"
     CONFIG_PATH="${HY2_DIR}/config.yaml"
     if [ -f "$CONFIG_PATH" ]; then
-        echo -e "${CYAN}------------------------------------------------"
+        echo -e "${CYAN}---------------------- 配置内容 ----------------------${PLAIN}"
         cat "$CONFIG_PATH"
-        echo -e "------------------------------------------------${PLAIN}"
+        echo -e "${CYAN}-----------------------------------------------------${PLAIN}"
+        listen_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/://')
+        auth_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | awk '{print $2}')
+        cert_path=$(grep -E '^\s*cert:' "$CONFIG_PATH" | awk '{print $2}')
+        masquerade_domain=$(grep -E '^\s*url:' "$CONFIG_PATH" | awk -F[/:] '{print $4}')
+        if [[ "$cert_path" =~ /root/cert/(.*)\.crt ]]; then
+            sni_domain="${BASH_REMATCH[1]}"
+        elif [[ "$cert_path" == "/etc/cert/server.crt" ]]; then
+            subject=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null)
+            sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
+            [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
+        else
+            sni_domain="$masquerade_domain"
+        fi
+        local_ip=$(get_local_ip)
+        listen_port=${listen_port:-443}
+        node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
+        echo -e "\n${YELLOW}Hysteria 节点链接：${PLAIN}\n${CYAN}${node_link}${PLAIN}"
     else
         echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
     fi
@@ -406,7 +431,7 @@ port_jump_menu() {
 # ======== 6. 主菜单循环 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Hysteria Ver.1.3 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Hysteria Ver.1.4 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}配置 证书"
     echo -e "${GREEN}  2.${PLAIN}安装 Hysteria"
     echo -e "${GREEN}  3.${PLAIN}管理 Hysteria"
@@ -546,6 +571,21 @@ EOF
             echo -e "${CYAN}Hysteria 服务启动状态: ${PLAIN}"
             sudo systemctl status --no-pager hysteria.service
             echo -e "${GREEN}已成功设置 Hysteria 开机自启并启动服务!${PLAIN}"
+            
+            listen_port=${listen_port:-443}
+            local_ip=$(get_local_ip)
+            if [[ "$cert_path" =~ /root/cert/(.*)\.crt ]]; then
+                sni_domain="${BASH_REMATCH[1]}"
+            elif [[ "$cert_path" == "/etc/cert/server.crt" ]]; then
+                subject=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null)
+                sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
+                [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
+            else
+                sni_domain="$masquerade_domain"
+            fi
+            node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
+            echo -e "\n${YELLOW}Hysteria 节点链接：${PLAIN}\n${CYAN}${node_link}${PLAIN}"
+
             pause_and_return
             ;;
         3)
