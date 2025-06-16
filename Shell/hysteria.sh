@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# ======== 1. 全局变量 ========
 RED="\033[31m\033[01m"
 GREEN="\033[32m\033[01m"
 PURPLE='\033[35m\033[01m'
@@ -8,6 +9,7 @@ BLUE="\033[1;34m"
 CYAN="\033[1;36m"
 PLAIN='\033[0m'
 
+# ======== 2. 通用函数 ========
 pause_and_return() {
     read -p "$(echo -e "${BLUE}按回车返回上一层...${PLAIN}")" temp
     clear
@@ -25,6 +27,10 @@ get_arch() {
     esac
 }
 
+random_pass() {
+    head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 10
+}
+
 get_latest_download_url() {
     local arch="$1"
     local api_url="https://api.github.com/repos/apernet/hysteria/releases/latest"
@@ -39,6 +45,7 @@ get_latest_download_url() {
     curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4
 }
 
+# ======== 3. 证书相关函数 ========
 generate_self_signed_cert() {
     DEFAULT_DOMAIN="bing.com"
     DEFAULT_CERT_PATH="/etc/cert"
@@ -157,20 +164,6 @@ issue_acme_cert() {
     pause_and_return
 }
 
-show_hysteria_config() {
-    clear
-    HY2_DIR="/root/hysteria"
-    CONFIG_PATH="${HY2_DIR}/config.yaml"
-    if [ -f "$CONFIG_PATH" ]; then
-        echo -e "${CYAN}------------------------------------------------"
-        cat "$CONFIG_PATH"
-        echo -e "------------------------------------------------${PLAIN}"
-    else
-        echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
-    fi
-    pause_and_return
-}
-
 cert_menu() {
     while true; do
         clear
@@ -190,16 +183,12 @@ cert_menu() {
     done
 }
 
-random_pass() {
-    head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 10
-}
-
 select_cert_for_hysteria() {
-    echo -e "${PURPLE}请选择证书: ${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN} 自签证书"
-    echo -e "${GREEN}2.${PLAIN} 域名证书"
-    echo -e "${GREEN}3.${PLAIN} 手动输入证书路径"
-    echo -e "${GREEN}0.${PLAIN} 退出安装"
+    echo -e "${PURPLE}✦ 请选择证书 ✦ : ${PLAIN}"
+    echo -e "${CYAN}  1.自签证书${PLAIN}"
+    echo -e "${CYAN}  2.域名证书${PLAIN}"
+    echo -e "${CYAN}  3.输入路径${PLAIN}"
+    echo -e "${CYAN}  0.退出/默认${PLAIN}"
     read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
     if [[ "$cert_option" == "1" ]]; then
@@ -214,26 +203,40 @@ select_cert_for_hysteria() {
         fi
     elif [[ "$cert_option" == "2" ]]; then
         if ! compgen -G "/root/cert/*.crt" > /dev/null; then
-            echo -e "${YELLOW}未检测到 /root/cert 下任何证书,请先申请域名证书!${PLAIN}"
+            echo -e "${PURPLE}未检测到 /root/cert 下任何证书,请先申请域名证书!${PLAIN}"
             pause_and_return
             return 1
         fi
-        echo -e "${YELLOW}检测到以下域名证书: ${PLAIN}"
-        select crtfile in /root/cert/*.crt; do
-            [[ -z "$crtfile" ]] && echo -e "${RED}请输入有效选项${PLAIN}" && continue
-            domain_base=$(basename "$crtfile" .crt)
-            keyfile="/root/cert/${domain_base}.key"
-            if [[ -f "$keyfile" ]]; then
-                cert_path="$crtfile"
-                key_path="$keyfile"
-                break
+        echo -e "${PURPLE}检测到以下域名证书: ${PLAIN}"
+
+        cert_files=($(ls /root/cert/*.crt 2>/dev/null | sort))
+        cert_count=${#cert_files[@]}
+
+        for ((i=0; i<cert_count; i++)); do
+            idx=$((i+1))
+            echo -e "${GREEN}${idx}.${PLAIN} ${GREEN}${cert_files[$i]}${PLAIN}"
+        done
+
+        while true; do
+            read -p "$(echo -e "${PURPLE}请输入证书编号(1-${cert_count}): ${PLAIN}")" crt_idx
+            if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
+                crtfile="${cert_files[$((crt_idx-1))]}"
+                domain_base=$(basename "$crtfile" .crt)
+                keyfile="/root/cert/${domain_base}.key"
+                if [[ -f "$keyfile" ]]; then
+                    cert_path="$crtfile"
+                    key_path="$keyfile"
+                    break
+                else
+                    echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
+                fi
             else
-                echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
+                echo -e "${RED}请输入有效编号${PLAIN}"
             fi
         done
     elif [[ "$cert_option" == "3" ]]; then
-        read -p "$(echo -e "${YELLOW}请输入证书路径: ${PLAIN}")" cert_path
-        read -p "$(echo -e "${YELLOW}请输入私钥路径: ${PLAIN}")" key_path
+        read -p "$(echo -e "${PURPLE}请输入证书路径: ${PLAIN}")" cert_path
+        read -p "$(echo -e "${PURPLE}请输入私钥路径: ${PLAIN}")" key_path
         if [[ ! -f "$cert_path" || ! -f "$key_path" ]]; then
             echo -e "${RED}自定义证书或私钥路径无效!${PLAIN}"
             pause_and_return
@@ -245,6 +248,22 @@ select_cert_for_hysteria() {
     return 0
 }
 
+# ======== 4. Hysteria 相关函数 ========
+show_hysteria_config() {
+    clear
+    HY2_DIR="/root/hysteria"
+    CONFIG_PATH="${HY2_DIR}/config.yaml"
+    if [ -f "$CONFIG_PATH" ]; then
+        echo -e "${CYAN}------------------------------------------------"
+        cat "$CONFIG_PATH"
+        echo -e "------------------------------------------------${PLAIN}"
+    else
+        echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
+    fi
+    pause_and_return
+}
+
+# ======== 5. 端口跳跃相关函数 ========
 port_jump_set() {
     clear
     echo -e "${CYAN}检查 iptables 是否已安装...${PLAIN}"
@@ -384,9 +403,10 @@ port_jump_menu() {
     done
 }
 
+# ======== 6. 主菜单循环 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Hysteria Ver.1.2 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Hysteria Ver.1.3 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}配置 证书"
     echo -e "${GREEN}  2.${PLAIN}安装 Hysteria"
     echo -e "${GREEN}  3.${PLAIN}管理 Hysteria"
@@ -397,12 +417,13 @@ while true; do
     case "$option" in
         0)
             echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
-            exit 0
+            sleep 0.6; clear; exit 0
             ;;
         1)
             cert_menu
             ;;
         2)
+            clear
             HY2_DIR="/root/hysteria"
             EXEC_PATH="${HY2_DIR}/hysteria"
             CONFIG_PATH="${HY2_DIR}/config.yaml"
@@ -443,16 +464,16 @@ while true; do
             done
             [[ $CERT_RTN -ne 0 ]] && continue
 
-            read -p "$(echo -e "${YELLOW}请输入监听端口(默认:443): ${PLAIN}")" listen_port
+            read -p "$(echo -e "${PURPLE}请输入监听端口(默认:443): ${PLAIN}")" listen_port
             listen_port=${listen_port:-443}
 
-            read -p "$(echo -e "${YELLOW}请输入认证密码(回车随机生成): ${PLAIN}")" auth_password
+            read -p "$(echo -e "${PURPLE}请输入认证密码(回车随机生成): ${PLAIN}")" auth_password
             if [ -z "$auth_password" ]; then
                 auth_password=$(random_pass)
                 echo -e "${GREEN}已自动生成认证密码: $auth_password${PLAIN}"
             fi
 
-            read -p "$(echo -e "${YELLOW}请输入伪装URL的域名(默认:www.bing.com): ${PLAIN}")" masquerade_domain
+            read -p "$(echo -e "${PURPLE}请输入伪装URL的域名(默认:www.bing.com): ${PLAIN}")" masquerade_domain
             masquerade_domain=${masquerade_domain:-www.bing.com}
             masquerade_url="https://${masquerade_domain}"
 
@@ -474,17 +495,17 @@ masquerade:
     rewriteHost: true
 EOF
 
-            echo -e "${YELLOW}是否添加 SOCKS5 出站${PLAIN}"
-            read -p "$(echo -e "${YELLOW}添加y,不添加n(默认:n) [y/n]: ${PLAIN}")" enable_outbounds
+            echo -e "${PURPLE}是否添加 SOCKS5 出站${PLAIN}"
+            read -p "$(echo -e "${PURPLE}添加y,不添加n(默认:n) [y/n]: ${PLAIN}")" enable_outbounds
             enable_outbounds=${enable_outbounds:-n}
 
             if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                read -p "$(echo -e "${YELLOW}请输入socks5地址 (默认:127.0.0.1): ${PLAIN}")" socks5_addr
+                read -p "$(echo -e "${PURPLE}请输入socks5地址 (默认:127.0.0.1): ${PLAIN}")" socks5_addr
                 socks5_addr=${socks5_addr:-127.0.0.1}
-                read -p "$(echo -e "${YELLOW}请输入socks5端口 (默认:18443): ${PLAIN}")" socks5_port
+                read -p "$(echo -e "${PURPLE}请输入socks5端口 (默认:18443): ${PLAIN}")" socks5_port
                 socks5_port=${socks5_port:-18443}
-                read -p "$(echo -e "${YELLOW}请输入socks5 用户名（可留空）: ${PLAIN}")" socks5_username
-                read -p "$(echo -e "${YELLOW}请输入socks5 密码（可留空）: ${PLAIN}")" socks5_password
+                read -p "$(echo -e "${PURPLE}请输入socks5 用户名（可留空）: ${PLAIN}")" socks5_username
+                read -p "$(echo -e "${PURPLE}请输入socks5 密码（可留空）: ${PLAIN}")" socks5_password
                 OUTBOUNDS_CONFIG=$(cat <<EOF2
 
 outbounds:
@@ -499,6 +520,7 @@ EOF2
                 echo "$OUTBOUNDS_CONFIG" >> "$HY2_DIR/config.yaml"
             fi
 
+            clear
             echo -e "${CYAN}正在创建 systemd 服务单元文件...${PLAIN}"
 
             cat > /etc/systemd/system/hysteria.service << EOF
@@ -521,7 +543,6 @@ EOF
             sudo systemctl enable hysteria.service
             sudo systemctl start hysteria.service
 
-            clear
             echo -e "${CYAN}Hysteria 服务启动状态: ${PLAIN}"
             sudo systemctl status --no-pager hysteria.service
             echo -e "${GREEN}已成功设置 Hysteria 开机自启并启动服务!${PLAIN}"
@@ -535,6 +556,12 @@ EOF
             SERVICE_FILE="/etc/systemd/system/hysteria.service"
             CERT_DIR="/etc/cert"
             PORT_JUMP_SERVICE="/etc/systemd/system/port-jump.service"
+
+            if [[ ! -f "$EXEC_PATH" || ! -f "$CONFIG_PATH" ]]; then
+                echo -e "${RED}未检测到配置及执行文件，请先安装并配置!${PLAIN}"
+                pause_and_return
+                continue
+            fi
 
             while true; do
                 clear
@@ -581,9 +608,7 @@ EOF
                             pause_and_return
                             continue
                         fi
-                        echo -e "${CYAN}当前 Hysteria 配置内容如下:${PLAIN}"
-                        cat "$CONFIG_PATH"
-                        echo -e "${YELLOW}请输配置参数（回车为保留原值）:${PLAIN}"
+                        echo -e "${PURPLE}请输配置参数（回车为保留原值）:${PLAIN}"
 
                         old_listen=$(grep -E '^listen:' "$CONFIG_PATH" | head -n1 | awk '{print $2}' | sed 's/://')
                         old_cert=$(grep -E '^\s*cert:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
@@ -603,17 +628,22 @@ EOF
                             default_outbounds="n"
                         fi
 
-                        read -p "$(echo -e "${YELLOW}请输入监听端口 (原值: ${old_listen:-443}): ${PLAIN}")" listen_port
+                        read -p "$(echo -e "${PURPLE}请输入监听端口 (原值: ${old_listen:-443}): ${PLAIN}")" listen_port
                         listen_port=${listen_port:-$old_listen}
                         listen_port=${listen_port:-443}
 
-                        read -p "$(echo -e "${YELLOW}请输入证书路径 (原值: ${old_cert}): ${PLAIN}")" cert_path_new
-                        cert_path_new=${cert_path_new:-$old_cert}
+                        echo -e "${PURPLE}请选择新的证书及私钥，或选0直接回车保留原值:${PLAIN}"
+                        select_cert_for_hysteria
+                        SELECT_CERT_STATUS=$?
+                        if [[ $SELECT_CERT_STATUS -eq 0 ]]; then
+                            cert_path_new="$cert_path"
+                            key_path_new="$key_path"
+                        else
+                            cert_path_new="$old_cert"
+                            key_path_new="$old_key"
+                        fi
 
-                        read -p "$(echo -e "${YELLOW}请输入私钥路径 (原值: ${old_key}): ${PLAIN}")" key_path_new
-                        key_path_new=${key_path_new:-$old_key}
-
-                        read -p "$(echo -e "${YELLOW}请输入认证密码 (原值: ${old_password}): ${PLAIN}")" auth_password
+                        read -p "$(echo -e "${PURPLE}请输入认证密码 (原值: ${old_password}): ${PLAIN}")" auth_password
                         if [ -z "$auth_password" ]; then
                             if [ -n "$old_password" ]; then
                                 auth_password="$old_password"
@@ -623,7 +653,7 @@ EOF
                             fi
                         fi
 
-                        read -p "$(echo -e "${YELLOW}请输入伪装URL的域名(原值: ${old_url_domain:-www.bing.com}): ${PLAIN}")" masquerade_domain
+                        read -p "$(echo -e "${PURPLE}请输入伪装URL的域名(原值: ${old_url_domain:-www.bing.com}): ${PLAIN}")" masquerade_domain
                         masquerade_domain=${masquerade_domain:-$old_url_domain}
                         masquerade_domain=${masquerade_domain:-www.bing.com}
                         masquerade_url="https://${masquerade_domain}"
@@ -646,18 +676,18 @@ masquerade:
     rewriteHost: true
 EOF
 
-                        echo -e "${YELLOW}是否添加 SOCKS5 出站配置${PLAIN}"
-                        read -p "$(echo -e "${BLUE}添加y，不添加 n [y/n] (原值:${default_outbounds}): ${PLAIN}")" enable_outbounds
+                        echo -e "${PURPLE}是否添加 SOCKS5 出站配置${PLAIN}"
+                        read -p "$(echo -e "${PURPLE}添加y，不添加 n [y/n] (原值:${default_outbounds}): ${PLAIN}")" enable_outbounds
                         enable_outbounds=${enable_outbounds:-$default_outbounds}
 
                         if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                            read -p "$(echo -e "${YELLOW}请输入socks5地址 (原值:${old_socks5_addr:-127.0.0.1}): ${PLAIN}")" socks5_addr
+                            read -p "$(echo -e "${PURPLE}请输入socks5地址 (原值:${old_socks5_addr:-127.0.0.1}): ${PLAIN}")" socks5_addr
                             socks5_addr=${socks5_addr:-${old_socks5_addr:-127.0.0.1}}
-                            read -p "$(echo -e "${YELLOW}请输入socks5端口 (原值:${old_socks5_port:-18443}): ${PLAIN}")" socks5_port
+                            read -p "$(echo -e "${PURPLE}请输入socks5端口 (原值:${old_socks5_port:-18443}): ${PLAIN}")" socks5_port
                             socks5_port=${socks5_port:-${old_socks5_port:-18443}}
-                            read -p "$(echo -e "${YELLOW}请输入socks5 用户名（可留空，原值:${old_socks5_username}）: ${PLAIN}")" socks5_username
+                            read -p "$(echo -e "${PURPLE}请输入socks5 用户名（可留空，原值:${old_socks5_username}）: ${PLAIN}")" socks5_username
                             socks5_username=${socks5_username:-$old_socks5_username}
-                            read -p "$(echo -e "${YELLOW}请输入socks5 密码（可留空，原值:${old_socks5_password}）: ${PLAIN}")" socks5_password
+                            read -p "$(echo -e "${PURPLE}请输入socks5 密码（可留空，原值:${old_socks5_password}）: ${PLAIN}")" socks5_password
                             socks5_password=${socks5_password:-$old_socks5_password}
                             OUTBOUNDS_CONFIG=$(cat <<EOF2
 
@@ -673,6 +703,7 @@ EOF2
                             echo "$OUTBOUNDS_CONFIG" >> "$CONFIG_PATH"
                         fi
 
+                        clear
                         echo -e "${GREEN}新配置已保存,将重启 Hysteria 服务...${PLAIN}"
                         sudo systemctl restart $SERVICE_NAME
                         sudo systemctl status --no-pager $SERVICE_NAME
@@ -714,7 +745,8 @@ EOF2
                         fi
                         sudo systemctl daemon-reload
                         echo -e "${GREEN}Hysteria 及相关资源已删除${PLAIN}"
-                        pause_and_return
+                        read -p "$(echo -e "${BLUE}按回车返回主菜单...${PLAIN}")"
+                        break
                         ;;
                     0)
                         clear
