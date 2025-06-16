@@ -642,7 +642,7 @@ while true; do
             ;;
         0)
             clear; echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
-            sleep 1; clear; exit 0
+            sleep 0.6; clear; exit 0
             ;;
         *)
             echo -e "${RED}无效选项，请重新选择。${PLAIN}"
