@@ -22,7 +22,7 @@ check_dependencies() {
         fi
     done
     if [[ ${#missing[@]} -gt 0 ]]; then
-        echo -e "${YELLOW}检测到缺少依赖：${missing[*]}，正在自动安装...${PLAIN}"
+        echo -e "${YELLOW}检测到缺少依赖: ${missing[*]},正在自动安装...${PLAIN}"
         apt update -y
         for dep in "${missing[@]}"; do
             case $dep in
@@ -52,19 +52,19 @@ banner() {
 install_trojan_go() {
     check_dependencies
     if [ -f "/root/trojan/trojan-go" ] && [ -f "/root/trojan/config.json" ]; then
-        echo -e "${YELLOW}${BOLD}检测到已安装并存在配置文件，无需重复安装。${PLAIN}"
-        echo -e "${CYAN}如需修改配置，请选择主菜单的【3. 管理 Trojan-Go】${PLAIN}"
+        echo -e "${YELLOW}${BOLD}检测到已安装并存在配置文件,无需重复安装${PLAIN}"
+        echo -e "${CYAN}如需修改配置,请选择主菜单的【3.管理 Trojan-Go】${PLAIN}"
         pause_and_return
         return
     fi
 
-    echo -e "${GREEN}${BOLD}准备安装 Trojan-Go 并设置配置……${PLAIN}"
+    echo -e "${GREEN}${BOLD}准备安装 Trojan-Go 并配置……${PLAIN}"
     mkdir -p /root/trojan && cd /root/trojan
 
     if [ -f ./trojan-go ]; then
-        echo -e "${YELLOW}检测到 trojan-go 已存在，跳过下载。${PLAIN}"
+        echo -e "${YELLOW}检测到 trojan-go 已存在,跳过下载${PLAIN}"
     else
-        echo -e "${YELLOW}正在检测并下载安装适合当前系统的 Trojan-Go ...${PLAIN}"
+        echo -e "${YELLOW}正在检测并下载安装适合当前系统的版本${PLAIN}"
         arch=""
         uname_arch=$(uname -m)
         case "$uname_arch" in
@@ -89,17 +89,17 @@ install_trojan_go() {
         unzip -j trojan-go.zip 'trojan-go/trojan-go' -d . 2>/dev/null || unzip -j trojan-go.zip 'trojan-go' -d .
         chmod +x trojan-go
         rm -f trojan-go.zip
-        echo -e "${GREEN}trojan-go 已下载。${PLAIN}"
+        echo -e "${GREEN}trojan-go 已下载${PLAIN}"
     fi
 
     clear
-    read -p "$(echo -e "${CYAN}请输入节点端口 [默认: 443]: ${PLAIN}")" local_port
+    read -p "$(echo -e "${CYAN}请输入节点端口 [默认:443]: ${PLAIN}")" local_port
     local_port=${local_port:-443}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认: speedtest.tele2.net]: ${PLAIN}")" remote_addr
+    read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认:speedtest.tele2.net]: ${PLAIN}")" remote_addr
     remote_addr=${remote_addr:-speedtest.tele2.net}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认: 80]: ${PLAIN}")" remote_port
+    read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:80]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-80}
 
     read -p "$(echo -e "${CYAN}请输入密码 (回车随机): ${PLAIN}")" password
@@ -112,15 +112,15 @@ install_trojan_go() {
     certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
 
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${GREEN}检测到以下域名证书，请选择：${PLAIN}"
-        echo -e "${GREEN}0.${PLAIN} 手动输入证书路径"
+        echo -e "${CYAN}检测到以下域名证书,请选择: ${PLAIN}"
+        echo -e "${GREEN}0.手动输入证书路径${PLAIN}"
         for i in "${!certs[@]}"; do
             num=$((i+1))
-            echo -e "${YELLOW}${num}.${PLAIN} ${certs[$i]}"
+            echo -e "${GREEN}${num}.${certs[$i]}"
         done
 
         while true; do
-            echo -ne "${GREEN}请输入序号: ${PLAIN}"
+            echo -ne "${CYAN}请输入序号: ${PLAIN}"
             read choice
             if [[ "$choice" =~ ^[0-9]+$ ]]; then
                 if [[ "$choice" == "0" ]]; then
@@ -138,7 +138,7 @@ install_trojan_go() {
                     if [[ -f "$key_path" ]]; then
                         break
                     else
-                        echo -e "${RED}未找到对应私钥：$key_path,请重新选择${PLAIN}"
+                        echo -e "${RED}未找到对应私钥: $key_path,请重新选择${PLAIN}"
                     fi
                 else
                     echo -e "${RED}输入无效,请重新输入${PLAIN}"
@@ -148,7 +148,7 @@ install_trojan_go() {
             fi
         done
     else
-        echo -e "${YELLOW} 未在 $cert_dir 中找到 .crt 文件,请手动输入证书路径 ${PLAIN}"
+        echo -e "${CYAN} 未在 $cert_dir 中找到 .crt 文件,请手动输入证书路径 ${PLAIN}"
         read -p "$(echo -e "${CYAN}请输入证书 cert 路径:${PLAIN}")" cert_path
         read -p "$(echo -e "${CYAN}请输入私钥 key 路径:${PLAIN}")" key_path
     fi
@@ -160,19 +160,19 @@ install_trojan_go() {
     domain="$detected_domain"
 
     if [[ -z "$domain" ]]; then
-        echo -e "${RED}无法从证书中提取域名，请检查证书文件！${PLAIN}"
+        echo -e "${RED}无法从证书中提取域名,请检查证书文件!${PLAIN}"
         pause_and_return
         return
     else
         echo -e "${GREEN}证书域名自动识别为: $domain${PLAIN}"
     fi
 
-    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: y]: ${PLAIN}")" enable_ws
+    read -p "$(echo -e "${CYAN}是否启用 WebSocket(y/n) [默认:y]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
         ws_enabled=true
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: /]: ${PLAIN}")" ws_path
+        read -p "$(echo -e "${CYAN}请输入 ws 路径 [默认:/]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-/}
-        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名）: ${PLAIN}")" ws_host
+        read -p "$(echo -e "${CYAN}请输入 ws Host（默认:证书域名）: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$domain}
     else
         ws_enabled=false
@@ -180,12 +180,12 @@ install_trojan_go() {
         ws_host="$domain"
     fi
 
-    read -p "$(echo -e "${CYAN}是否启用 forward_proxy 转发代理？(y/n) [默认: n]: ${PLAIN}")" enable_fp
+    read -p "$(echo -e "${CYAN}是否启用 socks5 代理转发(y/n) [默认:n]: ${PLAIN}")" enable_fp
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
-        read -p "$(echo -e "${CYAN}请输入代理地址 [默认: 127.0.0.1]: ${PLAIN}")" proxy_addr
+        read -p "$(echo -e "${CYAN}请输入代理地址 [默认:127.0.0.1]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-127.0.0.1}
-        read -p "$(echo -e "${CYAN}请输入代理端口 [默认: 18443]: ${PLAIN}")" proxy_port
+        read -p "$(echo -e "${CYAN}请输入代理端口 [默认:18443]: ${PLAIN}")" proxy_port
         proxy_port=${proxy_port:-18443}
         read -p "$(echo -e "${CYAN}请输入代理用户名（可留空）: ${PLAIN}")" fp_username
         read -p "$(echo -e "${CYAN}请输入代理密码（可留空）: ${PLAIN}")" fp_password
@@ -286,7 +286,7 @@ EOF
     else
         node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
     fi
-    echo -e "${CYAN}您的 Trojan 节点链接：${PLAIN}"
+    echo -e "${CYAN}您的 Trojan 节点链接: ${PLAIN}"
     echo -e "${GREEN}$node_link${PLAIN}"
 
     pause_and_return
@@ -301,7 +301,7 @@ modify_trojan_config() {
         pause_and_return
         return
     fi
-    echo -e "${YELLOW}请交互输入新配置项（直接回车为保留原值）：${PLAIN}"
+    echo -e "${YELLOW}请输设置参数（直接回车为保留原值: ${PLAIN}"
     old_local_port=$(jq -r '.local_port' "$CONFIG" 2>/dev/null)
     old_remote_addr=$(jq -r '.remote_addr' "$CONFIG" 2>/dev/null)
     old_remote_port=$(jq -r '.remote_port' "$CONFIG" 2>/dev/null)
@@ -320,13 +320,13 @@ modify_trojan_config() {
     old_fp_username=$(jq -r '.forward_proxy.username' "$CONFIG" 2>/dev/null)
     old_fp_password=$(jq -r '.forward_proxy.password' "$CONFIG" 2>/dev/null)
 
-    read -p "$(echo -e "${CYAN}请输入节点端口 [默认: $old_local_port]: ${PLAIN}")" local_port
+    read -p "$(echo -e "${CYAN}请输入节点端口 [默认:$old_local_port]: ${PLAIN}")" local_port
     local_port=${local_port:-$old_local_port}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认: $old_remote_addr]: ${PLAIN}")" remote_addr
+    read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认:$old_remote_addr]: ${PLAIN}")" remote_addr
     remote_addr=${remote_addr:-$old_remote_addr}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认: $old_remote_port]: ${PLAIN}")" remote_port
+    read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:$old_remote_port]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-$old_remote_port}
 
     read -p "$(echo -e "${CYAN}请输入新密码 [回车保持不变,输入r/R随机生成]: ${PLAIN}")" password
@@ -344,15 +344,15 @@ modify_trojan_config() {
     certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
 
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${GREEN}检测到以下域名证书，请选择：${PLAIN}"
-        echo -e "${GREEN}0.${PLAIN} 手动输入证书路径"
+        echo -e "${CYAN}检测到以下域名证书,请选择: ${PLAIN}"
+        echo -e "${GREEN}0.手动输入证书路径 ${PLAIN}"
         for i in "${!certs[@]}"; do
             num=$((i+1))
-            echo -e "${YELLOW}${num}.${PLAIN} ${certs[$i]}"
+            echo -e "${GREEN}${num}.${certs[$i]}"
         done
 
         while true; do
-            echo -ne "${GREEN}请输入序号: ${PLAIN}"
+            echo -ne "${CYAN}请输入序号: ${PLAIN}"
             read choice
             if [[ "$choice" =~ ^[0-9]+$ ]]; then
                 if [[ "$choice" == "0" ]]; then
@@ -370,7 +370,7 @@ modify_trojan_config() {
                     if [[ -f "$key_path" ]]; then
                         break
                     else
-                        echo -e "${RED}未找到对应私钥：$key_path,请重新选择${PLAIN}"
+                        echo -e "${RED}未找到对应私钥: $key_path,请重新选择${PLAIN}"
                     fi
                 else
                     echo -e "${RED}输入无效,请重新输入${PLAIN}"
@@ -380,9 +380,9 @@ modify_trojan_config() {
             fi
         done
     else
-        read -p "$(echo -e "${CYAN}请输入证书 cert 路径 [默认: $old_cert]: ${PLAIN}")" cert_path
+        read -p "$(echo -e "${CYAN}请输入证书 cert 路径 [默认:$old_cert]: ${PLAIN}")" cert_path
         cert_path=${cert_path:-$old_cert}
-        read -p "$(echo -e "${CYAN}请输入私钥 key 路径 [默认: $old_key]: ${PLAIN}")" key_path
+        read -p "$(echo -e "${CYAN}请输入私钥 key 路径 [默认:$old_key]: ${PLAIN}")" key_path
         key_path=${key_path:-$old_key}
     fi
 
@@ -393,14 +393,14 @@ modify_trojan_config() {
     domain="$detected_domain"
 
     if [[ -z "$domain" ]]; then
-        echo -e "${RED}无法从证书中提取域名，请检查证书文件！${PLAIN}"
+        echo -e "${RED}无法从证书中提取域名,请检查证书文件!${PLAIN}"
         pause_and_return
         return
     else
-        echo -e "${GREEN}证书域名自动识别为: $domain（sni自动设置）${PLAIN}"
+        echo -e "${GREEN}证书域名自动识别为: $domain ${PLAIN}"
     fi
 
-    read -p "$(echo -e "${CYAN}是否启用 WebSocket？(y/n) [默认: $( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
+    read -p "$(echo -e "${CYAN}是否启用 WebSocket (y/n) [默认:$( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" ]]; then
         if [[ "$old_ws_enabled" == "true" ]]; then
             ws_enabled=true
@@ -414,9 +414,9 @@ modify_trojan_config() {
     fi
 
     if [[ "$ws_enabled" == true ]]; then
-        read -p "$(echo -e "${CYAN}请输入 WebSocket 路径 [默认: $old_ws_path]: ${PLAIN}")" ws_path
+        read -p "$(echo -e "${CYAN}请输入 ws 路径 [默认:$old_ws_path]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-$old_ws_path}
-        read -p "$(echo -e "${CYAN}请输入 WebSocket Host（默认为证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
+        read -p "$(echo -e "${CYAN}请输入 ws Host（默认:证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$domain}
     else
         ws_path="${old_ws_path:-/}"
@@ -427,19 +427,19 @@ modify_trojan_config() {
     if [[ "$old_fp_enabled" == "true" ]]; then
         default_fp_text="y"
     fi
-    read -p "$(echo -e "${CYAN}是否启用 forward_proxy 转发代理？(y/n) [默认: $default_fp_text]: ${PLAIN}")" enable_fp
+    read -p "$(echo -e "${CYAN}是否启用 socks5 代理转发 (y/n) [默认:$default_fp_text]: ${PLAIN}")" enable_fp
     if [[ -z "$enable_fp" ]]; then
         enable_fp=$default_fp_text
     fi
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
-        read -p "$(echo -e "${CYAN}请输入代理地址 [默认: ${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
+        read -p "$(echo -e "${CYAN}请输入代理地址 [默认:${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-${old_fp_addr:-127.0.0.1}}
-        read -p "$(echo -e "${CYAN}请输入代理端口 [默认: ${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
+        read -p "$(echo -e "${CYAN}请输入代理端口 [默认:${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
         proxy_port=${proxy_port:-${old_fp_port:-18443}}
-        read -p "$(echo -e "${CYAN}请输入代理用户名（可留空） [默认: $old_fp_username]: ${PLAIN}")" fp_username
+        read -p "$(echo -e "${CYAN}请输入代理用户名（可留空） [默认:$old_fp_username]: ${PLAIN}")" fp_username
         fp_username=${fp_username:-$old_fp_username}
-        read -p "$(echo -e "${CYAN}请输入代理密码（可留空） [默认: $old_fp_password]: ${PLAIN}")" fp_password
+        read -p "$(echo -e "${CYAN}请输入代理密码（可留空） [默认:$old_fp_password]: ${PLAIN}")" fp_password
         fp_password=${fp_password:-$old_fp_password}
     else
         fp_enabled=false
@@ -499,7 +499,7 @@ modify_trojan_config() {
         ' > "$CONFIG"
 
     clear
-    echo -e "${GREEN}新配置已保存，将重启 Trojan-Go 服务...${PLAIN}"
+    echo -e "${GREEN}新配置已保存,将重启 Trojan-Go 服务...${PLAIN}"
     systemctl restart trojan-go
     systemctl status trojan-go --no-pager
     pause_and_return
@@ -532,7 +532,7 @@ show_trojan_config() {
         else
             node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
         fi
-        echo -e "${CYAN}您的 Trojan 节点链接：${PLAIN}"
+        echo -e "${CYAN}您的 Trojan 节点链接: ${PLAIN}"
         echo -e "${GREEN}$node_link${PLAIN}"
         # ---------------------------------
     else
@@ -562,12 +562,12 @@ remove_trojan_go() {
     if [[ "$delete_ssl" == "y" || "$delete_ssl" == "Y" ]]; then
         rm -rf /root/cert
         rm -f /root/trojan/config.json
-        echo -e "${RED}SSL 证书与私钥已被删除。${PLAIN}"
+        echo -e "${RED}SSL 证书与私钥已被删除${PLAIN}"
     else
-        echo -e "${YELLOW}SSL 证书与私钥保持不变。${PLAIN}"
+        echo -e "${YELLOW}SSL 证书与私钥保持不变${PLAIN}"
     fi
 
-    echo -e "${GREEN}Trojan-Go 及相关配置已经彻底删除！${PLAIN}"
+    echo -e "${GREEN}Trojan-Go 及相关配置已经彻底删除!${PLAIN}"
     pause_and_return
 }
 
@@ -577,7 +577,7 @@ start_trojan_go() {
     systemctl start trojan-go
     systemctl status trojan-go --no-pager
     echo ""
-    echo -e "${GREEN}若你看见『Active: active (running)』，那么你已经成功打开世界线之门。${PLAIN}"
+    echo -e "${GREEN}若你看见『Active: active (running)』那么你已经成功打开世界线之门${PLAIN}"
     pause_and_return
 }
 
@@ -587,7 +587,7 @@ stop_trojan_go() {
     systemctl stop trojan-go
     systemctl status trojan-go --no-pager
     echo ""
-    echo -e "${RED}Trojan-Go 已经停止运行！${PLAIN}"
+    echo -e "${RED}Trojan-Go 已经停止运行!${PLAIN}"
     pause_and_return
 }
 
@@ -597,7 +597,7 @@ restart_trojan_go() {
     systemctl restart trojan-go
     systemctl status trojan-go --no-pager
     echo ""
-    echo -e "${GREEN}Trojan-Go 已经重启！${PLAIN}"
+    echo -e "${GREEN}Trojan-Go 已经重启!${PLAIN}"
     pause_and_return
 }
 
@@ -626,7 +626,7 @@ manage_trojan_go() {
             5) modify_trojan_config ;;
             6) remove_trojan_go ;;
             0) clear; break ;;
-            *) echo -e "${RED}无效选择，请重新尝试。${PLAIN}" ;;
+            *) echo -e "${RED}无效选择,请重新尝试${PLAIN}" ;;
         esac
     done
 }
@@ -661,9 +661,9 @@ issue_acme_cert() {
     clear
     echo -e "${YELLOW}检测 80 端口占用...${PLAIN}"
     if [[ $(lsof -i:"80" | grep -i -c "listen") -ne 0 ]]; then
-        echo -e "${RED}80 端口被占用，以下是占用程序：${PLAIN}"
+        echo -e "${RED}80 端口被占用,以下是占用程序: ${PLAIN}"
         lsof -i:"80"
-        read -p "$(echo -e "${YELLOW}是否结束占用进程？(y/N): ${PLAIN}")" yn
+        read -p "$(echo -e "${YELLOW}是否结束占用进程 (y/N): ${PLAIN}")" yn
         if [[ $yn =~ [Yy] ]]; then
             lsof -i:"80" | awk '{print $2}' | grep -v "PID" | xargs kill -9
         else
@@ -678,7 +678,7 @@ issue_acme_cert() {
 
     echo -e "${YELLOW}请输入需要申请证书的域名(直接回车退出申请)${PLAIN}"
     read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
-    [[ -z $domain ]] && echo -e "${RED}未输入域名，操作中止。${PLAIN}" && pause_and_return && return
+    [[ -z $domain ]] && echo -e "${RED}未输入域名,操作中止${PLAIN}" && pause_and_return && return
 
     domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
     if [[ -z $domainIP ]]; then
@@ -694,9 +694,9 @@ issue_acme_cert() {
     fi
 
     if [[ "$ip_match" != "true" ]]; then
-        echo -e "${RED}域名解析 IP 与本机 IP 不符。${PLAIN}"
+        echo -e "${RED}域名解析 IP 与本机 IP 不符${PLAIN}"
         echo -e "${YELLOW}域名解析IP: $domainIP, 本机IPv4: $ipv4, IPv6: $ipv6${PLAIN}"
-        echo -e "${YELLOW}请检查域名解析后重试。${PLAIN}"
+        echo -e "${YELLOW}请检查域名解析后重试${PLAIN}"
         pause_and_return
         return
     fi
@@ -707,12 +707,12 @@ issue_acme_cert() {
 
     if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
         clear
-        echo -e "${GREEN}证书申请成功！${PLAIN}"
+        echo -e "${GREEN}证书申请成功!${PLAIN}"
         echo -e "${YELLOW}证书: ${CERT_DIR}/${domain}.crt${PLAIN}"
         echo -e "${YELLOW}私钥: ${CERT_DIR}/${domain}.key${PLAIN}"
         echo -e "${YELLOW}注册邮箱: $auto_email${PLAIN}"
     else
-        echo -e "${RED}证书申请失败，请检查网络和域名解析！${PLAIN}"
+        echo -e "${RED}证书申请失败,请检查网络和域名解析!${PLAIN}"
     fi
     pause_and_return
 }
@@ -724,28 +724,28 @@ uninstall_acme() {
     if [ -d ~/.acme.sh ]; then
         ~/.acme.sh/acme.sh --uninstall
         rm -rf ~/.acme.sh
-        echo -e "${GREEN}acme.sh 已卸载。${PLAIN}"
+        echo -e "${GREEN}acme.sh 已卸载${PLAIN}"
     else
-        echo -e "${YELLOW}未检测到 acme.sh，无需卸载。${PLAIN}"
+        echo -e "${YELLOW}未检测到 acme.sh,无需卸载${PLAIN}"
     fi
 
     CERT_DIR="/root/cert"
     if [ -d "$CERT_DIR" ]; then
         echo -e "${YELLOW}检测到证书目录 $CERT_DIR${PLAIN}"
-        read -p "$(echo -e "${YELLOW}是否删除该目录下所有证书文件？(y/N): ${PLAIN}")" del_cert
+        read -p "$(echo -e "${YELLOW}是否删除该目录下所有证书文件?(y/N): ${PLAIN}")" del_cert
         if [[ "$del_cert" =~ ^[Yy]$ ]]; then
-            read -p "$(echo -e "${RED}确定要删除 $CERT_DIR 下的所有证书文件吗？此操作不可恢复！(yes/NO): ${PLAIN}")" double_check
+            read -p "$(echo -e "${RED}确定要删除 $CERT_DIR 下的所有证书文件吗?此操作不可恢复!(yes/NO): ${PLAIN}")" double_check
             if [[ "$double_check" == "yes" ]]; then
                 rm -rf "$CERT_DIR"
-                echo -e "${GREEN}$CERT_DIR 目录及证书已删除。${PLAIN}"
+                echo -e "${GREEN}$CERT_DIR 目录及证书已删除${PLAIN}"
             else
-                echo -e "${YELLOW}已取消删除证书操作，$CERT_DIR 保持不变。${PLAIN}"
+                echo -e "${YELLOW}已取消删除证书操作,$CERT_DIR 保持不变${PLAIN}"
             fi
         else
-            echo -e "${YELLOW}$CERT_DIR 目录保持不变。${PLAIN}"
+            echo -e "${YELLOW}$CERT_DIR 目录保持不变${PLAIN}"
         fi
     else
-        echo -e "${YELLOW}未检测到 $CERT_DIR，无需删除。${PLAIN}"
+        echo -e "${YELLOW}未检测到 $CERT_DIR,无需删除${PLAIN}"
     fi
     pause_and_return
 }
