@@ -269,15 +269,9 @@ show_hysteria_config() {
         auth_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | awk '{print $2}')
         cert_path=$(grep -E '^\s*cert:' "$CONFIG_PATH" | awk '{print $2}')
         masquerade_domain=$(grep -E '^\s*url:' "$CONFIG_PATH" | awk -F[/:] '{print $4}')
-        if [[ "$cert_path" =~ /root/cert/(.*)\.crt ]]; then
-            sni_domain="${BASH_REMATCH[1]}"
-        elif [[ "$cert_path" == "/etc/cert/server.crt" ]]; then
-            subject=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null)
-            sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
-            [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
-        else
-            sni_domain="$masquerade_domain"
-        fi
+        subject=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null)
+        sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
+        [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
         local_ip=$(get_local_ip)
         listen_port=${listen_port:-443}
         node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
@@ -574,15 +568,9 @@ EOF
             
             listen_port=${listen_port:-443}
             local_ip=$(get_local_ip)
-            if [[ "$cert_path" =~ /root/cert/(.*)\.crt ]]; then
-                sni_domain="${BASH_REMATCH[1]}"
-            elif [[ "$cert_path" == "/etc/cert/server.crt" ]]; then
-                subject=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null)
-                sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
-                [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
-            else
-                sni_domain="$masquerade_domain"
-            fi
+            subject=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null)
+            sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
+            [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
             node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
             echo -e "\n${YELLOW}Hysteria 节点链接：${PLAIN}\n${CYAN}${node_link}${PLAIN}"
 
@@ -606,13 +594,13 @@ EOF
             while true; do
                 clear
                 echo -e "${BLUE}✦ Hysteria Menu ✦${PLAIN}"
-                echo -e "${GREEN}  1.${PLAIN}查看 HY状态"
-                echo -e "${GREEN}  2.${PLAIN}查看 HY配置"
-                echo -e "${GREEN}  3.${PLAIN}停止 HY服务"
-                echo -e "${GREEN}  4.${PLAIN}重启 HY服务"
-                echo -e "${GREEN}  5.${PLAIN}修改 HY配置"
-                echo -e "${GREEN}  6.${PLAIN}更新 HY内核"
-                echo -e "${GREEN}  7.${PLAIN}删除 HY服务"
+                echo -e "${GREEN}  1.${PLAIN}查看 Hysteria 状态"
+                echo -e "${GREEN}  2.${PLAIN}查看 Hysteria 配置"
+                echo -e "${GREEN}  3.${PLAIN}停止 Hysteria 服务"
+                echo -e "${GREEN}  4.${PLAIN}重启 Hysteria 服务"
+                echo -e "${GREEN}  5.${PLAIN}修改 Hysteria 配置"
+                echo -e "${GREEN}  6.${PLAIN}更新 Hysteria 内核"
+                echo -e "${GREEN}  7.${PLAIN}删除 Hysteria 服务"
                 echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
                 read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
 
