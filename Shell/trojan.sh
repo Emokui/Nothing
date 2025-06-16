@@ -576,8 +576,7 @@ start_trojan_go() {
     echo -e "${GREEN}${BOLD}正在启动 Trojan-Go……${PLAIN}"
     systemctl start trojan-go
     systemctl status trojan-go --no-pager
-    echo ""
-    echo -e "${GREEN}若你看见『Active: active (running)』那么你已经成功打开世界线之门${PLAIN}"
+    echo -e "${GREEN}Trojan-Go 已经启动!${PLAIN}"
     pause_and_return
 }
 
@@ -586,7 +585,6 @@ stop_trojan_go() {
     echo -e "${RED}${BOLD}正在停止 Trojan-Go……${PLAIN}"
     systemctl stop trojan-go
     systemctl status trojan-go --no-pager
-    echo ""
     echo -e "${RED}Trojan-Go 已经停止运行!${PLAIN}"
     pause_and_return
 }
@@ -596,7 +594,6 @@ restart_trojan_go() {
     echo -e "${GREEN}${BOLD}正在重启 Trojan-Go……${PLAIN}"
     systemctl restart trojan-go
     systemctl status trojan-go --no-pager
-    echo ""
     echo -e "${GREEN}Trojan-Go 已经重启!${PLAIN}"
     pause_and_return
 }
