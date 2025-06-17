@@ -180,7 +180,7 @@ cert_menu() {
         echo -e " ${GREEN}  2.${PLAIN}申请 域名证书"
         echo -e " ${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
 
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${PURPLE} ✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
             1) generate_self_signed_cert ;;
@@ -275,7 +275,7 @@ show_hysteria_config() {
         local_ip=$(get_local_ip)
         listen_port=${listen_port:-443}
         node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-        echo -e "\n${YELLOW}Hysteria 节点链接：${PLAIN}\n${CYAN}${node_link}${PLAIN}"
+        echo -e "\n${CYAN}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
     else
         echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
     fi
@@ -572,7 +572,7 @@ EOF
             sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
             [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
             node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-            echo -e "\n${YELLOW}Hysteria 节点链接：${PLAIN}\n${CYAN}${node_link}${PLAIN}"
+            echo -e "\n${CYAN}Hysteria 节点链接：${GREEN}\n${CYAN}${node_link}${PLAIN}"
 
             pause_and_return
             ;;
