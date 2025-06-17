@@ -268,7 +268,7 @@ EOF
     systemctl daemon-reload
     systemctl enable --now trojan-go
     clear
-    echo -e "${GREEN} Trojan-Go 已安装并设置开机自启 ${PLAIN}"
+    echo -e "${GREEN}Trojan-Go 已安装并设置开机自启 ${PLAIN}"
 
     password="$password"
     local_port="$local_port"
