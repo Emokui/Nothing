@@ -301,7 +301,7 @@ modify_trojan_config() {
         pause_and_return
         return
     fi
-    echo -e "${YELLOW}请输设置参数（直接回车为保留原值: ${PLAIN}"
+    echo -e "${GREEN}请输设置参数(回车不变): ${PLAIN}"
     old_local_port=$(jq -r '.local_port' "$CONFIG" 2>/dev/null)
     old_remote_addr=$(jq -r '.remote_addr' "$CONFIG" 2>/dev/null)
     old_remote_port=$(jq -r '.remote_port' "$CONFIG" 2>/dev/null)
@@ -335,7 +335,7 @@ modify_trojan_config() {
         echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
     elif [ -z "$password" ]; then
         password=$old_password
-        echo -e "${YELLOW}密码保持不变${PLAIN}"
+        echo -e "${GREEN}密码保持不变${PLAIN}"
     else
         echo -e "${GREEN}密码已修改${PLAIN}"
     fi
@@ -564,7 +564,7 @@ remove_trojan_go() {
         rm -f /root/trojan/config.json
         echo -e "${RED}SSL 证书与私钥已被删除${PLAIN}"
     else
-        echo -e "${YELLOW}SSL 证书与私钥保持不变${PLAIN}"
+        echo -e "${GREEN}SSL 证书与私钥保持不变${PLAIN}"
     fi
 
     echo -e "${GREEN}Trojan-Go 及相关配置已经彻底删除!${PLAIN}"
