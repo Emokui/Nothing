@@ -572,7 +572,7 @@ EOF
             sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
             [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
             node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-            echo -e "\n${CYAN}Hysteria 节点链接：${GREEN}\n${CYAN}${node_link}${PLAIN}"
+            echo -e "\n${CYAN}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
 
             pause_and_return
             ;;
