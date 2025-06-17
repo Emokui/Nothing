@@ -3,6 +3,7 @@ DOMAIN,beta.apple.com
 DOMAIN,testflight.apple.com
 DOMAIN,this_ruleset_is_made_by_sukkaw.ruleset.skk.moe
 DOMAIN,www-mail.icloud-sandbox.com
+DOMAIN,images-mercury.mzstatic.com
 DOMAIN-SUFFIX,.store.storeimages.apple.com.akadns.net
 DOMAIN-SUFFIX,akadns.net
 DOMAIN-SUFFIX,akamai.net
