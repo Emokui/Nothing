@@ -192,68 +192,88 @@ cert_menu() {
 }
 
 select_cert_for_hysteria() {
-    echo -e "${PURPLE}✦ 请选择证书 ✦ : ${PLAIN}"
-    echo -e "${CYAN}  1.自签证书${PLAIN}"
-    echo -e "${CYAN}  2.域名证书${PLAIN}"
-    echo -e "${CYAN}  3.输入路径${PLAIN}"
-    echo -e "${CYAN}  0.退出/默认${PLAIN}"
-    read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
+    local allow_exit=$1
+    while true; do
+        echo -e "${PURPLE}✦ 请选择证书 ✦ : ${PLAIN}"
+        echo -e "${CYAN}  1.自签证书${PLAIN}"
+        echo -e "${CYAN}  2.域名证书${PLAIN}"
+        echo -e "${CYAN}  3.输入路径${PLAIN}"
+        echo -e "${CYAN}  0.退出/默认${PLAIN}"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
-    if [[ "$cert_option" == "1" ]]; then
-        if [[ -f /etc/cert/server.crt && -f /etc/cert/server.key ]]; then
-            cert_path="/etc/cert/server.crt"
-            key_path="/etc/cert/server.key"
-            return 0
-        else
-            echo -e "${RED}未检测到 /etc/cert/server.crt 与 /etc/cert/server.key，请先生成自签证书！${PLAIN}"
-            pause_and_return
-            return 1
-        fi
-    elif [[ "$cert_option" == "2" ]]; then
-        if ! compgen -G "/root/cert/*.crt" > /dev/null; then
-            echo -e "${PURPLE}未检测到 /root/cert 下任何证书,请先申请域名证书!${PLAIN}"
-            pause_and_return
-            return 1
-        fi
-        echo -e "${PURPLE}检测到以下域名证书: ${PLAIN}"
-
-        cert_files=($(ls /root/cert/*.crt 2>/dev/null | sort))
-        cert_count=${#cert_files[@]}
-
-        for ((i=0; i<cert_count; i++)); do
-            idx=$((i+1))
-            echo -e "${GREEN}${idx}.${PLAIN} ${GREEN}${cert_files[$i]}${PLAIN}"
-        done
-
-        while true; do
-            read -p "$(echo -e "${PURPLE}请输入证书编号(1-${cert_count}): ${PLAIN}")" crt_idx
-            if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
-                crtfile="${cert_files[$((crt_idx-1))]}"
-                domain_base=$(basename "$crtfile" .crt)
-                keyfile="/root/cert/${domain_base}.key"
-                if [[ -f "$keyfile" ]]; then
-                    cert_path="$crtfile"
-                    key_path="$keyfile"
-                    break
-                else
-                    echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
-                fi
+        if [[ -z "$cert_option" ]]; then
+            if [[ "$allow_exit" == "0" ]]; then
+                echo -e "${RED}无效输入,请重新选择!${PLAIN}"
+                continue
             else
-                echo -e "${RED}请输入有效编号${PLAIN}"
+                return 1
             fi
-        done
-    elif [[ "$cert_option" == "3" ]]; then
-        read -p "$(echo -e "${PURPLE}请输入证书路径: ${PLAIN}")" cert_path
-        read -p "$(echo -e "${PURPLE}请输入私钥路径: ${PLAIN}")" key_path
-        if [[ ! -f "$cert_path" || ! -f "$key_path" ]]; then
-            echo -e "${RED}自定义证书或私钥路径无效!${PLAIN}"
-            pause_and_return
-            return 1
         fi
-    else
-        return 1
-    fi
-    return 0
+
+        case "$cert_option" in
+            1)
+                if [[ -f /etc/cert/server.crt && -f /etc/cert/server.key ]]; then
+                    cert_path="/etc/cert/server.crt"
+                    key_path="/etc/cert/server.key"
+                    return 0
+                else
+                    echo -e "${RED}未检测到 /etc/cert/server.crt 与 /etc/cert/server.key，请先生成自签证书！${PLAIN}"
+                    pause_and_return
+                    continue
+                fi
+                ;;
+            2)
+                if ! compgen -G "/root/cert/*.crt" > /dev/null; then
+                    echo -e "${PURPLE}未检测到 /root/cert 下任何证书,请先申请域名证书!${PLAIN}"
+                    pause_and_return
+                    continue
+                fi
+                echo -e "${PURPLE}检测到以下域名证书: ${PLAIN}"
+
+                cert_files=($(ls /root/cert/*.crt 2>/dev/null | sort))
+                cert_count=${#cert_files[@]}
+
+                for ((i=0; i<cert_count; i++)); do
+                    idx=$((i+1))
+                    echo -e "${GREEN}${idx}.${PLAIN} ${GREEN}${cert_files[$i]}${PLAIN}"
+                done
+
+                while true; do
+                    read -p "$(echo -e "${PURPLE}请输入证书编号(1-${cert_count}): ${PLAIN}")" crt_idx
+                    if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
+                        crtfile="${cert_files[$((crt_idx-1))]}"
+                        domain_base=$(basename "$crtfile" .crt)
+                        keyfile="/root/cert/${domain_base}.key"
+                        if [[ -f "$keyfile" ]]; then
+                            cert_path="$crtfile"
+                            key_path="$keyfile"
+                            return 0
+                        else
+                            echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
+                        fi
+                    else
+                        echo -e "${RED}请输入有效编号${PLAIN}"
+                    fi
+                done
+                ;;
+            3)
+                read -p "$(echo -e "${PURPLE}请输入证书路径: ${PLAIN}")" cert_path
+                read -p "$(echo -e "${PURPLE}请输入私钥路径: ${PLAIN}")" key_path
+                if [[ ! -f "$cert_path" || ! -f "$key_path" ]]; then
+                    echo -e "${RED}自定义证书或私钥路径无效!${PLAIN}"
+                    pause_and_return
+                    continue
+                fi
+                return 0
+                ;;
+            0)
+                return 1
+                ;;
+            *)
+                echo -e "${RED}无效输入,请重新选择!${PLAIN}"
+                ;;
+        esac
+    done
 }
 
 # ======== 4. Hysteria 相关函数 ========
@@ -475,13 +495,11 @@ while true; do
             echo -e "${GREEN}Hysteria 内核已成功下载并赋予执行权限${PLAIN}"
 
             clear
-            while true; do
-                select_cert_for_hysteria
-                CERT_RTN=$?
-                [[ $CERT_RTN -eq 0 ]] && break
-                [[ $CERT_RTN -eq 1 ]] && break
-            done
-            [[ $CERT_RTN -ne 0 ]] && continue
+            select_cert_for_hysteria 0
+            CERT_RTN=$?
+            if [[ $CERT_RTN -ne 0 ]]; then
+                continue
+            fi
 
             read -p "$(echo -e "${PURPLE}请输入监听端口(默认:443): ${PLAIN}")" listen_port
             listen_port=${listen_port:-443}
