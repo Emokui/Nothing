@@ -194,16 +194,19 @@ cert_menu() {
 select_cert_for_hysteria() {
     local allow_exit=$1
     while true; do
+        clear
         echo -e "${PURPLE}✦ 请选择证书 ✦ : ${PLAIN}"
         echo -e "${CYAN}  1.自签证书${PLAIN}"
         echo -e "${CYAN}  2.域名证书${PLAIN}"
         echo -e "${CYAN}  3.输入路径${PLAIN}"
         echo -e "${CYAN}  0.退出/默认${PLAIN}"
+
         read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
         if [[ -z "$cert_option" ]]; then
             if [[ "$allow_exit" == "0" ]]; then
                 echo -e "${RED}无效输入,请重新选择!${PLAIN}"
+                read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
                 continue
             else
                 return 1
@@ -217,16 +220,16 @@ select_cert_for_hysteria() {
                     key_path="/etc/cert/server.key"
                     return 0
                 else
-                    echo -e "${RED}未检测到 /etc/cert/server.crt 与 /etc/cert/server.key，请先生成自签证书！${PLAIN}"
-                    pause_and_return
+                    echo -e "${RED}未检测到 /etc/cert 下任何自签证书${PLAIN}"
+                    read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
                     continue
                 fi
                 ;;
             2)
                 if ! compgen -G "/root/cert/*.crt" > /dev/null; then
-                    echo -e "${PURPLE}未检测到 /root/cert 下任何证书,请先申请域名证书!${PLAIN}"
+                    echo -e "${PURPLE}未检测到 /root/cert 下任何域名证书${PLAIN}"
                     pause_and_return
-                    continue
+                    return 1
                 fi
                 echo -e "${PURPLE}检测到以下域名证书: ${PLAIN}"
 
@@ -250,9 +253,11 @@ select_cert_for_hysteria() {
                             return 0
                         else
                             echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
+                            read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
                         fi
                     else
                         echo -e "${RED}请输入有效编号${PLAIN}"
+                        read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
                     fi
                 done
                 ;;
@@ -262,7 +267,7 @@ select_cert_for_hysteria() {
                 if [[ ! -f "$cert_path" || ! -f "$key_path" ]]; then
                     echo -e "${RED}自定义证书或私钥路径无效!${PLAIN}"
                     pause_and_return
-                    continue
+                    return 1
                 fi
                 return 0
                 ;;
@@ -271,6 +276,7 @@ select_cert_for_hysteria() {
                 ;;
             *)
                 echo -e "${RED}无效输入,请重新选择!${PLAIN}"
+                read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
                 ;;
         esac
     done
