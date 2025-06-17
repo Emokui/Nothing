@@ -568,7 +568,8 @@ remove_trojan_go() {
     fi
 
     echo -e "${GREEN}Trojan-Go 及相关配置已经彻底删除!${PLAIN}"
-    pause_and_return
+    read -p "$(echo -e "${BLUE}请按回车键返回主菜单...${PLAIN}")"
+    return 123
 }
 
 start_trojan_go() {
@@ -621,7 +622,7 @@ manage_trojan_go() {
             3) restart_trojan_go ;;
             4) show_trojan_config ;;
             5) modify_trojan_config ;;
-            6) remove_trojan_go ;;
+            6) remove_trojan_go; ret=$?; if [[ $ret -eq 123 ]]; then break; fi ;;
             0) clear; break ;;
             *) echo -e "${RED}无效选择,请重新尝试${PLAIN}" ;;
         esac
