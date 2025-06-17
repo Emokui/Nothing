@@ -507,8 +507,22 @@ while true; do
                 continue
             fi
 
+        error_msg=""
+            while true; do
+            clear
+            echo -e "${CYAN}请输入Hysteria服务配置参数（回车为默认值）:${PLAIN}"
+            if [[ -n "$error_msg" ]]; then
+                echo -e "${RED}${error_msg}${PLAIN}"
+            fi
             read -p "$(echo -e "${PURPLE}请输入监听端口(默认:443): ${PLAIN}")" listen_port
             listen_port=${listen_port:-443}
+            if [[ "$listen_port" =~ ^[0-9]+$ ]] && ((listen_port >= 1 && listen_port <= 65535)); then
+                break
+            else
+                error_msg="端口必须为1-65535的数字！"
+            fi
+        done
+        unset error_msg
 
             read -p "$(echo -e "${PURPLE}请输入认证密码(回车随机生成): ${PLAIN}")" auth_password
             if [ -z "$auth_password" ]; then
@@ -680,9 +694,23 @@ EOF
                             default_outbounds="n"
                         fi
 
+                    error_msg=""
+                    while true; do
+                        clear
+                        echo -e "${CYAN}请输配置参数（回车为保留原值）:${PLAIN}"
+                        if [[ -n "$error_msg" ]]; then
+                            echo -e "${RED}${error_msg}${PLAIN}"
+                        fi
                         read -p "$(echo -e "${PURPLE}请输入监听端口 (原值: ${old_listen:-443}): ${PLAIN}")" listen_port
                         listen_port=${listen_port:-$old_listen}
                         listen_port=${listen_port:-443}
+                        if [[ "$listen_port" =~ ^[0-9]+$ ]] && ((listen_port >= 1 && listen_port <= 65535)); then
+                            break
+                        else
+                            error_msg="端口必须为1-65535的数字！"
+                        fi
+                    done
+                    unset error_msg
 
                         echo -e "${PURPLE}请选择新的证书及私钥，或选0直接回车保留原值:${PLAIN}"
                         select_cert_for_hysteria
