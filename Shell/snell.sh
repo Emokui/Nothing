@@ -14,8 +14,6 @@ SNELL_BIN="${SNELL_DIR}/snell-server"
 SNELL_VERSION_FILE="${SNELL_DIR}/version"
 TFO_SYSCTL_CONF="/etc/sysctl.d/local.conf"
 
-mkdir -p "$SNELL_CONFIGS"
-
 pause_and_clear() {
   read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
   clear
@@ -30,11 +28,9 @@ snell_config_exists() {
 }
 
 tfo_enabled() {
-  # 检查 /proc/sys/net/ipv4/tcp_fastopen 值为3且 local.conf 文件存在且含有 tcp_fastopen = 3
   [[ "$(cat /proc/sys/net/ipv4/tcp_fastopen 2>/dev/null)" == "3" ]] && grep -q "net.ipv4.tcp_fastopen = 3" "$TFO_SYSCTL_CONF" 2>/dev/null
 }
 
-# 获取 Snell 最新版本号
 get_latest_snell_version() {
     latest_version=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
     if [ -n "$latest_version" ]; then
@@ -176,7 +172,6 @@ delete_all_snell() {
   read -p "确定继续? [y/N]: " confirm
   [[ ! "$confirm" =~ ^[yY]$ ]] && echo -e "${YELLOW}操作已取消${PLAIN}" && pause_and_clear && return
 
-  # 1. 停止并删除所有snell@*.service服务
   for svc in /etc/systemd/system/snell@*.service; do
     [ ! -e "$svc" ] && continue
     svc_name=$(basename "$svc")
@@ -184,10 +179,8 @@ delete_all_snell() {
     rm -f "$svc"
   done
 
-  # 2. 重新加载 systemd
   systemctl daemon-reload
 
-  # 3. 强制删除/root/snell及其下全部文件（包括隐藏文件、子目录）
   if [ -d "/root/snell" ]; then
     rm -rf /root/snell
   fi
@@ -196,7 +189,6 @@ delete_all_snell() {
   pause_and_clear
 }
 
-# 开启 TCP Fast Open
 enableTCPFastOpen() {
   if tfo_enabled; then
     echo -e "${YELLOW}TCP Fast Open 已经开启，无需重复操作。${PLAIN}"
@@ -403,7 +395,7 @@ view_config() {
   list_configs
   echo "请选择要查看的配置名称:"
   read -p "(如: config1): " config_name
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
   if [[ ! -f "$config_file" ]]; then
@@ -431,7 +423,7 @@ delete_config() {
   list_configs
   echo "请选择要删除的配置名称:"
   read -p "(如: config1): " config_name
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
   if [[ ! -f "$config_file" ]]; then
