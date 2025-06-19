@@ -37,14 +37,14 @@ get_latest_snell_version() {
         SNELL_VERSION="v${latest_version}"
     else
         SNELL_VERSION="v4.1.1"
-        echo -e "${RED}获取 Snell 最新版本失败，使用默认版本 ${SNELL_VERSION}${PLAIN}"
+        echo -e "${RED}获取 Snell 最新版本失败,使用默认版本 ${SNELL_VERSION}${PLAIN}"
     fi
 }
 
 install_snell() {
   clear
   if snell_installed; then
-    echo -e "${YELLOW}Snell 已经安装在 ${SNELL_BIN}，如需更新请选择菜单 5（更新 Snell）。${PLAIN}"
+    echo -e "${YELLOW}Snell 已安装,如需更新请选择【5.更新 Snell】${PLAIN}"
     pause_and_clear
     return
   fi
@@ -71,7 +71,7 @@ install_snell() {
   echo -e "${YELLOW}下载 Snell（${arch}）...${PLAIN}"
   wget --no-check-certificate -N "$snell_url_official" -O "$snell_zip"
   if [[ ! -e "$snell_zip" ]]; then
-      echo -e "${RED}Snell 下载失败，请检查网络连接！${PLAIN}"
+      echo -e "${RED}Snell 下载失败,请检查网络连接!${PLAIN}"
       pause_and_clear
       return 1
   else
@@ -79,7 +79,7 @@ install_snell() {
   fi
 
   if [[ ! -e "snell-server" ]]; then
-      echo -e "${RED}Snell 解压失败！${PLAIN}"
+      echo -e "${RED}Snell 解压失败!${PLAIN}"
       pause_and_clear
       return 1
   else
@@ -88,7 +88,7 @@ install_snell() {
       mv -f snell-server "${SNELL_BIN}"
       echo "v${snell_latest_ver}" > ${SNELL_VERSION_FILE}
       echo -e "${GREEN}Snell (${arch}) 已下载安装完成${PLAIN}"
-      echo -e "${CYAN}请用[选项2]生成并管理配置文件${PLAIN}"
+      echo -e "${CYAN}请选择【2.配置 Snell】生成并管理配置文件${PLAIN}"
       pause_and_clear
       return 0
   fi
@@ -98,7 +98,7 @@ update_snell() {
   clear
 
   if ! snell_installed; then
-    echo -e "${YELLOW}未检测到已安装的 Snell，请先安装 Snell（菜单1）。${PLAIN}"
+    echo -e "${YELLOW}检测到未安装Snell,请先安装并配置${PLAIN}"
     pause_and_clear
     return 1
   fi
@@ -138,7 +138,7 @@ update_snell() {
   echo -e "${YELLOW}下载 Snell 最新版（${arch}, ${SNELL_VERSION}）...${PLAIN}"
   wget --no-check-certificate -N "$snell_url_official" -O "$snell_zip"
   if [[ ! -e "$snell_zip" ]]; then
-      echo -e "${RED}Snell 下载失败，请检查网络连接！${PLAIN}"
+      echo -e "${RED}Snell 下载失败,请检查网络连接!${PLAIN}"
       pause_and_clear
       return 1
   else
@@ -146,7 +146,7 @@ update_snell() {
   fi
 
   if [[ ! -e "snell-server" ]]; then
-      echo -e "${RED}Snell 解压失败！${PLAIN}"
+      echo -e "${RED}Snell 解压失败!${PLAIN}"
       pause_and_clear
       return 1
   else
@@ -154,7 +154,7 @@ update_snell() {
       chmod +x snell-server
       mv -f snell-server "${SNELL_BIN}"
       echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
-      echo -e "${GREEN}Snell 已更新到最新版：${SNELL_VERSION} (${arch})${PLAIN}"
+      echo -e "${GREEN}Snell 已更新到最新版:${SNELL_VERSION} (${arch})${PLAIN}"
       pause_and_clear
       return 0
   fi
@@ -163,12 +163,12 @@ update_snell() {
 delete_all_snell() {
   clear
   if ! snell_installed && ! snell_config_exists; then
-    echo -e "${YELLOW}未安装及配置 Snell，请先安装并配置 Snell。${PLAIN}"
+    echo -e "${YELLOW}未安装及配置 Snell,请先安装并配置 Snell。${PLAIN}"
     pause_and_clear
     return
   fi
 
-  echo -e "${RED}警告!此操作将彻底删除 /root/snell 目录及所有相关 systemd 服务${PLAIN}"
+  echo -e "${RED}警告!此操作将彻底删除 /root/snell 目录及相关 systemd 服务${PLAIN}"
   read -p "确定继续? [y/N]: " confirm
   [[ ! "$confirm" =~ ^[yY]$ ]] && echo -e "${YELLOW}操作已取消${PLAIN}" && pause_and_clear && return
 
@@ -185,13 +185,13 @@ delete_all_snell() {
     rm -rf /root/snell
   fi
 
-  echo -e "${GREEN}已彻底删除 /root/snell 及所有 systemd 服务${PLAIN}"
+  echo -e "${GREEN}已彻底删除 /root/snell 及 systemd 服务${PLAIN}"
   pause_and_clear
 }
 
 enableTCPFastOpen() {
   if tfo_enabled; then
-    echo -e "${YELLOW}TCP Fast Open 已经开启，无需重复操作。${PLAIN}"
+    echo -e "${YELLOW}TCP Fast Open 已经开启,无需重复操作${PLAIN}"
     pause_and_clear
     return
   fi
@@ -224,7 +224,7 @@ net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf" && sysctl --system >/dev/null 2>&1
     echo -e "${GREEN}TCP Fast Open 及推荐内核优化参数已开启${PLAIN}"
   else
-    echo -e "${RED}系统内核版本过低，无法支持 TCP Fast Open！${PLAIN}"
+    echo -e "${RED}系统内核版本过低,无法支持 TCP Fast Open!${PLAIN}"
   fi
   pause_and_clear
 }
@@ -237,13 +237,13 @@ modify_config() {
   list_configs
   echo "请选择要修改的配置名称:"
   read -p "(如: config1): " config_name
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空！${PLAIN}" && pause_and_clear && return
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
 
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
 
   if [[ ! -f "$config_file" ]]; then
-    echo -e "${RED}配置文件 $config_name 不存在！${PLAIN}"
+    echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
     pause_and_clear
     return
   fi
@@ -260,7 +260,7 @@ modify_config() {
   [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
 
   echo -e "${YELLOW}开始修改配置...${PLAIN}"
-  read -p "请输入新端口 (当前${current_port}, 保持不变请直接回车): " port
+  read -p "请输入新端口 (当前${current_port},保持不变请直接回车): " port
   port=${port:-$current_port}
 
   read -p "请输入新PSK密钥 (当前${current_psk},随机生成请输入r,保持不变请回车): " psk
@@ -273,7 +273,7 @@ modify_config() {
   read -p "是否开启 obfs (当前${current_obfs}, y:开启/N:关闭): " enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "请输入 obfs 域名 (当前${current_obfs_host:-example.com}, 保持不变请直接回车): " obfs_host
+    read -p "请输入 obfs 域名 (当前${current_obfs_host:-example.com},保持不变请直接回车): " obfs_host
     obfs_host=${obfs_host:-$current_obfs_host}
     obfs_host=${obfs_host:-example.com}
   else
@@ -316,7 +316,7 @@ generate_config() {
   fi
   read -p "请输入监听端口 (默认5000): " port
   port=${port:-5000}
-  read -p "请输入PSK密钥 (随机生成留空): " psk
+  read -p "请输入PSK密钥 (回车随机生成): " psk
   [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   obfs="off"
   read -p "是否开启 obfs (开启为http) [y/N]: " enable_obfs
@@ -344,7 +344,7 @@ EOF
 start_and_enable_config() {
   clear
   if ! snell_installed; then
-    echo -e "${YELLOW}未检测到已安装的 Snell server，请先安装（菜单1）。${PLAIN}"
+    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
     pause_and_clear
     return
   fi
@@ -385,7 +385,7 @@ EOF
 view_config() {
   clear
   if ! snell_installed; then
-    echo -e "${YELLOW}未检测到已安装的 Snell server，请先安装（菜单1）。${PLAIN}"
+    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
     pause_and_clear
     return
   fi
@@ -413,7 +413,7 @@ view_config() {
 delete_config() {
   clear
   if ! snell_installed; then
-    echo -e "${YELLOW}未检测到已安装的 Snell server，请先安装（菜单1）。${PLAIN}"
+    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
     pause_and_clear
     return
   fi
@@ -441,7 +441,7 @@ delete_config() {
 delete_all_configs() {
   clear
   if ! snell_installed; then
-    echo -e "${YELLOW}未检测到已安装的 Snell server，请先安装（菜单1）。${PLAIN}"
+    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
     pause_and_clear
     return
   fi
@@ -504,7 +504,7 @@ main() {
       1) install_snell ;;
       2)
         if ! snell_installed; then
-          echo -e "${YELLOW}未检测到已安装的 Snell server，请先安装（菜单1）。${PLAIN}"
+          echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
           pause_and_clear
           continue
         fi
