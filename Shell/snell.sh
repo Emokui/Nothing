@@ -475,7 +475,7 @@ list_configs() {
 
 show_main_menu() {
   clear
-  echo -e "${CYAN}✦ Snell ✦${PLAIN}"
+  echo -e "${CYAN}✦ Snell v4 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}安装 Snell"
   echo -e "${GREEN}  2.${PLAIN}配置 Snell"
   echo -e "${GREEN}  3.${PLAIN}删除 Snell"
