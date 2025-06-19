@@ -210,8 +210,8 @@ tun:
   stack: system
   dns-hijack:
     - 0.0.0.0:53
-  strict_route: true
   auto-route: true
+  strict-route: true
   auto-redirect: true
   auto-detect-interface: true
 
@@ -221,9 +221,7 @@ geox-url:
 geo-update-interval: 24
 tcp-concurrent: true
 find-process-mode: off
-allow-lan: true
-skip-auth-prefixes:
-  - 127.0.0.1/8
+allow-lan: false
 socks-port: $socks_port
 bind-address: "$bind_address"
 external-controller: "$external_controller"
@@ -247,7 +245,10 @@ dns:
     - 1.1.1.1
   direct-nameserver:
     - system
-  enhanced-mode: redir-host
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
 
 proxies:
   - name: "warp"
