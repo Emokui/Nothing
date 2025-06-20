@@ -102,11 +102,9 @@ install_trojan_go() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:80]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-80}
 
-    read -p "$(echo -e "${CYAN}请输入密码 (回车随机): ${PLAIN}")" password
-    if [ -z "$password" ]; then
-        password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
-        echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
-    fi
+    read -p "$(echo -e "${CYAN}请输入密码 ${YELLOW}(回车随机生成)${CYAN}: ${PLAIN}")" psk
+    [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+    echo -e "${GREEN}已自动生成密码: $psk${PLAIN}"
 
     cert_dir="/root/cert"
     certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
@@ -201,7 +199,7 @@ install_trojan_go() {
         --argjson local_port "$local_port" \
         --arg remote_addr "$remote_addr" \
         --argjson remote_port "$remote_port" \
-        --arg password "$password" \
+        --arg password "$psk" \
         --arg ws_enabled "$ws_enabled" \
         --arg ws_path "$ws_path" \
         --arg ws_host "$ws_host" \
@@ -270,7 +268,7 @@ EOF
     clear
     echo -e "${GREEN}Trojan-Go 已安装并设置开机自启 ${PLAIN}"
 
-    password="$password"
+    password="$psk"
     local_port="$local_port"
     sni="$domain"
     ws_enabled="$ws_enabled"
@@ -329,12 +327,12 @@ modify_trojan_config() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:$old_remote_port]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-$old_remote_port}
 
-    read -p "$(echo -e "${CYAN}请输入新密码 [回车保持不变,输入r/R随机生成]: ${PLAIN}")" password
-    if [[ "$password" == "r" || "$password" == "R" ]]; then
-        password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
-        echo -e "${GREEN}已自动生成密码: $password${PLAIN}"
-    elif [ -z "$password" ]; then
-        password=$old_password
+    read -p "$(echo -e "${CYAN}请输入新密码 ${YELLOW}[回车保持不变,输入r/R随机生成]${CYAN}: ${PLAIN}")" psk
+    if [[ "$psk" == "r" || "$psk" == "R" ]]; then
+        psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+        echo -e "${GREEN}已自动生成密码: $psk${PLAIN}"
+    elif [ -z "$psk" ]; then
+        psk=$old_password
         echo -e "${GREEN}密码保持不变${PLAIN}"
     else
         echo -e "${GREEN}密码已修改${PLAIN}"
@@ -453,7 +451,7 @@ modify_trojan_config() {
         --argjson local_port "$local_port" \
         --arg remote_addr "$remote_addr" \
         --argjson remote_port "$remote_port" \
-        --arg password "$password" \
+        --arg password "$psk" \
         --arg ws_enabled "$ws_enabled" \
         --arg ws_path "$ws_path" \
         --arg ws_host "$ws_host" \
