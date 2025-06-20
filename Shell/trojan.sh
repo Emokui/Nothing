@@ -102,7 +102,7 @@ install_trojan_go() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:80]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-80}
 
-    read -p "$(echo -e "${CYAN}请输入密码 ${YELLOW}(回车随机生成)${CYAN}: ${PLAIN}")" psk
+    read -p "$(echo -e "${CYAN}请输入密码 ${GREEN}(回车随机生成)${CYAN}: ${PLAIN}")" psk
     [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
     echo -e "${GREEN}已自动生成密码: $psk${PLAIN}"
 
@@ -327,7 +327,7 @@ modify_trojan_config() {
     read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:$old_remote_port]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-$old_remote_port}
 
-    read -p "$(echo -e "${CYAN}请输入新密码 ${YELLOW}[回车保持不变,输入r/R随机生成]${CYAN}: ${PLAIN}")" psk
+    read -p "$(echo -e "${CYAN}请输入新密码 ${GREEN}[回车保持不变,输入r/R随机生成]${CYAN}: ${PLAIN}")" psk
     if [[ "$psk" == "r" || "$psk" == "R" ]]; then
         psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
         echo -e "${GREEN}已自动生成密码: $psk${PLAIN}"
