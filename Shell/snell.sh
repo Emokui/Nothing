@@ -1,11 +1,11 @@
 #!/bin/bash
 
 RED='\033[0;31m'
-GREEN='\033[0;32m'
+GREEN="\033[32m\033[01m"
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
+CYAN="\033[1;36m"
 PLAIN='\033[0m'
 
 SNELL_DIR="/root/snell"
@@ -229,75 +229,89 @@ net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf" && sysctl --system >/dev
   pause_and_clear
 }
 
-modify_config() {
+show_sub_menu() {
+  clear
+  echo -e "${CYAN}✦ Snell 多配置管理 ✦${PLAIN}"
+  echo -e "${GREEN}  1.${PLAIN}生成 配置"
+  echo -e "${GREEN}  2.${PLAIN}启动 配置"
+  echo -e "${GREEN}  3.${PLAIN}查看 配置"
+  echo -e "${GREEN}  4.${PLAIN}删除 配置"
+  echo -e "${GREEN}  5.${PLAIN}修改 配置"
+  echo -e "${GREEN}  6.${PLAIN}停止 Snell"
+  echo -e "${GREEN}  0.${PLAIN}返回 Psy Kongroo"
+}
+
+delete_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
-
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
+    pause_and_clear
+    return
+  fi
   echo -e "${CYAN}当前可用配置:${PLAIN}"
   list_configs
-  echo "请选择要修改的配置名称:"
-  read -p "(如: config1): " config_name
+  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${CYAN}(如: config1)${PLAIN}${YELLOW}，输入99删除全部配置:${PLAIN}"
+  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  if [[ "$config_name" == "99" ]]; then
+    delete_all_configs
+    return
+  fi
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
-
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
-
   if [[ ! -f "$config_file" ]]; then
     echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
     pause_and_clear
     return
   fi
+  systemctl disable --now "$service_name" &>/dev/null
+  rm -f "/etc/systemd/system/$service_name"
+  rm -f "$config_file"
+  echo -e "${GREEN}配置 $config_name 及其服务已删除。${PLAIN}"
+  pause_and_clear
+}
 
-  local current_port=$(grep "^listen = " "$config_file" | cut -d':' -f2)
-  local current_psk=$(grep "^psk = " "$config_file" | cut -d' ' -f3)
-  local current_obfs=$(grep "^obfs = " "$config_file" | cut -d' ' -f3)
-  local current_obfs_host=$(grep "^obfs-host = " "$config_file" | cut -d' ' -f3)
-
-  echo -e "${CYAN}当前配置内容:${PLAIN}"
-  echo -e "端口: ${GREEN}${current_port}${PLAIN}"
-  echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
-  echo -e "OBFS: ${GREEN}${current_obfs}${PLAIN}"
-  [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
-
-  echo -e "${YELLOW}开始修改配置...${PLAIN}"
-  read -p "请输入新端口 (当前${current_port},保持不变请直接回车): " port
-  port=${port:-$current_port}
-
-  read -p "请输入新PSK密钥 (当前${current_psk},随机生成请输入r,保持不变请回车): " psk
-  if [[ "$psk" == "r" ]]; then
-    psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
-  elif [[ -z "$psk" ]]; then
-    psk=$current_psk
+delete_all_configs() {
+  clear
+  local config_dir="$SNELL_CONFIGS"
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,无需删除${PLAIN}"
+    pause_and_clear
+    return
   fi
+  local service_prefix="snell@"
+  echo -e "${RED}警告: 即将删除所有配置及服务!${PLAIN}"
+  read -p "$(echo -e "${YELLOW}确定继续?[y/N]: ${PLAIN}")" choice
+  [[ ! "$choice" =~ ^[yY]$ ]] && pause_and_clear && return
+  for config_file in "$config_dir"/*.conf; do
+    [[ ! -f "$config_file" ]] && continue
+    local config_name=$(basename "$config_file" .conf)
+    local service_name="${service_prefix}${config_name}.service"
+    systemctl disable --now "$service_name" &>/dev/null
+    rm -f "/etc/systemd/system/$service_name"
+  done
+  rm -rf "$config_dir"
+  echo -e "${GREEN}所有配置及服务已删除${PLAIN}"
+  pause_and_clear
+}
 
-  read -p "是否开启 obfs (当前${current_obfs}, y:开启/N:关闭): " enable_obfs
-  if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
-    obfs="http"
-    read -p "请输入 obfs 域名 (当前${current_obfs_host:-example.com},保持不变请直接回车): " obfs_host
-    obfs_host=${obfs_host:-$current_obfs_host}
-    obfs_host=${obfs_host:-example.com}
+stop_snell() {
+  clear
+  echo -e "${CYAN}正在停止所有 Snell systemd 服务...${PLAIN}"
+  local stopped_any=0
+  for svc in $(systemctl list-units --type=service --all | grep -oE 'snell@[^ ]+'); do
+    systemctl stop "$svc"
+    stopped_any=1
+    echo -e "${YELLOW}已停止服务: $svc${PLAIN}"
+  done
+  pkill -f "$SNELL_BIN" && echo -e "${YELLOW}已尝试终止所有 snell-server 进程${PLAIN}"
+  systemctl daemon-reload
+  if [[ $stopped_any -eq 1 ]]; then
+    echo -e "${GREEN}所有 Snell systemd 服务及进程已停止${PLAIN}"
   else
-    obfs="off"
-    obfs_host=""
+    echo -e "${YELLOW}未检测到正在运行的 Snell systemd 服务${PLAIN}"
   fi
-
-  cat > "$config_file" << EOF
-[snell-server]
-listen = 0.0.0.0:${port}
-psk = ${psk}
-obfs = ${obfs}
-$(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
-ipv6 = false
-tfo = true
-dns = 1.1.1.1, 8.8.8.8
-EOF
-
-  echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
-  systemctl restart "$service_name"
-  echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
-
-  echo -e "${CYAN}------ 当前服务状态 ------${PLAIN}"
-  systemctl status "$service_name" --no-pager
   pause_and_clear
 }
 
@@ -305,8 +319,8 @@ generate_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
   mkdir -p "$config_dir"
-  echo "请输入配置名称:"
-  read -p "(如: config1): " config_name
+  echo -e "${CYAN}请输入配置名称:${PLAIN}"
+  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
   if [[ -f "$config_file" ]]; then
@@ -314,16 +328,17 @@ generate_config() {
     pause_and_clear
     return
   fi
-  read -p "请输入监听端口 (默认5000): " port
+  read -p "$(echo -e "${CYAN}请输入监听端口 ${YELLOW}(默认5000)${CYAN}: ${PLAIN}")" port
   port=${port:-5000}
-  read -p "请输入PSK密钥 (回车随机生成): " psk
+  read -p "$(echo -e "${CYAN}请输入PSK密钥 ${YELLOW}(回车随机生成)${CYAN}: ${PLAIN}")" psk
   [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   obfs="off"
-  read -p "是否开启 obfs (开启为http) [y/N]: " enable_obfs
+  obfs_host=""
+  read -p "$(echo -e "${CYAN}是否开启 obfs ${YELLOW}(回车默认不开启, y开启)${CYAN}: ${PLAIN}")" enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "请输入 obfs 域名 (默认: example.com): " obfs_host
-    obfs_host=${obfs_host:-example.com}
+    read -p "$(echo -e "${CYAN}请输入 obfs 域名 ${YELLOW}(回车默认为 icloud.com)${CYAN}: ${PLAIN}")" obfs_host
+    obfs_host=${obfs_host:-icloud.com}
   fi
 
   cat > "$config_file" << EOF
@@ -343,18 +358,17 @@ EOF
 
 start_and_enable_config() {
   clear
-  if ! snell_installed; then
-    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
+  local config_dir="$SNELL_CONFIGS"
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
     pause_and_clear
     return
   fi
-
-  local config_dir="$SNELL_CONFIGS"
   local config_bin="$SNELL_BIN"
   echo -e "${CYAN}当前可用配置:${PLAIN}"
   list_configs
-  echo "请选择要启动的配置名称:"
-  read -p "(如: config1): " config_name
+  echo -e "${CYAN}请选择要启动的配置名称:${PLAIN}"
+  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
@@ -384,17 +398,16 @@ EOF
 
 view_config() {
   clear
-  if ! snell_installed; then
-    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
+  local config_dir="$SNELL_CONFIGS"
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
     pause_and_clear
     return
   fi
-
-  local config_dir="$SNELL_CONFIGS"
   echo -e "${CYAN}当前可用配置:${PLAIN}"
   list_configs
-  echo "请选择要查看的配置名称:"
-  read -p "(如: config1): " config_name
+  echo -e "${CYAN}请选择要查看的配置名称:${PLAIN}"
+  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
@@ -406,61 +419,97 @@ view_config() {
   echo -e "${CYAN}------ 配置内容 ------${PLAIN}"
   cat "$config_file"
   echo -e "${CYAN}------ 服务状态 ------${PLAIN}"
-  systemctl status $service_name --no-pager
+  # 只显示服务状态一行
+  local status
+  status=$(systemctl is-active "$service_name" 2>/dev/null)
+  if [[ "$status" == "active" ]]; then
+    echo -e "${GREEN}$service_name 状态：已启动 (active)${PLAIN}"
+  elif [[ "$status" == "inactive" ]]; then
+    echo -e "${YELLOW}$service_name 状态：已停止 (inactive)${PLAIN}"
+  elif [[ "$status" == "failed" ]]; then
+    echo -e "${RED}$service_name 状态：启动失败 (failed)${PLAIN}"
+  else
+    echo -e "${PURPLE}$service_name 状态：未知或未安装${PLAIN}"
+  fi
+  echo -e "${CYAN}---------------------${PLAIN}"
   pause_and_clear
 }
 
-delete_config() {
+modify_config() {
   clear
-  if ! snell_installed; then
-    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
+  local config_dir="$SNELL_CONFIGS"
+
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
     pause_and_clear
     return
   fi
 
-  local config_dir="$SNELL_CONFIGS"
   echo -e "${CYAN}当前可用配置:${PLAIN}"
   list_configs
-  echo "请选择要删除的配置名称:"
-  read -p "(如: config1): " config_name
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear
+  echo -e "${CYAN}请选择要修改的配置名称:${PLAIN}"
+  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
+
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
+
   if [[ ! -f "$config_file" ]]; then
     echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
     pause_and_clear
     return
   fi
-  systemctl disable --now "$service_name" &>/dev/null
-  rm -f "/etc/systemd/system/$service_name"
-  rm -f "$config_file"
-  echo -e "${GREEN}配置 $config_name 及其服务已删除。${PLAIN}"
-  pause_and_clear
-}
 
-delete_all_configs() {
-  clear
-  if ! snell_installed; then
-    echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
-    pause_and_clear
-    return
+  local current_port=$(grep "^listen = " "$config_file" | cut -d':' -f2)
+  local current_psk=$(grep "^psk = " "$config_file" | cut -d' ' -f3)
+  local current_obfs=$(grep "^obfs = " "$config_file" | cut -d' ' -f3)
+  local current_obfs_host=$(grep "^obfs-host = " "$config_file" | cut -d' ' -f3)
+
+  echo -e "${CYAN}当前配置内容:${PLAIN}"
+  echo -e "端口: ${GREEN}${current_port}${PLAIN}"
+  echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
+  echo -e "OBFS: ${GREEN}${current_obfs}${PLAIN}"
+  [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
+
+  echo -e "${YELLOW}开始修改配置...${PLAIN}"
+  read -p "$(echo -e "${CYAN}请输入新端口 ${YELLOW}(当前${current_port},回车不变)${CYAN}: ${PLAIN}")" port
+  port=${port:-$current_port}
+
+  read -p "$(echo -e "${CYAN}请输入新PSK密钥 ${YELLOW}(当前${current_psk},r随机,回车不变)${CYAN}: ${PLAIN}")" psk
+  if [[ "$psk" == "r" ]]; then
+    psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+  elif [[ -z "$psk" ]]; then
+    psk=$current_psk
   fi
 
-  local config_dir="$SNELL_CONFIGS"
-  local service_prefix="snell@"
-  echo -e "${RED}警告: 即将删除所有配置及服务!${PLAIN}"
-  read -p "确定继续?[y/N]: " choice
-  [[ ! "$choice" =~ ^[yY]$ ]] && pause_and_clear && return
-  for config_file in "$config_dir"/*.conf; do
-    [[ ! -f "$config_file" ]] && continue
-    local config_name=$(basename "$config_file" .conf)
-    local service_name="${service_prefix}${config_name}.service"
-    systemctl disable --now "$service_name" &>/dev/null
-    rm -f "/etc/systemd/system/$service_name"
-  done
-  rm -rf "$config_dir"
-  mkdir -p "$config_dir"
-  echo -e "${GREEN}所有配置及服务已删除${PLAIN}"
+  read -p "$(echo -e "${CYAN}是否开启 obfs ${YELLOW}(当前${current_obfs}, y开启,回车关闭)${CYAN}: ${PLAIN}")" enable_obfs
+  if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
+    obfs="http"
+    read -p "$(echo -e "${CYAN}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-icloud.com},回车不变)${CYAN}: ${PLAIN}")" obfs_host
+    obfs_host=${obfs_host:-$current_obfs_host}
+    obfs_host=${obfs_host:-icloud.com}
+  else
+    obfs="off"
+    obfs_host=""
+  fi
+
+  cat > "$config_file" << EOF
+[snell-server]
+listen = 0.0.0.0:${port}
+psk = ${psk}
+obfs = ${obfs}
+$(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
+ipv6 = false
+tfo = true
+dns = 1.1.1.1, 8.8.8.8
+EOF
+
+  echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
+  systemctl restart "$service_name"
+  echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
+
+  echo -e "${CYAN}------ 当前服务状态 ------${PLAIN}"
+  systemctl status "$service_name" --no-pager
   pause_and_clear
 }
 
@@ -475,25 +524,13 @@ list_configs() {
 
 show_main_menu() {
   clear
-  echo -e "${CYAN}✦ Snell v4 ✦${PLAIN}"
+  echo -e "${CYAN}✦ Snell_v4 Ver.1.0 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}安装 Snell"
   echo -e "${GREEN}  2.${PLAIN}配置 Snell"
   echo -e "${GREEN}  3.${PLAIN}删除 Snell"
-  echo -e "${GREEN}  4.${PLAIN}开启 TFO"
+  echo -e "${GREEN}  4.${PLAIN}开启 TCPFO"
   echo -e "${GREEN}  5.${PLAIN}更新 Snell"
   echo -e "${GREEN}  0.${PLAIN}退出 El Psy Kongroo"
-}
-
-show_sub_menu() {
-  clear
-  echo -e "${CYAN}✦ Snell 多配置管理 ✦${PLAIN}"
-  echo -e "${GREEN}  1.${PLAIN}生成 配置"
-  echo -e "${GREEN}  2.${PLAIN}启动 配置"
-  echo -e "${GREEN}  3.${PLAIN}查看 配置"
-  echo -e "${GREEN}  4.${PLAIN}删除 指定配置"
-  echo -e "${GREEN}  5.${PLAIN}删除 所有配置"
-  echo -e "${GREEN}  6.${PLAIN}修改 指定配置"
-  echo -e "${GREEN}  0.${PLAIN}返回 Psy Kongroo"
 }
 
 main() {
@@ -510,14 +547,14 @@ main() {
         fi
         while true; do
           show_sub_menu
-          read -p "✦ Steins Gate ✦ : " sub_choice
+          read -p "$(echo -e "${CYAN}请选择操作: ${PLAIN}")" sub_choice
           case $sub_choice in
             1) generate_config ;;
             2) start_and_enable_config ;;
             3) view_config ;;
             4) delete_config ;;
-            5) delete_all_configs ;;
-            6) modify_config ;;
+            5) modify_config ;;
+            6) stop_snell ;;
             0) break ;;
             *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
           esac
