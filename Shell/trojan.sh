@@ -340,6 +340,7 @@ modify_trojan_config() {
 
     cert_dir="/root/cert"
     certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
+    changed_cert=false
 
     if [[ ${#certs[@]} -gt 0 ]]; then
         echo -e "${CYAN}检测到以下域名证书,请选择: ${PLAIN}"
@@ -357,6 +358,7 @@ modify_trojan_config() {
                     read -p "请输入完整证书路径: " cert_path
                     read -p "请输入完整私钥路径: " key_path
                     if [[ -f "$cert_path" && -f "$key_path" ]]; then
+                        changed_cert=true
                         break
                     else
                         echo -e "${RED}证书或私钥文件不存在,请重新输入${PLAIN}"
@@ -366,6 +368,7 @@ modify_trojan_config() {
                     domain_base=$(basename "$cert_path" .crt)
                     key_path="$cert_dir/${domain_base}.key"
                     if [[ -f "$key_path" ]]; then
+                        changed_cert=true
                         break
                     else
                         echo -e "${RED}未找到对应私钥: $key_path,请重新选择${PLAIN}"
@@ -379,9 +382,16 @@ modify_trojan_config() {
         done
     else
         read -p "$(echo -e "${CYAN}请输入证书 cert 路径 [默认:$old_cert]: ${PLAIN}")" cert_path
-        cert_path=${cert_path:-$old_cert}
+        if [ -z "$cert_path" ]; then
+            cert_path=$old_cert
+            changed_cert=false
+        else
+            changed_cert=true
+        fi
         read -p "$(echo -e "${CYAN}请输入私钥 key 路径 [默认:$old_key]: ${PLAIN}")" key_path
-        key_path=${key_path:-$old_key}
+        if [ -z "$key_path" ]; then
+            key_path=$old_key
+        fi
     fi
 
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
@@ -397,6 +407,8 @@ modify_trojan_config() {
     else
         echo -e "${GREEN}证书域名自动识别为: $domain ${PLAIN}"
     fi
+
+    ws_host_default="$domain"
 
     read -p "$(echo -e "${CYAN}是否启用 WebSocket (y/n) [默认:$( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" ]]; then
@@ -414,11 +426,12 @@ modify_trojan_config() {
     if [[ "$ws_enabled" == true ]]; then
         read -p "$(echo -e "${CYAN}请输入 ws 路径 [默认:$old_ws_path]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-$old_ws_path}
-        read -p "$(echo -e "${CYAN}请输入 ws Host（默认:证书域名） [默认: $old_ws_host]: ${PLAIN}")" ws_host
-        ws_host=${ws_host:-$domain}
+        # ws_host 默认是当前证书域名
+        read -p "$(echo -e "${CYAN}请输入 ws Host（默认:证书域名） [默认: $ws_host_default]: ${PLAIN}")" ws_host
+        ws_host=${ws_host:-$ws_host_default}
     else
         ws_path="${old_ws_path:-/}"
-        ws_host="$domain"
+        ws_host="$ws_host_default"
     fi
 
     default_fp_text="n"
