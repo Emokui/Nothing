@@ -207,7 +207,7 @@ install_mihomo() {
     cat <<EOF > config.yaml
 tun:
   enable: $tun_enable
-  stack: system
+  stack: mixed
   dns-hijack:
     - 0.0.0.0:53
   auto-route: true
