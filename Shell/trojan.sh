@@ -774,17 +774,61 @@ issue_acme_cert() {
     fi
     clear
     echo -e "${YELLOW}检测 80 端口占用...${PLAIN}"
-    if [[ $(lsof -i:"80" | grep -i -c "listen") -ne 0 ]]; then
-        echo -e "${RED}80 端口被占用,以下是占用程序: ${PLAIN}"
-        lsof -i:"80"
-        read -p "$(echo -e "${YELLOW}是否结束占用进程 (y/N): ${PLAIN}")" yn
-        if [[ $yn =~ [Yy] ]]; then
-            lsof -i:"80" | awk '{print $2}' | grep -v "PID" | xargs kill -9
+
+    if lsof -i:80 | grep LISTEN >/dev/null 2>&1; then
+        echo -e "${RED}80端口被占用,请释放80端口后再申请证书${PLAIN}"
+        lsof -i:80
+        pause_and_return
+        return
+    fi
+
+    echo -e "${YELLOW}检测防火墙是否放行80端口...${PLAIN}"
+    port_open=false
+
+    if command -v ufw >/dev/null 2>&1; then
+        ufw_status=$(ufw status | grep -i '80/tcp' | grep -i 'allow')
+        if [[ -n "$ufw_status" ]]; then
+            port_open=true
         else
-            echo -e "${RED}申请中止。${PLAIN}"
-            pause_and_return
-            return
+            sudo ufw allow 80/tcp
+            sudo ufw reload
+            port_open=true
+            echo -e "${GREEN}已通过 ufw 放行 80 端口${PLAIN}"
         fi
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1 && pgrep -x firewalld >/dev/null 2>&1; then
+        fw_status=$(firewall-cmd --list-ports | grep -w '80/tcp')
+        if [[ -n "$fw_status" ]]; then
+            port_open=true
+        else
+            sudo firewall-cmd --add-port=80/tcp --permanent
+            sudo firewall-cmd --reload
+            port_open=true
+            echo -e "${GREEN}已通过 firewalld 放行 80 端口${PLAIN}"
+        fi
+    fi
+
+    if command -v iptables >/dev/null 2>&1; then
+        iptables_status=$(iptables -L INPUT -n | grep 'tcp dpt:80' | grep ACCEPT)
+        if [[ -n "$iptables_status" ]]; then
+            port_open=true
+        else
+            sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+            if command -v netfilter-persistent >/dev/null 2>&1; then
+                sudo netfilter-persistent save
+            elif command -v service >/dev/null 2>&1; then
+                sudo service iptables save
+            fi
+            port_open=true
+            echo -e "${GREEN}已通过 iptables 放行 80 端口${PLAIN}"
+        fi
+    fi
+
+    if ! $port_open; then
+        echo -e "${RED}未检测到常见防火墙或未能自动放行80端口,请手动检查防火墙规则${PLAIN}"
+        pause_and_return
+        return
     fi
 
     ipv4=$(curl -s4m8 ip.sb -k | sed -n 1p)
