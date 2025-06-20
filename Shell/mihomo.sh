@@ -250,6 +250,8 @@ dns:
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
     - '*.lan'
+    - '*.local'
+    - 'localhost'
 proxies:
   - name: "warp"
     type: wireguard
