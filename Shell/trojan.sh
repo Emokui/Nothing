@@ -48,6 +48,111 @@ banner() {
     echo "✦ Trojan Go - Ver 1.6 ✦"
 }
 
+# ======== 5. 伪装静态网页相关 ========
+web_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}${BOLD}✦ Nginx伪装网页 ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN} 配置 Nginx"
+        echo -e "${GREEN}  2.${PLAIN} 修改 Nginx"
+        echo -e "${GREEN}  3.${PLAIN} 重启 Nginx"
+        echo -e "${GREEN}  4.${PLAIN} 删除 Nginx"
+        echo -e "${GREEN}  0.${PLAIN} 返回主菜单"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
+        case "$sub_choice" in
+            1) install_fake_web ;;
+            2) modify_nginx_conf ;;
+            3) restart_nginx ;;
+            4) remove_nginx ;;
+            0) break ;;
+            *) echo -e "${RED}无效选择，请重新输入${PLAIN}"; pause_and_return ;;
+        esac
+    done
+}
+
+install_fake_web() {
+    clear
+    if [[ -f /etc/nginx/conf.d/trojan.conf ]]; then
+        echo -e "${YELLOW}trojan.conf 已存在，已配置过伪装网页。如需重新配置请先删除。${PLAIN}"
+        pause_and_return
+        return
+    fi
+    echo -e "${GREEN}开始安装并配置伪装静态网页...${PLAIN}"
+    read -p "$(echo -e "${CYAN}请输入 Nginx 监听端口 [默认:80]: ${PLAIN}")" web_port
+    web_port=${web_port:-80}
+    sudo mkdir -p /var/www/trojan
+    cd /var/www/trojan
+    sudo wget -O index.html https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/index.html
+
+    sudo bash -c "cat > /etc/nginx/conf.d/trojan.conf" <<EOF
+server {
+    listen $web_port default_server;
+    root /var/www/trojan;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+EOF
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo -e "${YELLOW}正在安装 Nginx...${PLAIN}"
+        apt update -y
+        apt install -y nginx
+    fi
+    systemctl enable nginx
+    systemctl restart nginx
+    echo -e "${GREEN}伪装网页已部署,Nginx 配置完成并已启动${PLAIN}"
+    pause_and_return
+}
+
+modify_nginx_conf() {
+    clear
+    conf_path="/etc/nginx/conf.d/trojan.conf"
+    if [[ ! -f "$conf_path" ]]; then
+        echo -e "${RED}未找到 Nginx 配置文件: $conf_path，未安装或未配置，请先选择1进行配置。${PLAIN}"
+        pause_and_return
+        return
+    fi
+    echo -e "${CYAN}当前 Nginx 配置如下:${PLAIN}"
+    cat "$conf_path"
+    echo -e "${YELLOW}请修改上面内容,在编辑器中保存并退出"
+    echo -e "${YELLOW}nano编辑器操作: Ctrl+O 保存,Ctrl+X 退出${PLAIN}"
+    read -p "按回车键继续编辑..." temp
+    ${EDITOR:-nano} "$conf_path"
+    echo -e "${YELLOW}正在重载 Nginx 服务...${PLAIN}"
+    systemctl reload nginx
+    echo -e "${GREEN}Nginx 配置已修改并重载${PLAIN}"
+    pause_and_return
+}
+
+restart_nginx() {
+    clear
+    echo -e "${YELLOW}正在重启 Nginx 服务...${PLAIN}"
+    systemctl restart nginx
+    systemctl status nginx --no-pager
+    echo -e "${GREEN}Nginx 已重启。${PLAIN}"
+    pause_and_return
+}
+
+remove_nginx() {
+    clear
+    echo -e "${RED}即将卸载 Nginx 及伪装网页配置...${PLAIN}"
+    read -p "$(echo -e "${YELLOW}确定删除 Nginx 及伪装网页吗？(y/n): ${PLAIN}")" yn
+    if [[ "$yn" =~ ^[Yy]$ ]]; then
+        systemctl stop nginx
+        apt purge -y nginx
+        apt autoremove -y
+        rm -rf /etc/nginx/conf.d/trojan.conf
+        rm -rf /var/www/trojan
+        echo -e "${GREEN}Nginx 及伪装网页已删除${PLAIN}"
+    else
+        echo -e "${YELLOW}取消删除操作${PLAIN}"
+    fi
+    pause_and_return
+}
+
 # ======== 3. Trojan-Go 功能相关 ========
 install_trojan_go() {
     check_dependencies
@@ -768,6 +873,7 @@ main_menu() {
         echo -e "${GREEN}  2.${PLAIN}安装 Trojan-Go"
         echo -e "${GREEN}  3.${PLAIN}管理 Trojan-Go"
         echo -e "${GREEN}  4.${PLAIN}卸载 Acme及证书"
+        echo -e "${GREEN}  5.${PLAIN}配置 伪装静态网页"
         echo -e "${GREEN}  0.${PLAIN}离开 El Psy Kongroo"
         read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
@@ -776,6 +882,7 @@ main_menu() {
             2) install_trojan_go ;;
             3) manage_trojan_go ;;
             4) uninstall_acme ;;
+            5) web_menu ;;
             0) clear; echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; exit 0 ;;
             *) echo -e "${RED}错误的命运抉择,请重新寻觅世界线。${PLAIN}"; pause_and_return ;;
         esac
