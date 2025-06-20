@@ -214,7 +214,6 @@ tun:
   strict-route: true
   auto-redirect: true
   auto-detect-interface: true
-
 geodata-mode: false
 geox-url:
   mmdb: "https://raw.githubusercontent.com/NobyDa/geoip/release/Private-GeoIP-CN.mmdb"
@@ -222,13 +221,15 @@ geo-update-interval: 24
 tcp-concurrent: true
 find-process-mode: off
 allow-lan: false
+skip-auth-prefixes:
+- 127.0.0.1/8
 socks-port: $socks_port
 bind-address: "$bind_address"
 external-controller: "$external_controller"
 secret: "$ext_ctrl_secret"
 $(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
 mode: $mode
-log-level: warning
+log-level: silent
 ipv6: false
 profile:
   store-selected: true
@@ -240,16 +241,15 @@ dns:
   listen: 0.0.0.0:53
   ipv6: false
   nameserver:
-    - 8.8.8.8
-  fallback:
     - 1.1.1.1
+  fallback:
+    - 8.8.8.8
   direct-nameserver:
     - system
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
     - '*.lan'
-
 proxies:
   - name: "warp"
     type: wireguard
@@ -261,7 +261,6 @@ proxies:
     allowed-ips: ['0.0.0.0/0']
     udp: true
     mtu: $mtu
-
 rule-providers:
   OpenAI:
     type: http
@@ -277,7 +276,6 @@ rule-providers:
     path: ./Rule/YouTube
     url: https://raw.githubusercontent.com/Emokui/Nothing/Zero/Rule/YouTube
     interval: 86400
-
 rules:
   - RULE-SET,YouTube,warp,no-resolve
   - RULE-SET,OpenAI,warp,no-resolve
