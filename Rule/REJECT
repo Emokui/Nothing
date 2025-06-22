@@ -1,33 +1,3 @@
-# OWN
-DOMAIN,googleads.g.doubleclick.net
-DOMAIN,wv.inner-active.mobi
-DOMAIN,ads.pubmatic.com
-DOMAIN,app-analytics-services.com
-DOMAIN,firebaselogging-pa.googleapis.com
-DOMAIN,firebase-settings.crashlytics.com
-DOMAIN,skadnetworks.fyber.com
-DOMAIN-SUFFIX,inmobi.com
-DOMAIN-SUFFIX,spadsync.com
-DOMAIN-SUFFIX,tappx.com
-DOMAIN-SUFFIX,criteo.com
-DOMAIN-SUFFIX,pubmatic.com
-DOMAIN-SUFFIX,smaato.net
-DOMAIN-SUFFIX,amazon-adsystem.com
-DOMAIN-SUFFIX,adsappier.com
-DOMAIN-SUFFIX,appier.net
-DOMAIN-SUFFIX,appiersig.com
-DOMAIN-SUFFIX,sp.mobidriven.com
-DOMAIN-SUFFIX,dsp.appifun.com
-DOMAIN-SUFFIX,telemetry.sdk.inmobi.cn
-DOMAIN-SUFFIX,ads.talkatone.com
-DOMAIN-SUFFIX,analytics.talkatone.com
-DOMAIN-SUFFIX,track.talkatone.com
-DOMAIN-SUFFIX,adserver.talkatone.com
-DOMAIN-SUFFIX,doubleclick.net
-DOMAIN-SUFFIX,googlesyndication.com
-DOMAIN-SUFFIX,inner-active.mobi
-DOMAIN-SUFFIX,mobilefuse.com
-# OTHERS
 DOMAIN,1500020991.vodplayer.wxamedia.com
 DOMAIN,1500022744.vodplayer.wxamedia.com
 DOMAIN,1500026601.vodplayer.wxamedia.com
@@ -191,7 +161,6 @@ DOMAIN,analysis.chatglm.cn
 DOMAIN,analysis.yozocloud.cn
 DOMAIN,analytics-api.samsunghealthcn.com
 DOMAIN,analytics.adjust.cn
-DOMAIN,analytics.google.com
 DOMAIN,analytics.pinterest.com
 DOMAIN,analytics.pointdrive.linkedin.com
 DOMAIN,analytics.query.yahoo.com
@@ -317,6 +286,7 @@ DOMAIN,csjplatform.com
 DOMAIN,cws-cctv.conviva.com
 DOMAIN,d.applovin.com
 DOMAIN,d.applvn.com
+DOMAIN,data-sdk-uuid-log.d.meituan.net
 DOMAIN,data.ads.oppomobile.com
 DOMAIN,data.chsmarttv.com
 DOMAIN,data.mistat.india.xiaomi.com
@@ -390,6 +360,7 @@ DOMAIN,gslb.hpplay.cn
 DOMAIN,gvideo.qpic.cn
 DOMAIN,h-adashx.ut.taobao.com
 DOMAIN,h.trace.qq.com
+DOMAIN,h5.analytics.126.net
 DOMAIN,h5.hpplay.com.cn
 DOMAIN,hanlanad.com
 DOMAIN,hc-ssp.sm.cn
@@ -492,6 +463,7 @@ DOMAIN,log.avlyun.com
 DOMAIN,log.avlyun.sec.intl.miui.com
 DOMAIN,log.byteoversea.com
 DOMAIN,log.fc.yahoo.com
+DOMAIN,log.iflytek.com
 DOMAIN,log.kuwo.cn
 DOMAIN,log.pinterest.com
 DOMAIN,log.popin.cc
@@ -653,6 +625,7 @@ DOMAIN,sdk-ab-config.qquanquan.com
 DOMAIN,sdk-cache.video.ptqy.gitv.tv
 DOMAIN,sdk.1rtb.net
 DOMAIN,sdk.ad.smaato.net
+DOMAIN,sdk.adx.adwangmai.com
 DOMAIN,sdk.beizi.biz
 DOMAIN,sdk.cferw.com
 DOMAIN,sdk.e.qq.com
@@ -675,6 +648,7 @@ DOMAIN,search5-search.ixigua.com
 DOMAIN,securemetrics.apple.com
 DOMAIN,securepubads.g.doubleclick.net
 DOMAIN,sensors-log.dongqiudi.com
+DOMAIN,sentry.music.163.com
 DOMAIN,service.changhong.upgrade2.huan.tv
 DOMAIN,service.vmos.cn
 DOMAIN,sf16-static.i18n-pglstatp.com
