@@ -456,166 +456,117 @@ configure_firewall() {
     else
         echo -e "${GREEN}[✓] iptables 已存在${RESET}"
     fi
-    
+
     while true; do
         clear
         echo -e "${BOLD}${CYAN}========= iptables 防火墙管理 =========${RESET}"
-        echo -e " ${GREEN}1.开启端口${RESET}"
-        echo -e " ${RED}2.关闭端口${RESET}"
-        echo -e " ${GREEN}3.开启全部端口${RESET}"
-        echo -e " ${RED}4.关闭全部端口(保留22)${RESET}"
-        echo -e " ${BLUE}5.显示已开启的端口${RESET}"
-        echo -e " ${YELLOW}0.返回主菜单${RESET}"
-        echo -e "${BOLD}${CYAN}=======================================${RESET}"
+        echo -e "${GREEN}1. 开启端口${RESET}"
+        echo -e "${RED}2. 关闭端口${RESET}"
+        echo -e "${GREEN}3. 开启全部端口${RESET}"
+        echo -e "${RED}4. 关闭全部端口(保留SSH)${RESET}"
+        echo -e "${BLUE}5. 显示已开启的端口${RESET}"
+        echo -e "${YELLOW}0. 返回主菜单${RESET}"
+        echo -e "${BOLD}${CYAN}======================================${RESET}"
         read -rp "请输入选项(0-5): " action_choice
-
+        action_choice=$(echo "$action_choice" | xargs)
+        [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
-        1|2)
-            process_port_rule() {
-                local mode="$1"
-                local proto port_spec
-                port_spec="$2"
-                for proto in tcp udp; do
-                    iptables -D INPUT -p $proto --dport "$port_spec" -j ACCEPT 2>/dev/null || true
-                    iptables -D INPUT -p $proto --dport "$port_spec" -j DROP 2>/dev/null || true
-
-                    if [ "$mode" = "open" ]; then
-                        if ! iptables -C INPUT -p $proto --dport "$port_spec" -j ACCEPT 2>/dev/null; then
-                            iptables -I INPUT -p $proto --dport "$port_spec" -j ACCEPT
+            1|2)
+                read -rp "请输入端口（如 443 或 1000-2000）: " ports
+                for port in $ports; do
+                    if [[ "$port" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                        start_port=${BASH_REMATCH[1]}
+                        end_port=${BASH_REMATCH[2]}
+                        # 先删除旧规则（tcp/udp）
+                        iptables -D INPUT -p tcp --dport $start_port:$end_port -j ACCEPT 2>/dev/null || true
+                        iptables -D INPUT -p tcp --dport $start_port:$end_port -j DROP 2>/dev/null || true
+                        iptables -D INPUT -p udp --dport $start_port:$end_port -j ACCEPT 2>/dev/null || true
+                        iptables -D INPUT -p udp --dport $start_port:$end_port -j DROP 2>/dev/null || true
+                        if [[ "$action_choice" == "1" ]]; then
+                            iptables -A INPUT -p tcp --dport $start_port:$end_port -j ACCEPT
+                            iptables -A INPUT -p udp --dport $start_port:$end_port -j ACCEPT
+                            echo -e "${GREEN}[✓] 端口范围 $port 已开启${RESET}"
+                        else
+                            [[ "$start_port" -le 22 && "$end_port" -ge 22 ]] && { echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${RESET}"; continue; }
+                            iptables -A INPUT -p tcp --dport $start_port:$end_port -j DROP
+                            iptables -A INPUT -p udp --dport $start_port:$end_port -j DROP
+                            echo -e "${RED}[✓] 端口范围 $port 已关闭${RESET}"
                         fi
                     else
-                        if ! iptables -C INPUT -p $proto --dport "$port_spec" -j DROP 2>/dev/null; then
-                            iptables -I INPUT -p $proto --dport "$port_spec" -j DROP
+                        if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+                            echo -e "${RED}[!] 无效端口: $port${RESET}"
+                            continue
+                        fi
+                        if [[ "$port" == "22" && "$action_choice" == "2" ]]; then
+                            echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${RESET}"
+                            continue
+                        fi
+                        # 先删除旧规则（tcp/udp）
+                        iptables -D INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null || true
+                        iptables -D INPUT -p tcp --dport $port -j DROP 2>/dev/null || true
+                        iptables -D INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
+                        iptables -D INPUT -p udp --dport $port -j DROP 2>/dev/null || true
+                        if [[ "$action_choice" == "1" ]]; then
+                            iptables -A INPUT -p tcp --dport $port -j ACCEPT
+                            iptables -A INPUT -p udp --dport $port -j ACCEPT
+                            echo -e "${GREEN}[✓] 端口 $port 已开启${RESET}"
+                        else
+                            iptables -A INPUT -p tcp --dport $port -j DROP
+                            iptables -A INPUT -p udp --dport $port -j DROP
+                            echo -e "${RED}[✓] 端口 $port 已关闭${RESET}"
                         fi
                     fi
                 done
-            }
-
-            read -rp "请输入端口（如 443,80,1000-2000): " ports_raw
-            ports=$(echo "$ports_raw" | tr ',' ' ' | sed 's/:/-/g')
-            for port in $ports; do
-                if [[ "$port" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                    start_port=${BASH_REMATCH[1]}
-                    end_port=${BASH_REMATCH[2]}
-                    if [[ "$action_choice" == "2" && "$start_port" -le 22 && "$end_port" -ge 22 ]]; then
-                        echo -e "${YELLOW}[!] 警告:不允许关闭 SSH端口(22)${RESET}"
-                        continue
-                    fi
-                    if [[ "$action_choice" == "1" ]]; then
-                        process_port_rule open "$start_port:$end_port"
-                        echo -e "${GREEN}[✓] 端口范围 $port 已开启${RESET}"
-                    else
-                        process_port_rule close "$start_port:$end_port"
-                        echo -e "${RED}[✓] 端口范围 $port 已关闭${RESET}"
-                    fi
-                elif [[ "$port" =~ ^[0-9]+$ ]]; then
-                    if [[ "$action_choice" == "2" && "$port" == "22" ]]; then
-                        echo -e "${YELLOW}[!] 警告:不允许关闭 SSH端口(22)${RESET}"
-                        continue
-                    fi
-                    if [[ "$action_choice" == "1" ]]; then
-                        process_port_rule open "$port"
-                        echo -e "${GREEN}[✓] 端口 $port 已开启${RESET}"
-                    else
-                        process_port_rule close "$port"
-                        echo -e "${RED}[✓] 端口 $port 已关闭${RESET}"
-                    fi
-                else
-                    echo -e "${RED}[!] 无效端口: $port${RESET}"
+                if command -v netfilter-persistent &>/dev/null; then
+                    netfilter-persistent save
+                elif command -v service &>/dev/null && service iptables save &>/dev/null; then
+                    service iptables save
                 fi
-            done
-
-            if command -v netfilter-persistent &>/dev/null; then
-                netfilter-persistent save
-            elif command -v service &>/dev/null && service iptables save &>/dev/null; then
-                service iptables save
-            fi
-
-            if [[ "$action_choice" == "1" ]]; then
-                echo -e "${GREEN}[✓] 所有指定端口已开启完成${RESET}"
-            else
-                echo -e "${RED}[✓] 所有指定端口已关闭完成${RESET}"
-            fi
-            read -n 1 -s -r -p "按任意键返回菜单..."
-            echo
-            ;;
-        3)
-            iptables -F
-            iptables -A INPUT -p tcp --dport 1:65535 -j ACCEPT
-            iptables -A INPUT -p udp --dport 1:65535 -j ACCEPT
-            iptables -P INPUT DROP
-            iptables -P FORWARD ACCEPT
-            iptables -P OUTPUT ACCEPT
-            if command -v netfilter-persistent &>/dev/null; then
-                netfilter-persistent save
-            elif command -v service &>/dev/null && service iptables save &>/dev/null; then
-                service iptables save
-            fi
-            echo -e "${GREEN}[✓] 所有端口已开启${RESET}"
-            read -n 1 -s -r -p "按任意键返回菜单..."
-            echo
-            ;;
-        4)
-            iptables -F
-            iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-            iptables -A INPUT -p udp --dport 22 -j ACCEPT
-            iptables -P INPUT DROP
-            iptables -P FORWARD ACCEPT
-            iptables -P OUTPUT ACCEPT
-            if command -v netfilter-persistent &>/dev/null; then
-                netfilter-persistent save
-            elif command -v service &>/dev/null && service iptables save &>/dev/null; then
-                service iptables save
-            fi
-            echo -e "${RED}[✓] 仅允许22端口,其他端口已禁用${RESET}"
-            read -n 1 -s -r -p "按任意键返回菜单..."
-            echo
-            ;;
-        5)
-            policy=$(iptables -L INPUT -n | head -1 | awk '{print $4}')
-            accept_all_tcp=$(iptables -S INPUT | grep -- "-p tcp" | grep -- "--dport 1:65535" | grep -q -- "-j ACCEPT" && echo yes || echo no)
-            accept_all_udp=$(iptables -S INPUT | grep -- "-p udp" | grep -- "--dport 1:65535" | grep -q -- "-j ACCEPT" && echo yes || echo no)
-
-            if [ "$policy" = "ACCEPT" ] || { [ "$accept_all_tcp" = "yes" ] && [ "$accept_all_udp" = "yes" ]; }; then
-                echo -e "${GREEN}所有端口均已开放${RESET}"
-                iptables -S INPUT | while read line; do
-                    echo "$line" | grep -q -- "-j DROP" || continue
-                    if echo "$line" | grep -q -- "--dport"; then
-                        proto=$(echo "$line" | awk '{for(i=1;i<=NF;i++){if($i=="-p"){print $(i+1)}}}')
-                        dport=$(echo "$line" | awk '{for(i=1;i<=NF;i++){if($i=="--dport"){print $(i+1)}}}')
-                        [ -n "$dport" ] && echo -e "${RED}${proto} 端口: $dport 已被关闭${RESET}"
-                    fi
-                done
-            else
-                echo -e "${BLUE}当前允许访问的端口如下:${RESET}"
-                tmpfile=$(mktemp)
-                iptables -S INPUT | while read line; do
-                    echo "$line" | grep -q -- "-j ACCEPT" || continue
-                    (echo "$line" | grep -q -- "-p tcp" || echo "$line" | grep -q -- "-p udp") || continue
-                    if echo "$line" | grep -q -- "--dport"; then
-                        proto=$(echo "$line" | awk '{for(i=1;i<=NF;i++){if($i=="-p"){print $(i+1)}}}')
-                        dport=$(echo "$line" | awk '{for(i=1;i<=NF;i++){if($i=="--dport"){print $(i+1)}}}')
-                        [ -n "$dport" ] && echo -e "${GREEN}${proto} 端口: $dport${RESET}"
-                    fi
-                done > "$tmpfile"
-                if [ -s "$tmpfile" ]; then
-                    cat "$tmpfile"
+                if [[ "$action_choice" == "1" ]]; then
+                    echo -e "${GREEN}[✓] 所有指定端口已开启完成${RESET}"
                 else
-                    echo -e "${YELLOW}未检测到开启的端口${RESET}"
+                    echo -e "${RED}[✓] 所有指定端口已关闭完成${RESET}"
                 fi
-                rm -f "$tmpfile"
-            fi
-            read -n 1 -s -r -p "按任意键返回菜单..."
-            echo
-            ;;
-        0)
-            break
-            ;;
-        *)
-            echo -e "${RED}无效选项，请重新输入${RESET}"
-            read -n 1 -s -r -p "按任意键返回菜单..."
-            echo
-            ;;
+                press_any_key_to_continue
+                ;;
+            3)
+                iptables -F
+                iptables -P INPUT ACCEPT
+                iptables -P FORWARD ACCEPT
+                iptables -P OUTPUT ACCEPT
+                if command -v netfilter-persistent &>/dev/null; then
+                    netfilter-persistent save
+                elif command -v service &>/dev/null && service iptables save &>/dev/null; then
+                    service iptables save
+                fi
+                echo -e "${GREEN}[✓] 所有端口已开启${RESET}"
+                press_any_key_to_continue
+                ;;
+            4)
+                iptables -F
+                iptables -P INPUT DROP
+                iptables -P FORWARD DROP
+                iptables -P OUTPUT ACCEPT
+                iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+                iptables -A INPUT -i lo -j ACCEPT
+                iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+                if command -v netfilter-persistent &>/dev/null; then
+                    netfilter-persistent save
+                elif command -v service &>/dev/null && service iptables save &>/dev/null; then
+                    service iptables save
+                fi
+                echo -e "${RED}[✓] 所有端口已关闭 (22端口除外)${RESET}"
+                press_any_key_to_continue
+                ;;
+            5)
+                iptables_output=$(iptables -L INPUT -n -v)
+                echo -e "${BLUE}$iptables_output${RESET}"
+                press_any_key_to_continue
+                ;;
+            *)
+                echo -e "${RED}[!] 无效选项，请重新选择${RESET}"
+                sleep 1
+                ;;
         esac
     done
 }
