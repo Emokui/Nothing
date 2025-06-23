@@ -414,7 +414,6 @@ install_hysteria()  { send_stats "配置Hysteria";  run_install_script "https://
 install_substore()  { send_stats "配置SubStore";  run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/substore.sh"; }
 install_install()   { send_stats "一键DDSystem";  run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/Install.sh"; }
 install_nginx()     { send_stats "反代Nginx";     run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/nginx.sh"; }
-install_snell-pro() { send_stats "超级Snell";     run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell-pro.sh"; }
 bbr_menu()          { send_stats "管理BBR";       run_install_script "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh"; }
 warp_menu()         { send_stats "管理WARP";      run_install_script "https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh"; }
 install_wireguard() { send_stats "提取WireGuard"; run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
@@ -730,13 +729,12 @@ main_menu() {
         echo -e "${GREEN}14.${WHITE} 配置 Acme"
         echo -e "${GREEN}15.${WHITE} 反代 Nginx"
         echo -e "${GREEN}16.${WHITE} 配置 Snell"
-        echo -e "${GREEN}17.${WHITE} 超级 Snell"
-        echo -e "${GREEN}18.${WHITE} 配置 Mihomo"
-        echo -e "${GREEN}19.${WHITE} 配置 Trojan"
-        echo -e "${GREEN}20.${WHITE} 配置 Hysteria"
-        echo -e "${GREEN}21.${WHITE} 配置 SubStore"
-        echo -e "${GREEN}22.${WHITE} 一键 DDsystem"
-        echo -e "${GREEN}23.${WHITE} 提取 WireGuard"
+        echo -e "${GREEN}17.${WHITE} 配置 Mihomo"
+        echo -e "${GREEN}18.${WHITE} 配置 Trojan"
+        echo -e "${GREEN}19.${WHITE} 配置 Hysteria"
+        echo -e "${GREEN}20.${WHITE} 配置 SubStore"
+        echo -e "${GREEN}21.${WHITE} 一键 DDsystem"
+        echo -e "${GREEN}22.${WHITE} 提取 WireGuard"
         echo -e "${GREEN} 0.${WHITE} 离开 El Psy Kongroo"
         read -rp "请选择操作: " choice
         choice=$(echo "$choice" | xargs)
@@ -757,13 +755,12 @@ main_menu() {
             14) install_acme ;;
             15) install_nginx ;;
             16) install_snell ;;
-            17) install_snell-pro ;;
-            18) install_mihomo ;;
-            19) install_trojan ;;
-            20) install_hysteria ;;
-            21) install_substore ;;
-            22) install_install ;;
-            23) install_wireguard ;;
+            17) install_mihomo ;;
+            18) install_trojan ;;
+            19) install_hysteria ;;
+            20) install_substore ;;
+            21) install_install ;;
+            22) install_wireguard ;;
             0)  clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${WHITE}"; sleep 1; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${WHITE}"; sleep 2 ;;
         esac
