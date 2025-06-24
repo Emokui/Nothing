@@ -841,12 +841,16 @@ install_fake_web() {
 
     sudo bash -c "cat > /etc/nginx/conf.d/trojan.conf" <<EOF
 server {
-    listen $web_port default_server;
+    listen 127.0.0.1:8080 default_server;
     root /var/www/trojan;
     index index.html;
 
+    location = / {
+        try_files /index.html =444;
+    }
+
     location / {
-        try_files \$uri \$uri/ =404;
+        return 444;
     }
 }
 EOF
