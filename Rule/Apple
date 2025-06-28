@@ -1,6 +1,7 @@
 DOMAIN,beta.apple.com
 DOMAIN,testflight.apple.com
 DOMAIN,loginserver.pokemmo.com
+DOMAIN,token.safebrowsing.apple
 DOMAIN,this_ruleset_is_made_by_sukkaw.ruleset.skk.moe
 DOMAIN,www-mail.icloud-sandbox.com
 DOMAIN,images-mercury.mzstatic.com
