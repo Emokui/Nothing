@@ -122,18 +122,18 @@ linux_clean() {
     elif command -v emerge &>/dev/null; then
         emerge --depclean && eclean-dist --deep
     else
-        echo -e "${RED}未知的包管理器!${WHITE}"
+        echo -e "${RED}未知的包管理器!${PLAIN}"
     fi
 
     # ------ 清理Docker垃圾 ------
     if command -v docker &>/dev/null; then
-        echo -e "${YELLOW}清理Docker垃圾...${WHITE}"
+        echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
         docker system prune -af
         docker volume prune -f
     fi
 
     # ------ 清理系统日志（保留1天） ------
-    echo -e "${YELLOW}正在清理系统日志...${WHITE}"
+    echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
         journalctl --vacuum-time=3d --vacuum-size=100M
     fi
@@ -142,11 +142,11 @@ linux_clean() {
     find /var/log -type f -name "*.1" -mtime +1 -exec rm -f {} \;
 
     # ------ 清理临时目录 ------
-    echo -e "${YELLOW}正在清理临时目录...${WHITE}"
+    echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
     rm -rf /tmp/* /var/tmp/*
 
     # ------ 清理用户缓存 ------
-    echo -e "${YELLOW}正在清理用户缓存...${WHITE}"
+    echo -e "${YELLOW}正在清理用户缓存...${PLAIN}"
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
     fi
