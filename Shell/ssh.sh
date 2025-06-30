@@ -122,35 +122,39 @@ linux_clean() {
     elif command -v emerge &>/dev/null; then
         emerge --depclean && eclean-dist --deep
     else
-        echo -e "${RED}未知的包管理器!${PLAIN}"
+        echo -e "${RED}未知的包管理器!${WHITE}"
     fi
 
     # ------ 清理Docker垃圾 ------
     if command -v docker &>/dev/null; then
-        echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
+        echo -e "${YELLOW}清理Docker垃圾...${WHITE}"
         docker system prune -af
         docker volume prune -f
     fi
 
-    # ------ 清理系统日志 ------
-    echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
+    # ------ 清理系统日志（保留1天） ------
+    echo -e "${YELLOW}正在清理系统日志...${WHITE}"
     if command -v journalctl &>/dev/null; then
-        journalctl --rotate
-        journalctl --vacuum-time=1s
+        journalctl --vacuum-time=3d --vacuum-size=100M
     fi
-    find /var/log -type f -name "*.log" -exec rm -f {} \;
-    find /var/log -type f -name "*.gz" -exec rm -f {} \;
-    find /var/log -type f -name "*.1" -exec rm -f {} \;
+    find /var/log -type f -name "*.log" -mtime +1 -exec rm -f {} \;
+    find /var/log -type f -name "*.gz" -mtime +1 -exec rm -f {} \;
+    find /var/log -type f -name "*.1" -mtime +1 -exec rm -f {} \;
 
     # ------ 清理临时目录 ------
-    echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
+    echo -e "${YELLOW}正在清理临时目录...${WHITE}"
     rm -rf /tmp/* /var/tmp/*
 
     # ------ 清理用户缓存 ------
-    echo -e "${YELLOW}正在清理用户缓存...${PLAIN}"
+    echo -e "${YELLOW}正在清理用户缓存...${WHITE}"
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
     fi
+    
+    #------ 清理非root用户缓存 ------
+    for uhome in /home/*; do
+        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
+    done
 
     echo -e "${GREEN}系统清理完成${PLAIN}"
     press_any_key_to_continue
