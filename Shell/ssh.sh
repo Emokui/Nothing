@@ -725,8 +725,8 @@ main_menu() {
         echo -e "${GREEN}04.${PLAIN} 设置防火墙"
         echo -e "${GREEN}05.${PLAIN} 设置虚拟内存"
         echo -e "${GREEN}06.${PLAIN} 配置 SSH"
-        echo -e "${GREEN}07.${PLAIN} 重启 VPS"
-        echo -e "${GREEN}08.${PLAIN} 配置 DNS"
+        echo -e "${GREEN}07.${PLAIN} 配置 DNS"
+        echo -e "${GREEN}08.${PLAIN} 重启 VPS"
         echo -e "${GREEN}09.${PLAIN} 管理 BBR"
         echo -e "${GREEN}10.${PLAIN} 管理 WARP"
         echo -e "${GREEN}11.${PLAIN} 配置 Acme"
@@ -748,8 +748,8 @@ main_menu() {
             4)  configure_firewall ;;
             5)  set_swap_menu ;;
             6)  ssh_config_menu ;;
-            7)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            8)  dns_config_menu ;;
+            7)  dns_config_menu ;;
+            8)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
             9)  bbr_menu ;;
             10) warp_menu ;;
             11) install_acme ;;
