@@ -41,6 +41,29 @@ get_latest_snell_version() {
     fi
 }
 
+install_unzip_if_missing() {
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo -e "${YELLOW}未检测到 unzip，正在自动安装...${PLAIN}"
+        if command -v apt &>/dev/null; then
+            apt update && apt install -y unzip
+        elif command -v dnf &>/dev/null; then
+            dnf install -y unzip
+        elif command -v yum &>/dev/null; then
+            yum install -y unzip
+        elif command -v apk &>/dev/null; then
+            apk add unzip
+        elif command -v pacman &>/dev/null; then
+            pacman -Sy --noconfirm unzip
+        elif command -v zypper &>/dev/null; then
+            zypper --non-interactive install unzip
+        else
+            echo -e "${RED}无法识别的包管理器，unzip 安装失败，请手动安装！${PLAIN}"
+            exit 1
+        fi
+        echo -e "${GREEN}unzip 安装完成${PLAIN}"
+    fi
+}
+
 install_snell() {
   clear
   if snell_installed; then
@@ -75,6 +98,7 @@ install_snell() {
       pause_and_clear
       return 1
   else
+      install_unzip_if_missing
       unzip -o "$snell_zip"
   fi
 
@@ -142,6 +166,7 @@ update_snell() {
       pause_and_clear
       return 1
   else
+      install_unzip_if_missing
       unzip -o "$snell_zip"
   fi
 
