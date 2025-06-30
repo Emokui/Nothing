@@ -328,13 +328,12 @@ change_timezone() {
 
     while true; do
         clear
-        echo -e "${BOLD}${CYAN}=============== 更改时区 ==============${PLAIN}"
-        echo -e "${YELLOW}当前系统时间:$(date)${PLAIN}"
-        echo -e "${YELLOW}当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${PLAIN}"
+        echo -e "${BOLD}${CYAN}=========== 更改时区 ==========${PLAIN}"
+        echo -e "${YELLOW}   当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 推荐时区 (${YELLOW}$current_tz${PLAIN})"
         echo -e "${GREEN}2.${PLAIN} 按国家代码选择"
         echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${CYAN}=======================================${PLAIN}"
+        echo -e "${BOLD}${CYAN}===============================${PLAIN}"
         read -rp "请选择: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
