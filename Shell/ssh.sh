@@ -102,12 +102,6 @@ linux_clean() {
     clear
     echo -e "${YELLOW}正在清理系统垃圾...${PLAIN}"
 
-    # ------ 权限检查 ------
-    if [ "$(id -u)" -ne 0 ]; then
-        echo -e "${RED}请以root权限运行本脚本以获得最佳清理效果！${PLAIN}"
-        return 1
-    fi
-
     # ------ 包管理器缓存清理 ------
     if command -v apt &>/dev/null; then
         apt autoremove -y && apt autoclean -y && apt clean
@@ -157,10 +151,6 @@ linux_clean() {
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
     fi
-    #------ 清理非root用户缓存 ------
-    for uhome in /home/*; do
-        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
-    done
 
     echo -e "${GREEN}系统清理完成${PLAIN}"
     press_any_key_to_continue
@@ -172,7 +162,6 @@ swapfile_path="/swapfile"
 set_swap_menu() {
     while true; do
         clear
-        # 获取当前 Swap 总大小（MB）
         current_swap=$(free -m | awk '/Swap:/ {print $2}')
         swap_info="无"
         if (( current_swap > 0 )); then
@@ -482,7 +471,6 @@ configure_firewall() {
                     if [[ "$port" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                         start_port=${BASH_REMATCH[1]}
                         end_port=${BASH_REMATCH[2]}
-                        # 先删除旧规则（tcp/udp）
                         iptables -D INPUT -p tcp --dport $start_port:$end_port -j ACCEPT 2>/dev/null || true
                         iptables -D INPUT -p tcp --dport $start_port:$end_port -j DROP 2>/dev/null || true
                         iptables -D INPUT -p udp --dport $start_port:$end_port -j ACCEPT 2>/dev/null || true
@@ -506,7 +494,6 @@ configure_firewall() {
                             echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${PLAIN}"
                             continue
                         fi
-                        # 先删除旧规则（tcp/udp）
                         iptables -D INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null || true
                         iptables -D INPUT -p tcp --dport $port -j DROP 2>/dev/null || true
                         iptables -D INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
@@ -761,7 +748,7 @@ main_menu() {
             17) install_substore ;;
             18) install_install ;;
             19) install_wireguard ;;
-            0)  clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 1; clear; break ;;
+            0)  clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
     done
