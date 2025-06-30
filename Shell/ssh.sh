@@ -138,14 +138,15 @@ linux_clean() {
         docker volume prune -f
     fi
 
-    # ------ 清理系统日志（保留3天） ------
+    # ------ 清理系统日志 ------
     echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=3d --vacuum-size=100M
+        journalctl --rotate
+        journalctl --vacuum-time=1s
     fi
-    find /var/log -type f -name "*.log" -mtime +3 -exec rm -f {} \;
-    find /var/log -type f -name "*.gz" -mtime +3 -exec rm -f {} \;
-    find /var/log -type f -name "*.1" -mtime +3 -exec rm -f {} \;
+    find /var/log -type f -name "*.log" -exec rm -f {} \;
+    find /var/log -type f -name "*.gz" -exec rm -f {} \;
+    find /var/log -type f -name "*.1" -exec rm -f {} \;
 
     # ------ 清理临时目录 ------
     echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
