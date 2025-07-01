@@ -3,15 +3,14 @@
 set -euo pipefail
 
 # ====== 颜色变量统一管理 ======
-GREEN='\033[32m'
-YELLOW='\033[33m'
-BLUE='\033[34m'
-PURPLE='\033[35m'
-CYAN='\033[36m'
-BOLD='\033[1m'
-LIGHTCYAN='\033[96m'
-RED='\033[31m'
-PLAIN='\033[0m'
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+PURPLE="\033[1;35m"
+CYAN="\033[1;36m"
+RED="\033[1;31m"
+BOLD="\033[1m"
+PLAIN="\033[0m"
 
 # ====== 必须以 root 权限运行 ======
 if [[ $EUID -ne 0 ]]; then
@@ -391,9 +390,9 @@ change_timezone() {
                     sleep 1
                     continue
                 fi
-                echo -e "${LIGHTCYAN}========= 可选时区 =========${PLAIN}"
+                echo -e "${BLUE}========= 可选时区 =========${PLAIN}"
                 for i in "${!lines[@]}"; do
-                    echo -e "${GREEN}$((i+1)).${PLAIN} ${LIGHTCYAN}${lines[$i]}${PLAIN}"
+                    echo -e "${GREEN}$((i+1)).${PLAIN} ${BLUE}${lines[$i]}${PLAIN}"
                 done
                 read -rp "请选择时区编号: " tz_choice
                 tz_choice=$(echo "$tz_choice" | xargs)
@@ -734,28 +733,28 @@ dns_config_menu() {
 main_menu() {
     while true; do
         clear
-        echo -e "${LIGHTCYAN}✦ Steins Gate - Ver 2.1 ✦${PLAIN}"
-        echo -e "${GREEN}01.${PLAIN} 系统更新"
-        echo -e "${GREEN}02.${PLAIN} 系统清理"
-        echo -e "${GREEN}03.${PLAIN} 设置时区"
-        echo -e "${GREEN}04.${PLAIN} 设置防火墙"
-        echo -e "${GREEN}05.${PLAIN} 设置虚拟内存"
-        echo -e "${GREEN}06.${PLAIN} 配置 SSH"
-        echo -e "${GREEN}07.${PLAIN} 配置 DNS"
-        echo -e "${GREEN}08.${PLAIN} 重启 VPS"
-        echo -e "${GREEN}09.${PLAIN} 管理 BBR"
-        echo -e "${GREEN}10.${PLAIN} 管理 WARP"
-        echo -e "${GREEN}11.${PLAIN} 配置 Acme"
-        echo -e "${GREEN}12.${PLAIN} 反代 Nginx"
-        echo -e "${GREEN}13.${PLAIN} 配置 Snell"
-        echo -e "${GREEN}14.${PLAIN} 配置 Mihomo"
-        echo -e "${GREEN}15.${PLAIN} 配置 Trojan"
-        echo -e "${GREEN}16.${PLAIN} 配置 Hysteria"
-        echo -e "${GREEN}17.${PLAIN} 配置 SubStore"
-        echo -e "${GREEN}18.${PLAIN} 一键 DDsystem"
-        echo -e "${GREEN}19.${PLAIN} 提取 WireGuard"
-        echo -e "${GREEN} 0.${PLAIN} 离开 El Psy Kongroo"
-        read -rp "请选择操作: " choice
+        echo -e "${BLUE}✦ Steins Gate - Ver 2.1 ✦${PLAIN}"
+        echo -e "${GREEN}  01.${PLAIN}系统更新"
+        echo -e "${GREEN}  02.${PLAIN}系统清理"
+        echo -e "${GREEN}  03.${PLAIN}设置时区"
+        echo -e "${GREEN}  04.${PLAIN}设置防火墙"
+        echo -e "${GREEN}  05.${PLAIN}设置虚拟内存"
+        echo -e "${GREEN}  06.${PLAIN}配置 SSH"
+        echo -e "${GREEN}  07.${PLAIN}配置 DNS"
+        echo -e "${GREEN}  08.${PLAIN}重启 VPS"
+        echo -e "${GREEN}  09.${PLAIN}管理 BBR"
+        echo -e "${GREEN}  10.${PLAIN}管理 WARP"
+        echo -e "${GREEN}  11.${PLAIN}配置 Acme"
+        echo -e "${GREEN}  12.${PLAIN}反代 Nginx"
+        echo -e "${GREEN}  13.${PLAIN}配置 Snell"
+        echo -e "${GREEN}  14.${PLAIN}配置 Mihomo"
+        echo -e "${GREEN}  15.${PLAIN}配置 Trojan"
+        echo -e "${GREEN}  16.${PLAIN}配置 Hysteria"
+        echo -e "${GREEN}  17.${PLAIN}配置 SubStore"
+        echo -e "${GREEN}  18.${PLAIN}一键 DDsystem"
+        echo -e "${GREEN}  19.${PLAIN}提取 WireGuard"
+        echo -e "${GREEN}   0.${PLAIN}离开 El Psy Kongroo"
+        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
