@@ -642,7 +642,7 @@ while true; do
             update_mihomo
             ;;
         0)
-            clear; echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
+            echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
             sleep 0.6; clear; exit 0
             ;;
         *)
