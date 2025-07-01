@@ -5,15 +5,15 @@ bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.
 ```
 
 
-![ssh](https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Mine/ssh.png "ssh")
+![ssh](https://gits.eu.cc/Emokui/Nothing/Zero/icon/Mine/ssh.png "ssh")
 
 
 ## 𝐁𝐥𝐨𝐠 ##
-https://snell.pages.dev
+https://snell.eu.cc
 
 
 ## 𝐂𝐥𝐨𝐮𝐝 ##
-https://noho.pages.dev
+https://noho.eu.cc
 
 
 ## 𝐑𝐮𝐥𝐞 ##
