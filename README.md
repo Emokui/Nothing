@@ -5,9 +5,6 @@ bash <(curl -sL https://snell.vercel.app)
 ```
 
 
-![ssh](https://gits.eu.cc/Emokui/Nothing/Zero/icon/Mine/ssh.png "ssh")
-
-
 ## 𝐁𝐥𝐨𝐠 ##
 https://snell.eu.cc
 
