@@ -931,7 +931,7 @@ main_menu() {
             3) manage_trojan_go ;;
             4) uninstall_acme ;;
             5) web_menu ;;
-            0) clear; echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; exit 0 ;;
+            0) echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; exit 0 ;;
             *) echo -e "${RED}错误的命运抉择,请重新寻觅世界线。${PLAIN}"; pause_and_return ;;
         esac
     done
