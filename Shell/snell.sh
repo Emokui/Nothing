@@ -4,7 +4,7 @@ RED='\033[0;31m'
 GREEN="\033[1;32m"
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
+PURPLE="\033[1;35m"
 CYAN="\033[1;36m"
 PLAIN='\033[0m'
 
@@ -32,13 +32,55 @@ tfo_enabled() {
 }
 
 get_latest_snell_version() {
-    latest_version=$(curl -s https://manual.nssurge.com/others/snell.html | grep -oP 'snell-server-v\K[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-    if [ -n "$latest_version" ]; then
-        SNELL_VERSION="v${latest_version}"
+    uname_arch=$(uname -m)
+    if [[ "$uname_arch" == "i686" ]] || [[ "$uname_arch" == "i386" ]]; then
+        arch="i386"
+    elif [[ "$uname_arch" == *"armv7"* ]] || [[ "$uname_arch" == "armv6l" ]]; then
+        arch="armv7l"
+    elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]]; then
+        arch="aarch64"
     else
-        SNELL_VERSION="v4.1.1"
-        echo -e "${RED}获取 Snell 最新版本失败,使用默认版本 ${SNELL_VERSION}${PLAIN}"
+        arch="amd64"
     fi
+
+    page=$(curl -s "https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell")
+
+    all_links=$(echo "$page" | grep -oE "https://dl.nssurge.com/snell/snell-server-v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*-linux-${arch}\.zip")
+
+    latest_stable=$(echo "$all_links" | grep -vE 'b[0-9]+|beta' | sort -V | tail -n 1)
+    latest_beta=$(echo "$all_links" | grep -E 'b[0-9]+|beta' | sort -V | tail -n 1)
+
+    if [[ -n "$latest_stable" ]]; then
+        SNELL_VERSION=$(echo "$latest_stable" | sed -E "s/.*snell-server-(v[0-9]+\.[0-9]+\.[0-9]+)-linux-${arch}\.zip/\1/")
+        SNELL_ZIP=$(basename "$latest_stable")
+        SNELL_URL="$latest_stable"
+        SNELL_ARCH="$arch"
+    else
+        SNELL_VERSION=""
+        SNELL_ZIP=""
+        SNELL_URL=""
+        SNELL_ARCH="$arch"
+    fi
+
+    if [[ -n "$latest_beta" ]]; then
+        SNELL_BETA_VERSION=$(echo "$latest_beta" | sed -E "s/.*snell-server-(v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*)-linux-${arch}\.zip/\1/")
+        SNELL_BETA_ZIP=$(basename "$latest_beta")
+        SNELL_BETA_URL="$latest_beta"
+        SNELL_BETA_ARCH="$arch"
+    else
+        SNELL_BETA_VERSION=""
+        SNELL_BETA_ZIP=""
+        SNELL_BETA_URL=""
+        SNELL_BETA_ARCH="$arch"
+    fi
+}
+
+get_latest_snell_beta_version() {
+    get_latest_snell_version
+    SNELL_VERSION="$SNELL_BETA_VERSION"
+    SNELL_ZIP="$SNELL_BETA_ZIP"
+    SNELL_URL="$SNELL_BETA_URL"
+    SNELL_ARCH="$SNELL_BETA_ARCH"
 }
 
 install_unzip_if_missing() {
@@ -64,42 +106,69 @@ install_unzip_if_missing() {
     fi
 }
 
+auto_enable_tcp_fastopen() {
+  if tfo_enabled; then
+    return
+  fi
+
+  kernel=$(uname -r | awk -F . '{print $1}')
+  sysctl_conf="$TFO_SYSCTL_CONF"
+  if [ "$kernel" -ge 3 ]; then
+    echo 3 >/proc/sys/net/ipv4/tcp_fastopen
+    [[ ! -e $sysctl_conf ]] && echo "fs.file-max = 51200
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.core.rmem_default = 65536
+net.core.wmem_default = 65536
+net.core.netdev_max_backlog = 4096
+net.core.somaxconn = 4096
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_tw_recycle = 0
+net.ipv4.tcp_fin_timeout = 30
+net.ipv4.tcp_keepalive_time = 1200
+net.ipv4.ip_local_port_range = 10000 65000
+net.ipv4.tcp_max_syn_backlog = 4096
+net.ipv4.tcp_max_tw_buckets = 5000
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_ecn=1
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf" && sysctl --system >/dev/null 2>&1
+  fi
+}
+
 install_snell() {
   clear
   if snell_installed; then
-    echo -e "${YELLOW}Snell 已安装,如需更新请选择【5.更新 Snell】${PLAIN}"
+    echo -e "${YELLOW}Snell 已安装,如需更新请选择【4.更新 Snell】${PLAIN}"
     pause_and_clear
     return
   fi
   echo -e "${CYAN}开始安装 Snell...${PLAIN}"
 
-  uname_arch=$(uname -m)
-  if [[ "$uname_arch" == "i686" ]] || [[ "$uname_arch" == "i386" ]]; then
-      arch="i386"
-  elif [[ "$uname_arch" == *"armv7"* ]] || [[ "$uname_arch" == "armv6l" ]]; then
-      arch="armv7l"
-  elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]]; then
-      arch="aarch64"
-  else
-      arch="amd64"
-  fi
+  get_latest_snell_version
 
-  snell_latest_ver="4.1.1"
-  snell_zip="snell-server-v${snell_latest_ver}-linux-${arch}.zip"
-  snell_url_official="https://dl.nssurge.com/snell/${snell_zip}"
+  if [[ -z "$SNELL_VERSION" || -z "$SNELL_URL" ]]; then
+      echo -e "${RED}未获取到 Snell 最新正式版信息，请检查网络或稍后再试！${PLAIN}"
+      pause_and_clear
+      return 1
+  fi
 
   mkdir -p "$SNELL_DIR"
   cd "$SNELL_DIR"
 
-  echo -e "${YELLOW}下载 Snell（${arch}）...${PLAIN}"
-  wget --no-check-certificate -N "$snell_url_official" -O "$snell_zip"
-  if [[ ! -e "$snell_zip" ]]; then
+  echo -e "${YELLOW}下载 Snell（${SNELL_ARCH}，${SNELL_VERSION}）...${PLAIN}"
+  wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
+  if [[ ! -e "$SNELL_ZIP" ]]; then
       echo -e "${RED}Snell 下载失败,请检查网络连接!${PLAIN}"
       pause_and_clear
       return 1
   else
       install_unzip_if_missing
-      unzip -o "$snell_zip"
+      unzip -o "$SNELL_ZIP"
   fi
 
   if [[ ! -e "snell-server" ]]; then
@@ -107,43 +176,34 @@ install_snell() {
       pause_and_clear
       return 1
   else
-      rm -f "$snell_zip"
+      rm -f "$SNELL_ZIP"
       chmod +x snell-server
       mv -f snell-server "${SNELL_BIN}"
-      echo "v${snell_latest_ver}" > ${SNELL_VERSION_FILE}
-      echo -e "${GREEN}Snell (${arch}) 已下载安装完成${PLAIN}"
+      echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+      echo -e "${GREEN}Snell (${SNELL_ARCH}) 已下载安装完成${PLAIN}"
       echo -e "${CYAN}请选择【2.配置 Snell】生成并管理配置文件${PLAIN}"
       pause_and_clear
       return 0
   fi
 }
 
-update_snell() {
+update_snell_stable() {
   clear
-
   if ! snell_installed; then
     echo -e "${YELLOW}检测到未安装Snell,请先安装并配置${PLAIN}"
     pause_and_clear
     return 1
   fi
 
-  echo -e "${CYAN}开始检查并更新 Snell ...${PLAIN}"
-
-  uname_arch=$(uname -m)
-  if [[ "$uname_arch" == "i686" ]] || [[ "$uname_arch" == "i386" ]]; then
-      arch="i386"
-  elif [[ "$uname_arch" == *"armv7"* ]] || [[ "$uname_arch" == "armv6l" ]]; then
-      arch="armv7l"
-  elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]]; then
-      arch="aarch64"
-  else
-      arch="amd64"
-  fi
+  echo -e "${CYAN}开始检查并更新 Snell 正式版 ...${PLAIN}"
 
   get_latest_snell_version
-  latest_ver_num=${SNELL_VERSION#v}
-  snell_zip="snell-server-v${latest_ver_num}-linux-${arch}.zip"
-  snell_url_official="https://dl.nssurge.com/snell/${snell_zip}"
+
+  if [[ -z "$SNELL_VERSION" || -z "$SNELL_URL" ]]; then
+      echo -e "${RED}未获取到 Snell 最新正式版信息，请检查网络或稍后再试！${PLAIN}"
+      pause_and_clear
+      return 1
+  fi
 
   current_ver=""
   if [[ -f "$SNELL_VERSION_FILE" ]]; then
@@ -151,7 +211,7 @@ update_snell() {
   fi
 
   if [[ "$current_ver" == "$SNELL_VERSION" && -f "$SNELL_BIN" ]]; then
-    echo -e "${GREEN}Snell 已经是最新版：${SNELL_VERSION}${PLAIN}"
+    echo -e "${GREEN}Snell 已经是正式版最新版：${SNELL_VERSION}${PLAIN}"
     pause_and_clear
     return 0
   fi
@@ -159,30 +219,102 @@ update_snell() {
   mkdir -p "$SNELL_DIR"
   cd "$SNELL_DIR"
 
-  echo -e "${YELLOW}下载 Snell 最新版（${arch}, ${SNELL_VERSION}）...${PLAIN}"
-  wget --no-check-certificate -N "$snell_url_official" -O "$snell_zip"
-  if [[ ! -e "$snell_zip" ]]; then
-      echo -e "${RED}Snell 下载失败,请检查网络连接!${PLAIN}"
+  echo -e "${YELLOW}下载 Snell 正式版（${SNELL_ARCH}, ${SNELL_VERSION}）...${PLAIN}"
+  wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
+  if [[ ! -e "$SNELL_ZIP" ]]; then
+      echo -e "${RED}Snell 正式版下载失败,请检查网络连接!${PLAIN}"
       pause_and_clear
       return 1
   else
       install_unzip_if_missing
-      unzip -o "$snell_zip"
+      unzip -o "$SNELL_ZIP"
   fi
 
   if [[ ! -e "snell-server" ]]; then
-      echo -e "${RED}Snell 解压失败!${PLAIN}"
+      echo -e "${RED}Snell 正式版解压失败!${PLAIN}"
       pause_and_clear
       return 1
   else
-      rm -f "$snell_zip"
+      rm -f "$SNELL_ZIP"
       chmod +x snell-server
       mv -f snell-server "${SNELL_BIN}"
       echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
-      echo -e "${GREEN}Snell 已更新到最新版:${SNELL_VERSION} (${arch})${PLAIN}"
+      echo -e "${GREEN}Snell 已更新到正式版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
       pause_and_clear
       return 0
   fi
+}
+
+update_snell_beta() {
+  clear
+  if ! snell_installed; then
+    echo -e "${YELLOW}检测到未安装Snell,请先安装并配置${PLAIN}"
+    pause_and_clear
+    return 1
+  fi
+  echo -e "${CYAN}开始检查并更新 Snell 测试版 ...${PLAIN}"
+
+  get_latest_snell_beta_version
+
+  if [[ -z "$SNELL_VERSION" || -z "$SNELL_URL" ]]; then
+    echo -e "${RED}未检测到任何 Snell 测试版！${PLAIN}"
+    pause_and_clear
+    return 1
+  fi
+
+  current_ver=""
+  if [[ -f "$SNELL_VERSION_FILE" ]]; then
+    current_ver=$(cat "$SNELL_VERSION_FILE")
+  fi
+
+  if [[ "$current_ver" == "$SNELL_VERSION" && -f "$SNELL_BIN" ]]; then
+    echo -e "${GREEN}Snell 已经是测试版最新版：${SNELL_VERSION}${PLAIN}"
+    pause_and_clear
+    return 0
+  fi
+
+  mkdir -p "$SNELL_DIR"
+  cd "$SNELL_DIR"
+
+  echo -e "${YELLOW}下载 Snell 测试版（${SNELL_ARCH}, ${SNELL_VERSION}）...${PLAIN}"
+  wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
+  if [[ ! -e "$SNELL_ZIP" ]]; then
+      echo -e "${RED}Snell 测试版下载失败,请检查网络连接!${PLAIN}"
+      pause_and_clear
+      return 1
+  else
+      install_unzip_if_missing
+      unzip -o "$SNELL_ZIP"
+  fi
+
+  if [[ ! -e "snell-server" ]]; then
+      echo -e "${RED}Snell 测试版解压失败!${PLAIN}"
+      pause_and_clear
+      return 1
+  else
+      rm -f "$SNELL_ZIP"
+      chmod +x snell-server
+      mv -f snell-server "${SNELL_BIN}"
+      echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+      echo -e "${GREEN}Snell 已更新到测试版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
+      pause_and_clear
+      return 0
+  fi
+}
+
+update_snell_menu() {
+  clear
+  echo -e "${CYAN}✦ Snell 更新菜单 ✦${PLAIN}"
+  echo -e "${GREEN}  1.${PLAIN}更新正式版"
+  echo -e "${GREEN}  2.${PLAIN}更新测试版"
+  echo -e "${GREEN}  0.${PLAIN}返回"
+  read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
+  case $update_choice in
+    1) update_snell_stable ;;
+    2) update_snell_beta ;;
+    0) return ;;
+    *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
+  esac
 }
 
 delete_all_snell() {
@@ -214,132 +346,6 @@ delete_all_snell() {
   pause_and_clear
 }
 
-enableTCPFastOpen() {
-  if tfo_enabled; then
-    echo -e "${YELLOW}TCP Fast Open 已经开启,无需重复操作${PLAIN}"
-    pause_and_clear
-    return
-  fi
-
-  kernel=$(uname -r | awk -F . '{print $1}')
-  sysctl_conf="$TFO_SYSCTL_CONF"
-  if [ "$kernel" -ge 3 ]; then
-    echo 3 >/proc/sys/net/ipv4/tcp_fastopen
-    [[ ! -e $sysctl_conf ]] && echo "fs.file-max = 51200
-net.core.rmem_max = 67108864
-net.core.wmem_max = 67108864
-net.core.rmem_default = 65536
-net.core.wmem_default = 65536
-net.core.netdev_max_backlog = 4096
-net.core.somaxconn = 4096
-net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_tw_reuse = 1
-net.ipv4.tcp_tw_recycle = 0
-net.ipv4.tcp_fin_timeout = 30
-net.ipv4.tcp_keepalive_time = 1200
-net.ipv4.ip_local_port_range = 10000 65000
-net.ipv4.tcp_max_syn_backlog = 4096
-net.ipv4.tcp_max_tw_buckets = 5000
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_rmem = 4096 87380 67108864
-net.ipv4.tcp_wmem = 4096 65536 67108864
-net.ipv4.tcp_mtu_probing = 1
-net.ipv4.tcp_ecn=1
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control = bbr" >>"$sysctl_conf" && sysctl --system >/dev/null 2>&1
-    echo -e "${GREEN}TCP Fast Open 及推荐内核优化参数已开启${PLAIN}"
-  else
-    echo -e "${RED}系统内核版本过低,无法支持 TCP Fast Open!${PLAIN}"
-  fi
-  pause_and_clear
-}
-
-show_sub_menu() {
-  clear
-  echo -e "${CYAN}✦ Snell 多配置管理 ✦${PLAIN}"
-  echo -e "${GREEN}  1.${PLAIN}生成 配置"
-  echo -e "${GREEN}  2.${PLAIN}启动 配置"
-  echo -e "${GREEN}  3.${PLAIN}查看 配置"
-  echo -e "${GREEN}  4.${PLAIN}删除 配置"
-  echo -e "${GREEN}  5.${PLAIN}修改 配置"
-  echo -e "${GREEN}  6.${PLAIN}停止 Snell"
-  echo -e "${GREEN}  0.${PLAIN}返回 Psy Kongroo"
-}
-
-delete_config() {
-  clear
-  local config_dir="$SNELL_CONFIGS"
-  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
-    pause_and_clear
-    return
-  fi
-  echo -e "${CYAN}当前可用配置:${PLAIN}"
-  list_configs
-  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${CYAN}(如: config1)${PLAIN}${YELLOW}，输入99删除全部配置:${PLAIN}"
-  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
-  if [[ "$config_name" == "99" ]]; then
-    delete_all_configs
-    return
-  fi
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
-  local config_file="${config_dir}/${config_name}.conf"
-  local service_name="snell@${config_name}.service"
-  if [[ ! -f "$config_file" ]]; then
-    echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
-    pause_and_clear
-    return
-  fi
-  systemctl disable --now "$service_name" &>/dev/null
-  rm -f "/etc/systemd/system/$service_name"
-  rm -f "$config_file"
-  echo -e "${GREEN}配置 $config_name 及其服务已删除。${PLAIN}"
-  pause_and_clear
-}
-
-delete_all_configs() {
-  clear
-  local config_dir="$SNELL_CONFIGS"
-  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,无需删除${PLAIN}"
-    pause_and_clear
-    return
-  fi
-  local service_prefix="snell@"
-  echo -e "${RED}警告: 即将删除所有配置及服务!${PLAIN}"
-  read -p "$(echo -e "${YELLOW}确定继续?[y/N]: ${PLAIN}")" choice
-  [[ ! "$choice" =~ ^[yY]$ ]] && pause_and_clear && return
-  for config_file in "$config_dir"/*.conf; do
-    [[ ! -f "$config_file" ]] && continue
-    local config_name=$(basename "$config_file" .conf)
-    local service_name="${service_prefix}${config_name}.service"
-    systemctl disable --now "$service_name" &>/dev/null
-    rm -f "/etc/systemd/system/$service_name"
-  done
-  rm -rf "$config_dir"
-  echo -e "${GREEN}所有配置及服务已删除${PLAIN}"
-  pause_and_clear
-}
-
-stop_snell() {
-  clear
-  echo -e "${CYAN}正在停止所有 Snell systemd 服务...${PLAIN}"
-  local stopped_any=0
-  for svc in $(systemctl list-units --type=service --all | grep -oE 'snell@[^ ]+'); do
-    systemctl stop "$svc"
-    stopped_any=1
-    echo -e "${YELLOW}已停止服务: $svc${PLAIN}"
-  done
-  pkill -f "$SNELL_BIN" && echo -e "${YELLOW}已尝试终止所有 snell-server 进程${PLAIN}"
-  systemctl daemon-reload
-  if [[ $stopped_any -eq 1 ]]; then
-    echo -e "${GREEN}所有 Snell systemd 服务及进程已停止${PLAIN}"
-  else
-    echo -e "${YELLOW}未检测到正在运行的 Snell systemd 服务${PLAIN}"
-  fi
-  pause_and_clear
-}
-
 generate_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
@@ -365,7 +371,6 @@ generate_config() {
     read -p "$(echo -e "${CYAN}请输入 obfs 域名 ${YELLOW}(回车默认为 icloud.com)${CYAN}: ${PLAIN}")" obfs_host
     obfs_host=${obfs_host:-icloud.com}
   fi
-
   cat > "$config_file" << EOF
 [snell-server]
 listen = 0.0.0.0:${port}
@@ -376,7 +381,6 @@ ipv6 = false
 tfo = true
 dns = 1.1.1.1, 8.8.8.8
 EOF
-
   echo -e "${GREEN}配置文件已生成: $config_file${PLAIN}"
   pause_and_clear
 }
@@ -444,7 +448,6 @@ view_config() {
   echo -e "${CYAN}------ 配置内容 ------${PLAIN}"
   cat "$config_file"
   echo -e "${CYAN}------ 服务状态 ------${PLAIN}"
-  # 只显示服务状态一行
   local status
   status=$(systemctl is-active "$service_name" 2>/dev/null)
   if [[ "$status" == "active" ]]; then
@@ -460,53 +463,98 @@ view_config() {
   pause_and_clear
 }
 
-modify_config() {
+delete_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
-
   if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
     echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
     pause_and_clear
     return
   fi
-
   echo -e "${CYAN}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${CYAN}请选择要修改的配置名称:${PLAIN}"
-  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
+  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${CYAN}(如: config1)${PLAIN}${YELLOW}，输入99删除全部配置:${PLAIN}"
+  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  if [[ "$config_name" == "99" ]]; then
+    delete_all_configs
+    return
+  fi
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
-
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
-
   if [[ ! -f "$config_file" ]]; then
     echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
     pause_and_clear
     return
   fi
+  systemctl disable --now "$service_name" &>/dev/null
+  rm -f "/etc/systemd/system/$service_name"
+  rm -f "$config_file"
+  echo -e "${GREEN}配置 $config_name 及其服务已删除。${PLAIN}"
+  pause_and_clear
+}
+delete_all_configs() {
+  clear
+  local config_dir="$SNELL_CONFIGS"
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,无需删除${PLAIN}"
+    pause_and_clear
+    return
+  fi
+  local service_prefix="snell@"
+  echo -e "${RED}警告: 即将删除所有配置及服务!${PLAIN}"
+  read -p "$(echo -e "${YELLOW}确定继续?[y/N]: ${PLAIN}")" choice
+  [[ ! "$choice" =~ ^[yY]$ ]] && pause_and_clear && return
+  for config_file in "$config_dir"/*.conf; do
+    [[ ! -f "$config_file" ]] && continue
+    local config_name=$(basename "$config_file" .conf)
+    local service_name="${service_prefix}${config_name}.service"
+    systemctl disable --now "$service_name" &>/dev/null
+    rm -f "/etc/systemd/system/$service_name"
+  done
+  rm -rf "$config_dir"
+  echo -e "${GREEN}所有配置及服务已删除${PLAIN}"
+  pause_and_clear
+}
 
+modify_config() {
+  clear
+  local config_dir="$SNELL_CONFIGS"
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
+    pause_and_clear
+    return
+  fi
+  echo -e "${CYAN}当前可用配置:${PLAIN}"
+  list_configs
+  echo -e "${CYAN}请选择要修改的配置名称:${PLAIN}"
+  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
+  local config_file="${config_dir}/${config_name}.conf"
+  local service_name="snell@${config_name}.service"
+  if [[ ! -f "$config_file" ]]; then
+    echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
+    pause_and_clear
+    return
+  fi
   local current_port=$(grep "^listen = " "$config_file" | cut -d':' -f2)
   local current_psk=$(grep "^psk = " "$config_file" | cut -d' ' -f3)
   local current_obfs=$(grep "^obfs = " "$config_file" | cut -d' ' -f3)
   local current_obfs_host=$(grep "^obfs-host = " "$config_file" | cut -d' ' -f3)
-
   echo -e "${CYAN}当前配置内容:${PLAIN}"
   echo -e "端口: ${GREEN}${current_port}${PLAIN}"
   echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
   echo -e "OBFS: ${GREEN}${current_obfs}${PLAIN}"
   [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
-
   echo -e "${YELLOW}开始修改配置...${PLAIN}"
   read -p "$(echo -e "${CYAN}请输入新端口 ${YELLOW}(当前${current_port},回车不变)${CYAN}: ${PLAIN}")" port
   port=${port:-$current_port}
-
   read -p "$(echo -e "${CYAN}请输入新PSK密钥 ${YELLOW}(当前${current_psk},r随机,回车不变)${CYAN}: ${PLAIN}")" psk
   if [[ "$psk" == "r" ]]; then
     psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   elif [[ -z "$psk" ]]; then
     psk=$current_psk
   fi
-
   read -p "$(echo -e "${CYAN}是否开启 obfs ${YELLOW}(当前${current_obfs}, y开启,回车关闭)${CYAN}: ${PLAIN}")" enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
@@ -517,7 +565,6 @@ modify_config() {
     obfs="off"
     obfs_host=""
   fi
-
   cat > "$config_file" << EOF
 [snell-server]
 listen = 0.0.0.0:${port}
@@ -528,13 +575,30 @@ ipv6 = false
 tfo = true
 dns = 1.1.1.1, 8.8.8.8
 EOF
-
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
   systemctl restart "$service_name"
   echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
-
   echo -e "${CYAN}------ 当前服务状态 ------${PLAIN}"
   systemctl status "$service_name" --no-pager
+  pause_and_clear
+}
+
+stop_snell() {
+  clear
+  echo -e "${CYAN}正在停止所有 Snell systemd 服务...${PLAIN}"
+  local stopped_any=0
+  for svc in $(systemctl list-units --type=service --all | grep -oE 'snell@[^ ]+'); do
+    systemctl stop "$svc"
+    stopped_any=1
+    echo -e "${YELLOW}已停止服务: $svc${PLAIN}"
+  done
+  pkill -f "$SNELL_BIN" && echo -e "${YELLOW}已尝试终止所有 snell-server 进程${PLAIN}"
+  systemctl daemon-reload
+  if [[ $stopped_any -eq 1 ]]; then
+    echo -e "${GREEN}所有 Snell systemd 服务及进程已停止${PLAIN}"
+  else
+    echo -e "${YELLOW}未检测到正在运行的 Snell systemd 服务${PLAIN}"
+  fi
   pause_and_clear
 }
 
@@ -547,47 +611,56 @@ list_configs() {
   ls "$config_dir" | sed 's/\.conf$//'
 }
 
+config_snell_menu() {
+  while true; do
+    show_sub_menu
+    read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
+    case $sub_choice in
+      1) generate_config ;;
+      2) start_and_enable_config ;;
+      3) view_config ;;
+      4) delete_config ;;
+      5) modify_config ;;
+      6) stop_snell ;;
+      0) break ;;
+      *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
+    esac
+  done
+}
+
+show_sub_menu() {
+  clear
+  echo -e "${CYAN}✦ Snell 多配置管理 ✦${PLAIN}"
+  echo -e "${GREEN}  1.${PLAIN}生成 配置"
+  echo -e "${GREEN}  2.${PLAIN}启动 配置"
+  echo -e "${GREEN}  3.${PLAIN}查看 配置"
+  echo -e "${GREEN}  4.${PLAIN}删除 配置"
+  echo -e "${GREEN}  5.${PLAIN}修改 配置"
+  echo -e "${GREEN}  6.${PLAIN}停止 Snell"
+  echo -e "${GREEN}  0.${PLAIN}返回 Psy Kongroo"
+}
+
 show_main_menu() {
   clear
-  echo -e "${CYAN}✦ Snell_v4 Ver.1.0 ✦${PLAIN}"
+  echo -e "${CYAN}✦ Snell_Ver.1.1 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}安装 Snell"
   echo -e "${GREEN}  2.${PLAIN}配置 Snell"
   echo -e "${GREEN}  3.${PLAIN}删除 Snell"
-  echo -e "${GREEN}  4.${PLAIN}开启 TCPFO"
-  echo -e "${GREEN}  5.${PLAIN}更新 Snell"
+  echo -e "${GREEN}  4.${PLAIN}更新 Snell"
   echo -e "${GREEN}  0.${PLAIN}退出 El Psy Kongroo"
 }
 
 main() {
+  install_unzip_if_missing
+  auto_enable_tcp_fastopen
   while true; do
     show_main_menu
-    read -p "✦ Steins Gate ✦ : " main_choice
+    read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
     case $main_choice in
       1) install_snell ;;
-      2)
-        if ! snell_installed; then
-          echo -e "${YELLOW}检测到未安装Snell,请先安装${PLAIN}"
-          pause_and_clear
-          continue
-        fi
-        while true; do
-          show_sub_menu
-          read -p "$(echo -e "${CYAN}请选择操作: ${PLAIN}")" sub_choice
-          case $sub_choice in
-            1) generate_config ;;
-            2) start_and_enable_config ;;
-            3) view_config ;;
-            4) delete_config ;;
-            5) modify_config ;;
-            6) stop_snell ;;
-            0) break ;;
-            *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
-          esac
-        done
-        ;;
+      2) config_snell_menu ;;
       3) delete_all_snell ;;
-      4) enableTCPFastOpen ;;
-      5) update_snell ;;
+      4) update_snell_menu ;;
       0) exit 0 ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
