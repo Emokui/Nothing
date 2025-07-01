@@ -1,7 +1,7 @@
 ## 𝐔𝐬𝐞  ##
 
 ```
-bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
+bash <(curl -sL https://gits.eu.cc/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
 
 
