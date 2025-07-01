@@ -254,50 +254,75 @@ ssh_config_menu() {
     done
 }
 
+change_ssh_port() {
+    while true; do
+        echo "==== 修改 SSH 端口 ===="
+        read -rp "请输入新的 SSH 端口（输入0返回）: " new_port
+        new_port=$(echo "$new_port" | xargs)
+        if [[ "$new_port" == "0" ]]; then
+            return
+        fi
+        if [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )); then
+            sed -i '/^[#[:space:]]*Port[[:space:]]\+[0-9]\+/Id' /etc/ssh/sshd_config
+            echo "Port $new_port" >> /etc/ssh/sshd_config
+            if ! sshd -t 2>/dev/null; then
+                echo -e "${RED}sshd 配置有误，未重启 sshd！请检查 /etc/ssh/sshd_config${PLAIN}"
+                press_any_key_to_continue
+                return
+            fi
+            systemctl restart sshd
+            echo "[✓] SSH 端口已修改为 $new_port"
+            press_any_key_to_continue
+            return
+        else
+            echo "[!] 无效的端口格式"
+            press_any_key_to_continue
+        fi
+    done
+}
+
 enable_root_login() {
-    echo "==== 设置 Root 密码 ===="
-    passwd root
-    echo "[✓] Root 密码已成功设置"
+    while true; do
+        echo "==== 开启 Root 登录 ===="
+        read -rp "按回车继续，输入0返回: " input
+        input=$(echo "$input" | xargs)
+        if [[ "$input" == "0" ]]; then
+            return
+        fi
 
-    echo "==== 开启 Root 登录并启用密码登录 ===="
-    if ! grep -q '^PermitRootLogin' /etc/ssh/sshd_config; then
+        passwd root
+        echo "[✓] Root 密码已设置"
+
+        sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
         echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
-    else
-        sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-    fi
 
-    if ! grep -q '^PasswordAuthentication' /etc/ssh/sshd_config; then
+        sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
         echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
-    else
-        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-    fi
 
-    systemctl restart sshd
-    echo "[✓] Root 登录和密码登录已启用，请尝试使用密码登录"
-    press_any_key_to_continue
+        if ! sshd -t 2>/dev/null; then
+            echo -e "${RED}sshd 配置有误，未重启 sshd！请检查 /etc/ssh/sshd_config${PLAIN}"
+            press_any_key_to_continue
+            return
+        fi
+        systemctl restart sshd
+        echo "[✓] Root 登录和密码登录已启用"
+        press_any_key_to_continue
+        return
+    done
 }
 
 change_root_password() {
-    echo "==== 修改 root 密码 ===="
-    passwd root
-    press_any_key_to_continue
-}
-
-change_ssh_port() {
-    echo "==== 修改 SSH 端口 ===="
-    read -rp "请输入新的 SSH 端口: " new_port
-    if [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )); then
-        if ! grep -q '^Port' /etc/ssh/sshd_config; then
-            echo "Port $new_port" >> /etc/ssh/sshd_config
-        else
-            sed -i "s/^#\?Port .*/Port $new_port/" /etc/ssh/sshd_config
+    while true; do
+        echo "==== 修改 root 密码 ===="
+        read -rp "按回车继续，输入0返回: " input
+        input=$(echo "$input" | xargs)
+        if [[ "$input" == "0" ]]; then
+            return
         fi
-        systemctl restart sshd
-        echo "[✓] SSH 端口已修改为 $new_port"
-    else
-        echo "[!] 无效的端口格式"
-    fi
-    press_any_key_to_continue
+        passwd root
+        press_any_key_to_continue
+        return
+    done
 }
 
 # ====== 时区管理 ======
