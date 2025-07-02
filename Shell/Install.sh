@@ -196,7 +196,7 @@ run_custom_reinstall() {
     echo -e "${Tip} 警告：此操作将DD重装为Debian 12，所有数据将丢失。确定继续？(y/N): "
     read confirm
     [[ $confirm == [yY] ]] || return
-    bash <(curl -sL https://csnm.pages.dev/bin456789/reinstall/main/reinstall.sh) debian 12
+    bash <(curl -sL https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh) debian 12
 }
 
 # ====== 主菜单输出 ======
