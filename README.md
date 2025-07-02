@@ -3,7 +3,7 @@
 ```
 bash <(curl -sL https://snell.vercel.app)
 ```
-
+![SSH](./icon/Mine/ssh.png)
 
 ## 𝐁𝐥𝐨𝐠 ##
 https://snell.eu.cc
