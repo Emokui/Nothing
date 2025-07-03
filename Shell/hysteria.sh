@@ -449,7 +449,7 @@ port_jump_menu() {
 # ======== 6. 主菜单循环 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Hysteria Ver.1.4 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Hysteria_Ver.1.4 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}配置 证书"
     echo -e "${GREEN}  2.${PLAIN}安装 Hysteria"
     echo -e "${GREEN}  3.${PLAIN}管理 Hysteria"
