@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # ======== 1. 全局变量 ========
-RED="\033[31m\033[01m"
-PURPLE='\033[35m\033[01m'
-YELLOW="\033[33m\033[01m"
+RED="\033[1;31m"
 GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
 BLUE="\033[1;34m"
-CYAN="\033[1;36m"
-PLAIN='\033[0m'
+PLAIN="\033[0m"
 
 # ======== 2. 通用函数 ========
 pause_and_return() {
@@ -59,11 +57,11 @@ generate_self_signed_cert() {
     DEFAULT_CERT_PATH="/etc/cert"
     DEFAULT_DAYS=36500
 
-    read -rp "$(echo -e "${GREEN}自签证书域名${PLAIN} ${CYAN}(默认:${DEFAULT_DOMAIN})${PLAIN}: ")" domain
+    read -rp "$(echo -e "${GREEN}自签证书域名${PLAIN} ${BLUE}(默认:${DEFAULT_DOMAIN})${PLAIN}: ")" domain
     domain="${domain:-$DEFAULT_DOMAIN}"
-    read -rp "$(echo -e "${GREEN}证书存放路径${PLAIN}${CYAN}(默认:${DEFAULT_CERT_PATH})${PLAIN}: ")" cert_path
+    read -rp "$(echo -e "${GREEN}证书存放路径${PLAIN}${BLUE}(默认:${DEFAULT_CERT_PATH})${PLAIN}: ")" cert_path
     cert_path="${cert_path:-$DEFAULT_CERT_PATH}"
-    read -rp "$(echo -e "${GREEN}证书有效天数${PLAIN}${CYAN}(默认:${DEFAULT_DAYS})${PLAIN}: ")" days
+    read -rp "$(echo -e "${GREEN}证书有效天数${PLAIN}${BLUE}(默认:${DEFAULT_DAYS})${PLAIN}: ")" days
     days="${days:-$DEFAULT_DAYS}"
 
     key_file="${cert_path}/server.key"
@@ -127,7 +125,7 @@ issue_acme_cert() {
 
     clear
     echo -e "${YELLOW}请输入需要申请证书的域名${PLAIN}"
-    read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
+    read -p "$(echo -e "${BLUE}域名: ${PLAIN}")" domain
     [[ -z $domain ]] && echo -e "${RED}未输入域名,操作中止${PLAIN}" && pause_and_return && return
 
     domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
@@ -175,12 +173,12 @@ issue_acme_cert() {
 cert_menu() {
     while true; do
         clear
-        echo -e " ${CYAN}✦ 证书配置 ✦${PLAIN}"
+        echo -e " ${BLUE}✦ 证书配置 ✦${PLAIN}"
         echo -e " ${GREEN}  1.${PLAIN}生成 自签证书"
         echo -e " ${GREEN}  2.${PLAIN}申请 域名证书"
         echo -e " ${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
 
-        read -p "$(echo -e "${PURPLE} ✦ Steins Gate ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE} ✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
             1) generate_self_signed_cert ;;
@@ -195,18 +193,18 @@ select_cert_for_hysteria() {
     local allow_exit=$1
     while true; do
         clear
-        echo -e "${PURPLE}✦ 请选择证书 ✦ : ${PLAIN}"
-        echo -e "${CYAN}  1.自签证书${PLAIN}"
-        echo -e "${CYAN}  2.域名证书${PLAIN}"
-        echo -e "${CYAN}  3.输入路径${PLAIN}"
-        echo -e "${CYAN}  0.退出/默认${PLAIN}"
+        echo -e "${BLUE}✦ 请选择证书 ✦ : ${PLAIN}"
+        echo -e "${GREEN}  1.自签证书${PLAIN}"
+        echo -e "${BLUE}  2.域名证书${PLAIN}"
+        echo -e "${YELLOW}  3.输入路径${PLAIN}"
+        echo -e "${RED}  0.退出/默认${PLAIN}"
 
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
         if [[ -z "$cert_option" ]]; then
             if [[ "$allow_exit" == "0" ]]; then
                 echo -e "${RED}无效输入,请重新选择!${PLAIN}"
-                read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
+                read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
                 continue
             else
                 return 1
@@ -221,17 +219,17 @@ select_cert_for_hysteria() {
                     return 0
                 else
                     echo -e "${RED}未检测到 /etc/cert 下任何自签证书${PLAIN}"
-                    read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
+                    read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
                     continue
                 fi
                 ;;
             2)
                 if ! compgen -G "/root/cert/*.crt" > /dev/null; then
-                    echo -e "${PURPLE}未检测到 /root/cert 下任何域名证书${PLAIN}"
+                    echo -e "${BLUE}未检测到 /root/cert 下任何域名证书${PLAIN}"
                     pause_and_return
                     return 1
                 fi
-                echo -e "${PURPLE}检测到以下域名证书: ${PLAIN}"
+                echo -e "${BLUE}检测到以下域名证书: ${PLAIN}"
 
                 cert_files=($(ls /root/cert/*.crt 2>/dev/null | sort))
                 cert_count=${#cert_files[@]}
@@ -242,7 +240,7 @@ select_cert_for_hysteria() {
                 done
 
                 while true; do
-                    read -p "$(echo -e "${PURPLE}请输入证书编号(1-${cert_count}): ${PLAIN}")" crt_idx
+                    read -p "$(echo -e "${BLUE}请输入证书编号(1-${cert_count}): ${PLAIN}")" crt_idx
                     if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
                         crtfile="${cert_files[$((crt_idx-1))]}"
                         domain_base=$(basename "$crtfile" .crt)
@@ -253,17 +251,17 @@ select_cert_for_hysteria() {
                             return 0
                         else
                             echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
-                            read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
+                            read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
                         fi
                     else
                         echo -e "${RED}请输入有效编号${PLAIN}"
-                        read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
+                        read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
                     fi
                 done
                 ;;
             3)
-                read -p "$(echo -e "${PURPLE}请输入证书路径: ${PLAIN}")" cert_path
-                read -p "$(echo -e "${PURPLE}请输入私钥路径: ${PLAIN}")" key_path
+                read -p "$(echo -e "${BLUE}请输入证书路径: ${PLAIN}")" cert_path
+                read -p "$(echo -e "${BLUE}请输入私钥路径: ${PLAIN}")" key_path
                 if [[ ! -f "$cert_path" || ! -f "$key_path" ]]; then
                     echo -e "${RED}自定义证书或私钥路径无效!${PLAIN}"
                     pause_and_return
@@ -276,7 +274,7 @@ select_cert_for_hysteria() {
                 ;;
             *)
                 echo -e "${RED}无效输入,请重新选择!${PLAIN}"
-                read -p "$(echo -e "${CYAN}按回车继续...${PLAIN}")"
+                read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
                 ;;
         esac
     done
@@ -288,9 +286,9 @@ show_hysteria_config() {
     HY2_DIR="/root/hysteria"
     CONFIG_PATH="${HY2_DIR}/config.yaml"
     if [ -f "$CONFIG_PATH" ]; then
-        echo -e "${CYAN}---------------------- 配置内容 ----------------------${PLAIN}"
+        echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
         cat "$CONFIG_PATH"
-        echo -e "${CYAN}-----------------------------------------------------${PLAIN}"
+        echo -e "${BLUE}-----------------------------------------------------${PLAIN}"
         listen_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/://')
         auth_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | awk '{print $2}')
         cert_path=$(grep -E '^\s*cert:' "$CONFIG_PATH" | awk '{print $2}')
@@ -301,7 +299,7 @@ show_hysteria_config() {
         local_ip=$(get_local_ip)
         listen_port=${listen_port:-443}
         node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-        echo -e "\n${CYAN}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
+        echo -e "\n${BLUE}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
     else
         echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
     fi
@@ -311,7 +309,7 @@ show_hysteria_config() {
 # ======== 5. 端口跳跃相关函数 ========
 port_jump_set() {
     clear
-    echo -e "${CYAN}检查 iptables 是否已安装...${PLAIN}"
+    echo -e "${BLUE}检查 iptables 是否已安装...${PLAIN}"
     if ! command -v iptables &> /dev/null; then
         echo -e "${YELLOW}未检测到 iptables,正在安装中...${PLAIN}"
         if [ -f /etc/debian_version ]; then
@@ -329,7 +327,7 @@ port_jump_set() {
     if [[ -n "$EXIST_RULE" ]]; then
         echo -e "${GREEN}已检测到存在端口跳跃配置:${PLAIN}"
         echo -e "${YELLOW}$EXIST_RULE${PLAIN}"
-        echo -e "${CYAN}如需修改,请选择【2.修改端口跳跃】${PLAIN}"
+        echo -e "${BLUE}如需修改,请选择【2.修改端口跳跃】${PLAIN}"
         pause_and_return
         return
     fi
@@ -362,13 +360,13 @@ port_jump_set() {
     read -p "$(echo -e "${YELLOW}请输入HY端口(默认:${default_port}): ${PLAIN}")" target_port
     target_port=${target_port:-$default_port}
 
-    echo -e "${CYAN}正在设置端口跳跃规则...${PLAIN}"
+    echo -e "${BLUE}正在设置端口跳跃规则...${PLAIN}"
     sudo iptables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"
 
-    echo -e "${CYAN}以下是当前的 iptables 规则:${PLAIN}"
+    echo -e "${BLUE}以下是当前的 iptables 规则:${PLAIN}"
     sudo iptables -t nat -L -n
 
-    echo -e "${CYAN}创建 systemd 自启服务: port-jump.service${PLAIN}"
+    echo -e "${BLUE}创建 systemd 自启服务: port-jump.service${PLAIN}"
     cat > /etc/systemd/system/port-jump.service << EOF
 [Unit]
 Description=UDP Port Jumping NAT Rule
@@ -393,7 +391,7 @@ EOF
 
 port_jump_modify() {
     clear
-    echo -e "${CYAN}正在修改端口跳跃规则...${PLAIN}"
+    echo -e "${BLUE}正在修改端口跳跃规则...${PLAIN}"
     sudo systemctl stop port-jump.service 2>/dev/null
     sudo systemctl disable port-jump.service 2>/dev/null
     sudo rm -f /etc/systemd/system/port-jump.service
@@ -404,9 +402,9 @@ port_jump_modify() {
 
 port_jump_view() {
     clear
-    echo -e "${CYAN}当前 iptables 端口跳跃规则: ${PLAIN}"
+    echo -e "${BLUE}当前 iptables 端口跳跃规则: ${PLAIN}"
     sudo iptables -t nat -L -n --line-numbers | grep REDIRECT
-    echo -e "${CYAN}当前 systemd port-jump.service 配置: ${PLAIN}"
+    echo -e "${BLUE}当前 systemd port-jump.service 配置: ${PLAIN}"
     if [ -f /etc/systemd/system/port-jump.service ]; then
         cat /etc/systemd/system/port-jump.service
     else
@@ -417,7 +415,7 @@ port_jump_view() {
 
 port_jump_delete() {
     clear
-    echo -e "${CYAN}正在删除端口跳跃规则...${PLAIN}"
+    echo -e "${BLUE}正在删除端口跳跃规则...${PLAIN}"
     sudo systemctl stop port-jump.service 2>/dev/null
     sudo systemctl disable port-jump.service 2>/dev/null
     sudo rm -f /etc/systemd/system/port-jump.service
@@ -430,13 +428,13 @@ port_jump_delete() {
 port_jump_menu() {
     while true; do
         clear
-        echo -e "${CYAN}✦ 端口跳跃 ✦${PLAIN}"
+        echo -e "${BLUE}✦ 端口跳跃 ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}设置 端口跳跃"
         echo -e "${GREEN}  2.${PLAIN}修改 端口跳跃"
         echo -e "${GREEN}  3.${PLAIN}查看 端口跳跃"
         echo -e "${GREEN}  4.${PLAIN}删除 端口跳跃"
         echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
         case "$pjopt" in
             1) port_jump_set ;;
             2) port_jump_modify ;;
@@ -457,13 +455,11 @@ while true; do
     echo -e "${GREEN}  3.${PLAIN}管理 Hysteria"
     echo -e "${GREEN}  4.${PLAIN}设置 端口跳跃"
     echo -e "${GREEN}  0.${PLAIN}离开 El Psy Kongroo"
-    read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" option
+    read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
         0)
-            echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
-            sleep 0.6; clear; exit 0
-            ;;
+            exit 0 ;;
         1)
             cert_menu
             ;;
@@ -475,7 +471,7 @@ while true; do
 
             if [[ -f "$EXEC_PATH" && -f "$CONFIG_PATH" ]]; then
                 echo -e "${YELLOW}检测到已安装且存在配置文件,无需重复安装${PLAIN}"
-                echo -e "${CYAN}如需修改配置,请选择主菜单的【3.管理 Hysteria】${PLAIN}"
+                echo -e "${BLUE}如需修改配置,请选择主菜单的【3.管理 Hysteria】${PLAIN}"
                 pause_and_return
                 continue
             fi
@@ -483,13 +479,13 @@ while true; do
             mkdir -p "$HY2_DIR"
 
             ARCH=$(get_arch)
-            echo -e "${CYAN}检测到系统架构: $ARCH${PLAIN}"
+            echo -e "${BLUE}检测到系统架构: $ARCH${PLAIN}"
             DOWNLOAD_URL=$(get_latest_download_url "$ARCH")
             if [ -z "$DOWNLOAD_URL" ]; then
                 echo -e "${RED}未找到适用于架构 $ARCH 的 Hysteria 内核,请手动安装${PLAIN}"
                 exit 1
             fi
-            echo -e "${CYAN}正在下载最新版本的 Hysteria ($ARCH)...${PLAIN}"
+            echo -e "${BLUE}正在下载最新版本的 Hysteria ($ARCH)...${PLAIN}"
             wget -O "${EXEC_PATH}" "$DOWNLOAD_URL"
 
             if [ ! -s "$EXEC_PATH" ]; then
@@ -510,11 +506,11 @@ while true; do
         error_msg=""
             while true; do
             clear
-            echo -e "${CYAN}请输入Hysteria服务配置参数（回车为默认值）:${PLAIN}"
+            echo -e "${BLUE}请输入Hysteria服务配置参数（回车为默认值）:${PLAIN}"
             if [[ -n "$error_msg" ]]; then
                 echo -e "${RED}${error_msg}${PLAIN}"
             fi
-            read -p "$(echo -e "${PURPLE}请输入监听端口(默认:443): ${PLAIN}")" listen_port
+            read -p "$(echo -e "${BLUE}请输入监听端口(默认:443): ${PLAIN}")" listen_port
             listen_port=${listen_port:-443}
             if [[ "$listen_port" =~ ^[0-9]+$ ]] && ((listen_port >= 1 && listen_port <= 65535)); then
                 break
@@ -524,13 +520,13 @@ while true; do
         done
         unset error_msg
 
-            read -p "$(echo -e "${PURPLE}请输入认证密码(回车随机生成): ${PLAIN}")" auth_password
+            read -p "$(echo -e "${BLUE}请输入认证密码(回车随机生成): ${PLAIN}")" auth_password
             if [ -z "$auth_password" ]; then
                 auth_password=$(random_pass)
                 echo -e "${GREEN}已自动生成认证密码: $auth_password${PLAIN}"
             fi
 
-            read -p "$(echo -e "${PURPLE}请输入伪装URL的域名(默认:www.bing.com): ${PLAIN}")" masquerade_domain
+            read -p "$(echo -e "${BLUE}请输入伪装URL的域名(默认:www.bing.com): ${PLAIN}")" masquerade_domain
             masquerade_domain=${masquerade_domain:-www.bing.com}
             masquerade_url="https://${masquerade_domain}"
 
@@ -552,17 +548,17 @@ masquerade:
     rewriteHost: true
 EOF
 
-            echo -e "${PURPLE}是否添加 SOCKS5 出站${PLAIN}"
-            read -p "$(echo -e "${PURPLE}添加y,不添加n(默认:n) [y/n]: ${PLAIN}")" enable_outbounds
+            echo -e "${BLUE}是否添加 SOCKS5 出站${PLAIN}"
+            read -p "$(echo -e "${BLUE}添加y,不添加n(默认:n) [y/n]: ${PLAIN}")" enable_outbounds
             enable_outbounds=${enable_outbounds:-n}
 
             if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                read -p "$(echo -e "${PURPLE}请输入socks5地址 (默认:127.0.0.1): ${PLAIN}")" socks5_addr
+                read -p "$(echo -e "${BLUE}请输入socks5地址 (默认:127.0.0.1): ${PLAIN}")" socks5_addr
                 socks5_addr=${socks5_addr:-127.0.0.1}
-                read -p "$(echo -e "${PURPLE}请输入socks5端口 (默认:18443): ${PLAIN}")" socks5_port
+                read -p "$(echo -e "${BLUE}请输入socks5端口 (默认:18443): ${PLAIN}")" socks5_port
                 socks5_port=${socks5_port:-18443}
-                read -p "$(echo -e "${PURPLE}请输入socks5 用户名（可留空）: ${PLAIN}")" socks5_username
-                read -p "$(echo -e "${PURPLE}请输入socks5 密码（可留空）: ${PLAIN}")" socks5_password
+                read -p "$(echo -e "${BLUE}请输入socks5 用户名（可留空）: ${PLAIN}")" socks5_username
+                read -p "$(echo -e "${BLUE}请输入socks5 密码（可留空）: ${PLAIN}")" socks5_password
                 OUTBOUNDS_CONFIG=$(cat <<EOF2
 
 outbounds:
@@ -578,7 +574,7 @@ EOF2
             fi
 
             clear
-            echo -e "${CYAN}正在创建 systemd 服务单元文件...${PLAIN}"
+            echo -e "${BLUE}正在创建 systemd 服务单元文件...${PLAIN}"
 
             cat > /etc/systemd/system/hysteria.service << EOF
 [Unit]
@@ -600,7 +596,7 @@ EOF
             sudo systemctl enable hysteria.service
             sudo systemctl start hysteria.service
 
-            echo -e "${CYAN}Hysteria 服务启动状态: ${PLAIN}"
+            echo -e "${BLUE}Hysteria 服务启动状态: ${PLAIN}"
             sudo systemctl status --no-pager hysteria.service
             echo -e "${GREEN}已成功设置 Hysteria 开机自启并启动服务!${PLAIN}"
             
@@ -610,7 +606,7 @@ EOF
             sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
             [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
             node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-            echo -e "\n${CYAN}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
+            echo -e "\n${BLUE}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
 
             pause_and_return
             ;;
@@ -632,20 +628,20 @@ EOF
             while true; do
                 clear
                 echo -e "${BLUE}✦ Hysteria Menu ✦${PLAIN}"
-                echo -e "${GREEN}  1.${PLAIN}查看 Hysteria 状态"
-                echo -e "${GREEN}  2.${PLAIN}查看 Hysteria 配置"
-                echo -e "${GREEN}  3.${PLAIN}停止 Hysteria 服务"
-                echo -e "${GREEN}  4.${PLAIN}重启 Hysteria 服务"
-                echo -e "${GREEN}  5.${PLAIN}修改 Hysteria 配置"
-                echo -e "${GREEN}  6.${PLAIN}更新 Hysteria 内核"
-                echo -e "${GREEN}  7.${PLAIN}删除 Hysteria 服务"
-                echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
-                read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
+                echo -e "${GREEN}  1.${PLAIN}查看 状态"
+                echo -e "${GREEN}  2.${PLAIN}查看 配置"
+                echo -e "${GREEN}  3.${PLAIN}停止 服务"
+                echo -e "${GREEN}  4.${PLAIN}重启 服务"
+                echo -e "${GREEN}  5.${PLAIN}修改 配置"
+                echo -e "${GREEN}  6.${PLAIN}更新 内核"
+                echo -e "${GREEN}  7.${PLAIN}删除 服务"
+                echo -e "${GREEN}  0.${PLAIN}返回 菜单"
+                read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
 
                 case "$ACTION" in
                     1)
                         clear
-                        echo -e "${CYAN}Hysteria 服务当前状态: ${PLAIN}"
+                        echo -e "${BLUE}Hysteria 服务当前状态: ${PLAIN}"
                         sudo systemctl status --no-pager $SERVICE_NAME
                         pause_and_return
                         ;;
@@ -655,14 +651,14 @@ EOF
                         ;;
                     3)
                         clear
-                        echo -e "${CYAN}正在停止 Hysteria 服务...${PLAIN}"
+                        echo -e "${BLUE}正在停止 Hysteria 服务...${PLAIN}"
                         sudo systemctl stop $SERVICE_NAME
                         echo -e "${GREEN}已停止${PLAIN}"
                         pause_and_return
                         ;;
                     4)
                         clear
-                        echo -e "${CYAN}正在重启 Hysteria 服务...${PLAIN}"
+                        echo -e "${BLUE}正在重启 Hysteria 服务...${PLAIN}"
                         sudo systemctl restart $SERVICE_NAME
                         echo -e "${GREEN}已重启${PLAIN}"
                         pause_and_return
@@ -674,7 +670,7 @@ EOF
                             pause_and_return
                             continue
                         fi
-                        echo -e "${PURPLE}请输配置参数（回车为保留原值）:${PLAIN}"
+                        echo -e "${BLUE}请输配置参数（回车为保留原值）:${PLAIN}"
 
                         old_listen=$(grep -E '^listen:' "$CONFIG_PATH" | head -n1 | awk '{print $2}' | sed 's/://')
                         old_cert=$(grep -E '^\s*cert:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
@@ -697,11 +693,11 @@ EOF
                     error_msg=""
                     while true; do
                         clear
-                        echo -e "${CYAN}请输配置参数（回车为保留原值）:${PLAIN}"
+                        echo -e "${BLUE}请输配置参数（回车为保留原值）:${PLAIN}"
                         if [[ -n "$error_msg" ]]; then
                             echo -e "${RED}${error_msg}${PLAIN}"
                         fi
-                        read -p "$(echo -e "${PURPLE}请输入监听端口 (原值: ${old_listen:-443}): ${PLAIN}")" listen_port
+                        read -p "$(echo -e "${BLUE}请输入监听端口 (原值: ${old_listen:-443}): ${PLAIN}")" listen_port
                         listen_port=${listen_port:-$old_listen}
                         listen_port=${listen_port:-443}
                         if [[ "$listen_port" =~ ^[0-9]+$ ]] && ((listen_port >= 1 && listen_port <= 65535)); then
@@ -712,7 +708,7 @@ EOF
                     done
                     unset error_msg
 
-                        echo -e "${PURPLE}请选择新的证书及私钥，或选0直接回车保留原值:${PLAIN}"
+                        echo -e "${BLUE}请选择新的证书及私钥，或选0直接回车保留原值:${PLAIN}"
                         select_cert_for_hysteria
                         SELECT_CERT_STATUS=$?
                         if [[ $SELECT_CERT_STATUS -eq 0 ]]; then
@@ -723,7 +719,7 @@ EOF
                             key_path_new="$old_key"
                         fi
 
-                        read -p "$(echo -e "${PURPLE}请输入认证密码 (原值: ${old_password}): ${PLAIN}")" auth_password
+                        read -p "$(echo -e "${BLUE}请输入认证密码 (原值: ${old_password}): ${PLAIN}")" auth_password
                         if [ -z "$auth_password" ]; then
                             if [ -n "$old_password" ]; then
                                 auth_password="$old_password"
@@ -733,7 +729,7 @@ EOF
                             fi
                         fi
 
-                        read -p "$(echo -e "${PURPLE}请输入伪装URL的域名(原值: ${old_url_domain:-www.bing.com}): ${PLAIN}")" masquerade_domain
+                        read -p "$(echo -e "${BLUE}请输入伪装URL的域名(原值: ${old_url_domain:-www.bing.com}): ${PLAIN}")" masquerade_domain
                         masquerade_domain=${masquerade_domain:-$old_url_domain}
                         masquerade_domain=${masquerade_domain:-www.bing.com}
                         masquerade_url="https://${masquerade_domain}"
@@ -756,18 +752,18 @@ masquerade:
     rewriteHost: true
 EOF
 
-                        echo -e "${PURPLE}是否添加 SOCKS5 出站配置${PLAIN}"
-                        read -p "$(echo -e "${PURPLE}添加y，不添加 n [y/n] (原值:${default_outbounds}): ${PLAIN}")" enable_outbounds
+                        echo -e "${BLUE}是否添加 SOCKS5 出站配置${PLAIN}"
+                        read -p "$(echo -e "${BLUE}添加y，不添加 n [y/n] (原值:${default_outbounds}): ${PLAIN}")" enable_outbounds
                         enable_outbounds=${enable_outbounds:-$default_outbounds}
 
                         if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                            read -p "$(echo -e "${PURPLE}请输入socks5地址 (原值:${old_socks5_addr:-127.0.0.1}): ${PLAIN}")" socks5_addr
+                            read -p "$(echo -e "${BLUE}请输入socks5地址 (原值:${old_socks5_addr:-127.0.0.1}): ${PLAIN}")" socks5_addr
                             socks5_addr=${socks5_addr:-${old_socks5_addr:-127.0.0.1}}
-                            read -p "$(echo -e "${PURPLE}请输入socks5端口 (原值:${old_socks5_port:-18443}): ${PLAIN}")" socks5_port
+                            read -p "$(echo -e "${BLUE}请输入socks5端口 (原值:${old_socks5_port:-18443}): ${PLAIN}")" socks5_port
                             socks5_port=${socks5_port:-${old_socks5_port:-18443}}
-                            read -p "$(echo -e "${PURPLE}请输入socks5 用户名（可留空，原值:${old_socks5_username}）: ${PLAIN}")" socks5_username
+                            read -p "$(echo -e "${BLUE}请输入socks5 用户名（可留空，原值:${old_socks5_username}）: ${PLAIN}")" socks5_username
                             socks5_username=${socks5_username:-$old_socks5_username}
-                            read -p "$(echo -e "${PURPLE}请输入socks5 密码（可留空，原值:${old_socks5_password}）: ${PLAIN}")" socks5_password
+                            read -p "$(echo -e "${BLUE}请输入socks5 密码（可留空，原值:${old_socks5_password}）: ${PLAIN}")" socks5_password
                             socks5_password=${socks5_password:-$old_socks5_password}
                             OUTBOUNDS_CONFIG=$(cat <<EOF2
 
@@ -791,11 +787,11 @@ EOF2
                         ;;
                     6)
                         clear
-                        echo -e "${CYAN}正在更新 Hysteria 内核...${PLAIN}"
-                        echo -e "${CYAN}先停止 Hysteria 服务...${PLAIN}"
+                        echo -e "${BLUE}正在更新 Hysteria 内核...${PLAIN}"
+                        echo -e "${BLUE}先停止 Hysteria 服务...${PLAIN}"
                         sudo systemctl stop $SERVICE_NAME
                         ARCH=$(get_arch)
-                        echo -e "${CYAN}检测到系统架构: $ARCH${PLAIN}"
+                        echo -e "${BLUE}检测到系统架构: $ARCH${PLAIN}"
                         DOWNLOAD_URL=$(get_latest_download_url "$ARCH")
                         if [ -z "$DOWNLOAD_URL" ]; then
                             echo -e "${RED}未找到适用于架构 $ARCH 的 Hysteria 内核,请手动安装${PLAIN}"
@@ -804,14 +800,14 @@ EOF2
                         fi
                         wget -O "$EXEC_PATH" "$DOWNLOAD_URL"
                         chmod +x "$EXEC_PATH"
-                        echo -e "${CYAN}内核已更新,重启服务中...${PLAIN}"
+                        echo -e "${BLUE}内核已更新,重启服务中...${PLAIN}"
                         sudo systemctl daemon-reload
                         sudo systemctl start $SERVICE_NAME
                         pause_and_return
                         ;;
                     7)
                         clear
-                        echo -e "${CYAN}正在删除 Hysteria 相关资源...${PLAIN}"
+                        echo -e "${BLUE}正在删除 Hysteria 相关资源...${PLAIN}"
                         sudo systemctl stop $SERVICE_NAME
                         sudo systemctl disable $SERVICE_NAME
                         sudo rm -f $SERVICE_FILE
