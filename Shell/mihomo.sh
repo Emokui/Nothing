@@ -2,10 +2,8 @@
 
 BLUE="\033[1;34m"
 GREEN="\033[1;32m"
-PURPLE="\033[1;35m"
 YELLOW="\033[1;33m"
 RED="\033[1;31m"
-CYAN="\033[1;36m"
 PLAIN="\033[0m"
 
 MIHOMO_DIR="${HOME}/clash"
@@ -85,16 +83,16 @@ install_mihomo() {
     clear
     if [ -f "$MIHOMO_PATH" ] && [ -f "$CONFIG_PATH" ]; then
         echo -e "${YELLOW}[!] 检测到已安装 Mihomo 且已存在配置文件，无需重复安装。${PLAIN}"
-        echo -e "${CYAN}如需修改配置，请选择主菜单的【2. 管理 Mihomo】${PLAIN}"
+        echo -e "${BLUE}如需修改配置，请选择主菜单的【2. 管理 Mihomo】${PLAIN}"
         read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键返回主菜单...${PLAIN}")"
         clear
         return
     fi
-    echo -e "${CYAN}[*] 开始安装并配置 Mihomo...${PLAIN}"
+    echo -e "${BLUE}[*] 开始安装并配置 Mihomo...${PLAIN}"
     mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
 
     download_url=$(get_latest_mihomo_url)
-    echo -e "${CYAN}[*] 下载 Mihomo: $download_url ${PLAIN}"
+    echo -e "${BLUE}[*] 下载 Mihomo: $download_url ${PLAIN}"
     wget "$download_url" -O "mihomo.gz"
     check_status "下载 Mihomo"
 
@@ -154,7 +152,7 @@ install_mihomo() {
     esac
 
     echo -e "${YELLOW}[*] SOCKS端口: ${PLAIN}"
-    read -e -p "$(echo -e "${BLUE} socks-port  ${PLAIN}${CYAN}[默认: 18443]${PLAIN}: ")" socks_port
+    read -e -p "$(echo -e "${BLUE} socks-port  ${PLAIN}${BLUE}[默认: 18443]${PLAIN}: ")" socks_port
     socks_port=${socks_port:-18443}
 
     echo -e "${YELLOW}[*] SOCKS地址: ${PLAIN}"
@@ -203,7 +201,7 @@ install_mihomo() {
     ext_ctrl_secret=${ext_ctrl_secret:-""}
 
     clear
-    echo -e "${CYAN}[*] 创建 config.yaml 配置文件...${PLAIN}"
+    echo -e "${BLUE}[*] 创建 config.yaml 配置文件...${PLAIN}"
     cat <<EOF > config.yaml
 tun:
   enable: $tun_enable
@@ -285,14 +283,14 @@ rules:
 EOF
     check_status "创建配置文件"
 
-    echo -e "${CYAN}[*] 配置 systemd service 与 timer...${PLAIN}"
+    echo -e "${BLUE}[*] 配置 systemd service 与 timer...${PLAIN}"
     create_systemd_service
     create_systemd_timer
 
     sudo systemctl daemon-reload
     sudo systemctl enable --now ${TIMER_NAME}
     echo -e "${GREEN}[*] Mihomo 安装完成，将于开机2分钟后自动启动。${PLAIN}"
-    echo -e "${CYAN}你也可以用 'sudo systemctl [start|stop|restart|status] ${SERVICE_NAME}' 管理"
+    echo -e "${BLUE}你也可以用 'sudo systemctl [start|stop|restart|status] ${SERVICE_NAME}' 管理"
     echo "查看定时器状态：sudo systemctl status ${TIMER_NAME}${PLAIN}"
 
     read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
@@ -307,12 +305,12 @@ get_latest_mihomo_url_and_version() {
 
 update_mihomo() {
     clear
-    echo -e "${CYAN}[*] 开始更新 Mihomo...${PLAIN}"
+    echo -e "${BLUE}[*] 开始更新 Mihomo...${PLAIN}"
     cd "$MIHOMO_DIR" || { echo -e "${RED}[!] 无法进入 $MIHOMO_DIR 目录。${PLAIN}"; exit 1; }
     result=$(get_latest_mihomo_url_and_version)
     download_url="${result%|*}"
 
-    echo -e "${CYAN}[*] 下载 Mihomo: $download_url ${PLAIN}"
+    echo -e "${BLUE}[*] 下载 Mihomo: $download_url ${PLAIN}"
     wget "$download_url" -O "mihomo.gz"
     check_status "下载 Mihomo"
 
@@ -326,7 +324,7 @@ update_mihomo() {
     fi
 
     clear
-    echo -e "${CYAN}[*] 重启 Mihomo systemd 服务...${PLAIN}"
+    echo -e "${BLUE}[*] 重启 Mihomo systemd 服务...${PLAIN}"
     sudo systemctl restart ${SERVICE_NAME}.service
     sleep 2
     sudo systemctl status --no-pager ${SERVICE_NAME}.service
@@ -376,7 +374,7 @@ modify_mihomo_config() {
         echo -e "${GREEN}  12.${PLAIN}控制器密码:               ${YELLOW}${ext_secret}${PLAIN}"
         echo -e "${GREEN}   0.${PLAIN}保存并重启 Mihomo 服务${PLAIN}"
         echo -e "${GREEN}   q.${PLAIN}放弃修改并返回${PLAIN}"
-        read -e -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" modchoice
+        read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" modchoice
 
         case $modchoice in
             1)
@@ -491,7 +489,7 @@ modify_mihomo_config() {
                 ;;
             0)
                 clear
-                echo -e "${CYAN}[*] 保存并重启 Mihomo 服务...${PLAIN}"
+                echo -e "${BLUE}[*] 保存并重启 Mihomo 服务...${PLAIN}"
                 sudo systemctl restart ${SERVICE_NAME}.service
                 sleep 2
                 sudo systemctl status --no-pager ${SERVICE_NAME}.service
@@ -500,7 +498,7 @@ modify_mihomo_config() {
                 break
                 ;;
             q|Q)
-                echo -e "${CYAN}[*] 放弃修改，返回主菜单...${PLAIN}"
+                echo -e "${BLUE}[*] 放弃修改，返回主菜单...${PLAIN}"
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键返回主菜单...${PLAIN}")"
                 clear
                 break
@@ -518,7 +516,7 @@ delete_mihomo() {
     echo -e "${RED}[!] 此操作将停止并彻底删除 Mihomo 及其配置，无法恢复！${PLAIN}"
     read -e -p "$(echo -e "${YELLOW}确定要删除 Mihomo 及配置吗？(y/n): ${PLAIN}")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-        echo -e "${CYAN}[*] 停止并禁用 Mihomo systemd/timer...${PLAIN}"
+        echo -e "${BLUE}[*] 停止并禁用 Mihomo systemd/timer...${PLAIN}"
         sudo systemctl stop ${SERVICE_NAME}.service
         sudo systemctl disable ${SERVICE_NAME}.service
         sudo systemctl stop ${TIMER_NAME}
@@ -542,7 +540,7 @@ delete_mihomo() {
         read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
         clear
     else
-        echo -e "${CYAN}[*] 已取消删除操作。${PLAIN}"
+        echo -e "${BLUE}[*] 已取消删除操作。${PLAIN}"
 
         read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
         clear
@@ -560,25 +558,25 @@ manage_service() {
         echo -e "${GREEN}  5.${PLAIN}修改 Mihomo 配置"
         echo -e "${GREEN}  6.${PLAIN}删除 Mihomo"
         echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
-        read -e -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" subchoice
+        read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" subchoice
 
         case $subchoice in
             1)
-                echo -e "${CYAN}[*] systemd 停止 Mihomo...${PLAIN}"
+                echo -e "${BLUE}[*] systemd 停止 Mihomo...${PLAIN}"
                 sudo systemctl stop ${SERVICE_NAME}.service
                 echo -e "${GREEN}[*] Mihomo 已停止${PLAIN}"
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
                 ;;
             2)
-                echo -e "${CYAN}[*] systemd 启动 Mihomo...${PLAIN}"
+                echo -e "${BLUE}[*] systemd 启动 Mihomo...${PLAIN}"
                 sudo systemctl start ${SERVICE_NAME}.service
                 echo -e "${GREEN}[*] Mihomo 已启动${PLAIN}"
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
                 ;;
             3)
-                echo -e "${CYAN}[*] systemd 重启 Mihomo...${PLAIN}"
+                echo -e "${BLUE}[*] systemd 重启 Mihomo...${PLAIN}"
                 sudo systemctl restart ${SERVICE_NAME}.service
                 echo -e "${GREEN}[*] Mihomo 已重启${PLAIN}"
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
@@ -586,7 +584,7 @@ manage_service() {
                 ;;
             4)
                 clear
-                echo -e "${CYAN}[*] systemd 查看 Mihomo 状态...${PLAIN}"
+                echo -e "${BLUE}[*] systemd 查看 Mihomo 状态...${PLAIN}"
                 sudo systemctl status --no-pager ${SERVICE_NAME}.service
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
@@ -599,7 +597,7 @@ manage_service() {
                 break
                 ;;
             0)
-                echo -e "${CYAN}[*] 返回主菜单...${PLAIN}"
+                echo -e "${BLUE}[*] 返回主菜单...${PLAIN}"
                 clear
                 break
                 ;;
@@ -619,7 +617,7 @@ while true; do
     echo -e "${GREEN}  2.${PLAIN}管理 Mihomo"
     echo -e "${GREEN}  3.${PLAIN}更新 Mihomo"
     echo -e "${GREEN}  0.${PLAIN}退出 El Psy Kongroo"
-    read -e -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
+    read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
     case $choice in
         1) install_mihomo ;;
@@ -642,7 +640,7 @@ while true; do
             update_mihomo
             ;;
         0)
-            echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
+            echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
             sleep 0.6; clear; exit 0
             ;;
         *)
