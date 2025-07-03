@@ -3,9 +3,7 @@
 RED='\033[0;31m'
 GREEN="\033[1;32m"
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE="\033[1;35m"
-CYAN="\033[1;36m"
+BLUE="\033[1;34m"
 PLAIN='\033[0m'
 
 SNELL_DIR="/root/snell"
@@ -147,7 +145,7 @@ install_snell() {
     pause_and_clear
     return
   fi
-  echo -e "${CYAN}开始安装 Snell...${PLAIN}"
+  echo -e "${BLUE}开始安装 Snell...${PLAIN}"
 
   get_latest_snell_version
 
@@ -181,7 +179,7 @@ install_snell() {
       mv -f snell-server "${SNELL_BIN}"
       echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
       echo -e "${GREEN}Snell (${SNELL_ARCH}) 已下载安装完成${PLAIN}"
-      echo -e "${CYAN}请选择【2.配置 Snell】生成并管理配置文件${PLAIN}"
+      echo -e "${BLUE}请选择【2.配置 Snell】生成并管理配置文件${PLAIN}"
       pause_and_clear
       return 0
   fi
@@ -195,7 +193,7 @@ update_snell_stable() {
     return 1
   fi
 
-  echo -e "${CYAN}开始检查并更新 Snell 正式版 ...${PLAIN}"
+  echo -e "${BLUE}开始检查并更新 Snell 正式版 ...${PLAIN}"
 
   get_latest_snell_version
 
@@ -252,7 +250,7 @@ update_snell_beta() {
     pause_and_clear
     return 1
   fi
-  echo -e "${CYAN}开始检查并更新 Snell 测试版 ...${PLAIN}"
+  echo -e "${BLUE}开始检查并更新 Snell 测试版 ...${PLAIN}"
 
   get_latest_snell_beta_version
 
@@ -304,11 +302,11 @@ update_snell_beta() {
 
 update_snell_menu() {
   clear
-  echo -e "${CYAN}✦ Snell 更新菜单 ✦${PLAIN}"
+  echo -e "${BLUE}✦ Snell 更新菜单 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}更新正式版"
   echo -e "${GREEN}  2.${PLAIN}更新测试版"
   echo -e "${GREEN}  0.${PLAIN}返回"
-  read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
+  read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
   case $update_choice in
     1) update_snell_stable ;;
     2) update_snell_beta ;;
@@ -350,7 +348,7 @@ generate_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
   mkdir -p "$config_dir"
-  echo -e "${CYAN}请输入配置名称:${PLAIN}"
+  echo -e "${BLUE}请输入配置名称:${PLAIN}"
   read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
@@ -359,16 +357,16 @@ generate_config() {
     pause_and_clear
     return
   fi
-  read -p "$(echo -e "${CYAN}请输入监听端口 ${YELLOW}(默认5000)${CYAN}: ${PLAIN}")" port
+  read -p "$(echo -e "${BLUE}请输入监听端口 ${YELLOW}(默认5000)${BLUE}: ${PLAIN}")" port
   port=${port:-5000}
-  read -p "$(echo -e "${CYAN}请输入PSK密钥 ${YELLOW}(回车随机生成)${CYAN}: ${PLAIN}")" psk
+  read -p "$(echo -e "${BLUE}请输入PSK密钥 ${YELLOW}(回车随机生成)${BLUE}: ${PLAIN}")" psk
   [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   obfs="off"
   obfs_host=""
-  read -p "$(echo -e "${CYAN}是否开启 obfs ${YELLOW}(回车默认不开启, y开启)${CYAN}: ${PLAIN}")" enable_obfs
+  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(回车默认不开启, y开启)${BLUE}: ${PLAIN}")" enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "$(echo -e "${CYAN}请输入 obfs 域名 ${YELLOW}(回车默认为 icloud.com)${CYAN}: ${PLAIN}")" obfs_host
+    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(回车默认为 icloud.com)${BLUE}: ${PLAIN}")" obfs_host
     obfs_host=${obfs_host:-icloud.com}
   fi
   cat > "$config_file" << EOF
@@ -394,9 +392,9 @@ start_and_enable_config() {
     return
   fi
   local config_bin="$SNELL_BIN"
-  echo -e "${CYAN}当前可用配置:${PLAIN}"
+  echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${CYAN}请选择要启动的配置名称:${PLAIN}"
+  echo -e "${BLUE}请选择要启动的配置名称:${PLAIN}"
   read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
@@ -433,9 +431,9 @@ view_config() {
     pause_and_clear
     return
   fi
-  echo -e "${CYAN}当前可用配置:${PLAIN}"
+  echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${CYAN}请选择要查看的配置名称:${PLAIN}"
+  echo -e "${BLUE}请选择要查看的配置名称:${PLAIN}"
   read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear
   local config_file="${config_dir}/${config_name}.conf"
@@ -445,9 +443,9 @@ view_config() {
     pause_and_clear
     return
   fi
-  echo -e "${CYAN}------ 配置内容 ------${PLAIN}"
+  echo -e "${BLUE}------ 配置内容 ------${PLAIN}"
   cat "$config_file"
-  echo -e "${CYAN}------ 服务状态 ------${PLAIN}"
+  echo -e "${BLUE}------ 服务状态 ------${PLAIN}"
   local status
   status=$(systemctl is-active "$service_name" 2>/dev/null)
   if [[ "$status" == "active" ]]; then
@@ -457,9 +455,9 @@ view_config() {
   elif [[ "$status" == "failed" ]]; then
     echo -e "${RED}$service_name 状态：启动失败 (failed)${PLAIN}"
   else
-    echo -e "${PURPLE}$service_name 状态：未知或未安装${PLAIN}"
+    echo -e "${BLUE}$service_name 状态：未知或未安装${PLAIN}"
   fi
-  echo -e "${CYAN}---------------------${PLAIN}"
+  echo -e "${BLUE}---------------------${PLAIN}"
   pause_and_clear
 }
 
@@ -471,9 +469,9 @@ delete_config() {
     pause_and_clear
     return
   fi
-  echo -e "${CYAN}当前可用配置:${PLAIN}"
+  echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${CYAN}(如: config1)${PLAIN}${YELLOW}，输入99删除全部配置:${PLAIN}"
+  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${BLUE}(如: config1)${PLAIN}${YELLOW}，输入99删除全部配置:${PLAIN}"
   read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
   if [[ "$config_name" == "99" ]]; then
     delete_all_configs
@@ -525,9 +523,9 @@ modify_config() {
     pause_and_clear
     return
   fi
-  echo -e "${CYAN}当前可用配置:${PLAIN}"
+  echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${CYAN}请选择要修改的配置名称:${PLAIN}"
+  echo -e "${BLUE}请选择要修改的配置名称:${PLAIN}"
   read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
@@ -541,24 +539,24 @@ modify_config() {
   local current_psk=$(grep "^psk = " "$config_file" | cut -d' ' -f3)
   local current_obfs=$(grep "^obfs = " "$config_file" | cut -d' ' -f3)
   local current_obfs_host=$(grep "^obfs-host = " "$config_file" | cut -d' ' -f3)
-  echo -e "${CYAN}当前配置内容:${PLAIN}"
+  echo -e "${BLUE}当前配置内容:${PLAIN}"
   echo -e "端口: ${GREEN}${current_port}${PLAIN}"
   echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
   echo -e "OBFS: ${GREEN}${current_obfs}${PLAIN}"
   [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
   echo -e "${YELLOW}开始修改配置...${PLAIN}"
-  read -p "$(echo -e "${CYAN}请输入新端口 ${YELLOW}(当前${current_port},回车不变)${CYAN}: ${PLAIN}")" port
+  read -p "$(echo -e "${BLUE}请输入新端口 ${YELLOW}(当前${current_port},回车不变)${BLUE}: ${PLAIN}")" port
   port=${port:-$current_port}
-  read -p "$(echo -e "${CYAN}请输入新PSK密钥 ${YELLOW}(当前${current_psk},r随机,回车不变)${CYAN}: ${PLAIN}")" psk
+  read -p "$(echo -e "${BLUE}请输入新PSK密钥 ${YELLOW}(当前${current_psk},r随机,回车不变)${BLUE}: ${PLAIN}")" psk
   if [[ "$psk" == "r" ]]; then
     psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   elif [[ -z "$psk" ]]; then
     psk=$current_psk
   fi
-  read -p "$(echo -e "${CYAN}是否开启 obfs ${YELLOW}(当前${current_obfs}, y开启,回车关闭)${CYAN}: ${PLAIN}")" enable_obfs
+  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(当前${current_obfs}, y开启,回车关闭)${BLUE}: ${PLAIN}")" enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "$(echo -e "${CYAN}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-icloud.com},回车不变)${CYAN}: ${PLAIN}")" obfs_host
+    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-icloud.com},回车不变)${BLUE}: ${PLAIN}")" obfs_host
     obfs_host=${obfs_host:-$current_obfs_host}
     obfs_host=${obfs_host:-icloud.com}
   else
@@ -578,14 +576,14 @@ EOF
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
   systemctl restart "$service_name"
   echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
-  echo -e "${CYAN}------ 当前服务状态 ------${PLAIN}"
+  echo -e "${BLUE}------ 当前服务状态 ------${PLAIN}"
   systemctl status "$service_name" --no-pager
   pause_and_clear
 }
 
 stop_snell() {
   clear
-  echo -e "${CYAN}正在停止所有 Snell systemd 服务...${PLAIN}"
+  echo -e "${BLUE}正在停止所有 Snell systemd 服务...${PLAIN}"
   local stopped_any=0
   for svc in $(systemctl list-units --type=service --all | grep -oE 'snell@[^ ]+'); do
     systemctl stop "$svc"
@@ -614,7 +612,7 @@ list_configs() {
 config_snell_menu() {
   while true; do
     show_sub_menu
-    read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
+    read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
     case $sub_choice in
       1) generate_config ;;
       2) start_and_enable_config ;;
@@ -630,7 +628,7 @@ config_snell_menu() {
 
 show_sub_menu() {
   clear
-  echo -e "${CYAN}✦ Snell 多配置管理 ✦${PLAIN}"
+  echo -e "${BLUE}✦ Snell 多配置管理 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}生成 配置"
   echo -e "${GREEN}  2.${PLAIN}启动 配置"
   echo -e "${GREEN}  3.${PLAIN}查看 配置"
@@ -642,7 +640,7 @@ show_sub_menu() {
 
 show_main_menu() {
   clear
-  echo -e "${CYAN}✦ Snell_Ver.1.1 ✦${PLAIN}"
+  echo -e "${BLUE}✦ Snell_Ver.1.1 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}安装 Snell"
   echo -e "${GREEN}  2.${PLAIN}配置 Snell"
   echo -e "${GREEN}  3.${PLAIN}删除 Snell"
@@ -655,7 +653,7 @@ main() {
   auto_enable_tcp_fastopen
   while true; do
     show_main_menu
-    read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
+    read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
     case $main_choice in
       1) install_snell ;;
       2) config_snell_menu ;;
