@@ -727,7 +727,7 @@ dns_config_menu() {
 main_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Steins Gate - Ver 2.1 ✦${PLAIN}"
+        echo -e "${BLUE}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
         echo -e "${GREEN}  01.${PLAIN}系统更新"
         echo -e "${GREEN}  02.${PLAIN}系统清理"
         echo -e "${GREEN}  03.${PLAIN}设置时区"
