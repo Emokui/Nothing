@@ -640,9 +640,7 @@ while true; do
             update_mihomo
             ;;
         0)
-            echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"
-            sleep 0.6; clear; exit 0
-            ;;
+            exit 0 ;;
         *)
             echo -e "${RED}无效选项，请重新选择。${PLAIN}"
             read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
