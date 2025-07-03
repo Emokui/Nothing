@@ -612,7 +612,7 @@ manage_service() {
 
 while true; do
     clear
-    echo -e "${BLUE}✦ Mihomo Ver.1.1 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Mihomo_Ver.1.1 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}安装 Mihomo"
     echo -e "${GREEN}  2.${PLAIN}管理 Mihomo"
     echo -e "${GREEN}  3.${PLAIN}更新 Mihomo"
