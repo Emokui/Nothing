@@ -174,7 +174,7 @@ set_swap_menu() {
         echo -e "${GREEN} 3.输入设置 Swap 大小${PLAIN} "
         echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}=============================${PLAIN}"
-        read -rp "请输入选项 [0-3]: " opt
+        read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" opt
         opt=$(echo "$opt" | xargs)
         case "$opt" in
             1)
@@ -238,7 +238,7 @@ ssh_config_menu() {
         echo -e "${GREEN} 3.修改 root密码${PLAIN}"
         echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
-        read -rp "请输入选项 [0-3]: " ssh_choice
+        read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
             1) change_ssh_port ;;
@@ -349,7 +349,7 @@ change_timezone() {
         echo -e "${GREEN} 2.按国家代码选择${PLAIN}"
         echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}===========================${PLAIN}"
-        read -rp "请输入选项 [0-2]: " choice
+        read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)
@@ -486,7 +486,7 @@ configure_firewall() {
         echo -e "${BLUE}5. 显示已开启的端口${PLAIN}"
         echo -e "${YELLOW}0. 返回主菜单${PLAIN}"
         echo -e "${BLUE}======================================${PLAIN}"
-        read -rp "请输入选项 [0-5]: " action_choice
+        read -p "$(echo -e "${BLUE}请输入选项 [0-5]: ${PLAIN}")" action_choice
         action_choice=$(echo "$action_choice" | xargs)
         [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
@@ -711,7 +711,7 @@ dns_config_menu() {
         echo -e "${GREEN} 2.手动修改DNS${PLAIN}"
         echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}============================${PLAIN}"
-        read -rp "请输入选项 [0-2]: " option
+        read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" option
         option=$(echo "$option" | xargs)
         case "$option" in
             1) set_predefined_dns ;;
