@@ -6,8 +6,6 @@ set -euo pipefail
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
 BLUE="\033[1;34m"
-PURPLE="\033[1;35m"
-CYAN="\033[1;36m"
 RED="\033[1;31m"
 BOLD="\033[1m"
 PLAIN="\033[0m"
@@ -170,13 +168,13 @@ set_swap_menu() {
         if (( current_swap > 0 )); then
             swap_info="${current_swap} MB"
         fi
-        echo -e "${BOLD}${CYAN}======== 虚拟内存(Swap)管理 =======${PLAIN}"
+        echo -e "${BOLD}${BLUE}======== 虚拟内存(Swap)管理 =======${PLAIN}"
         echo -e "${YELLOW}当前虚拟内存（Swap）大小：$swap_info${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 设置为 1024 MB (1GB)"
         echo -e "${GREEN}2.${PLAIN} 设置为 2048 MB (2GB)"
         echo -e "${GREEN}3.${PLAIN} 手动输入 Swap 大小"
         echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${CYAN}===================================${PLAIN}"
+        echo -e "${BOLD}${BLUE}===================================${PLAIN}"
         read -rp "请输入选项 [0-3]: " opt
         opt=$(echo "$opt" | xargs)
         case "$opt" in
@@ -235,13 +233,13 @@ set_swap() {
 ssh_config_menu() {
     while true; do
         clear
-        echo -e "${BOLD}${CYAN}========== SSH 配置 ==========${PLAIN}"
+        echo -e "${BOLD}${BLUE}========== SSH 配置 ==========${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 修改 SSH端口"
         echo -e "${GREEN}2.${PLAIN} 开启 root登录"
         echo -e "${GREEN}3.${PLAIN} 修改 root密码"
         echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${CYAN}==============================${PLAIN}"
-        read -rp "请选择操作: " ssh_choice
+        echo -e "${BOLD}${BLUE}==============================${PLAIN}"
+        read -rp "请输入选项 [0-3]: " ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
             1) change_ssh_port ;;
@@ -346,13 +344,13 @@ change_timezone() {
 
     while true; do
         clear
-        echo -e "${BOLD}${CYAN}=========== 更改时区 ==========${PLAIN}"
+        echo -e "${BOLD}${BLUE}=========== 更改时区 ==========${PLAIN}"
         echo -e "${YELLOW}   当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 推荐时区 (${YELLOW}$current_tz${PLAIN})"
         echo -e "${GREEN}2.${PLAIN} 按国家代码选择"
         echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${CYAN}===============================${PLAIN}"
-        read -rp "请选择: " choice
+        echo -e "${BOLD}${BLUE}===============================${PLAIN}"
+        read -rp "请输入选项 [0-2]: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)
@@ -481,15 +479,15 @@ configure_firewall() {
 
     while true; do
         clear
-        echo -e "${BOLD}${CYAN}========= iptables 防火墙管理 =========${PLAIN}"
+        echo -e "${BOLD}${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
         echo -e "${GREEN}1. 开启端口${PLAIN}"
         echo -e "${RED}2. 关闭端口${PLAIN}"
         echo -e "${GREEN}3. 开启全部端口${PLAIN}"
         echo -e "${RED}4. 关闭全部端口(保留SSH)${PLAIN}"
         echo -e "${BLUE}5. 显示已开启的端口${PLAIN}"
         echo -e "${YELLOW}0. 返回主菜单${PLAIN}"
-        echo -e "${BOLD}${CYAN}======================================${PLAIN}"
-        read -rp "请输入选项(0-5): " action_choice
+        echo -e "${BOLD}${BLUE}======================================${PLAIN}"
+        read -rp "请输入选项 [0-5]: " action_choice
         action_choice=$(echo "$action_choice" | xargs)
         [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
@@ -710,14 +708,14 @@ set_manual_dns() {
 dns_config_menu() {
     while true; do
         clear
-        echo -e "${BOLD}${CYAN}======== DNS配置工具 =======${PLAIN}"
+        echo -e "${BOLD}${BLUE}======== DNS配置工具 =======${PLAIN}"
         show_current_dns
         echo -e "${YELLOW}请选择操作:${PLAIN}"
         echo -e "${GREEN}1.${PLAIN} 修改DNS为8.8.8.8和1.1.1.1"
         echo -e "${GREEN}2.${PLAIN} 手动修改DNS"
         echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${CYAN}============================${PLAIN}"
-        read -rp "请选择操作: " option
+        echo -e "${BOLD}${BLUE}============================${PLAIN}"
+        read -rp "请输入选项 [0-2]: " option
         option=$(echo "$option" | xargs)
         case "$option" in
             1) set_predefined_dns ;;
@@ -754,7 +752,7 @@ main_menu() {
         echo -e "${GREEN}  18.${PLAIN}一键 DDsystem"
         echo -e "${GREEN}  19.${PLAIN}提取 WireGuard"
         echo -e "${GREEN}   0.${PLAIN}离开 El Psy Kongroo"
-        read -p "$(echo -e "${PURPLE}✦ Choice ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
@@ -776,7 +774,7 @@ main_menu() {
             17) install_substore ;;
             18) install_install ;;
             19) install_wireguard ;;
-            0)  clear; echo -e "${PURPLE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
+            0)  clear; echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
     done
