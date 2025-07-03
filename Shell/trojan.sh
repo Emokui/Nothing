@@ -42,7 +42,7 @@ pause_and_return() {
 
 banner() {
     echo -e "${BLUE}"
-    echo "✦ Trojan Go - Ver 1.6 ✦"
+    echo "✦ Trojan Go_Ver.1.6 ✦"
 }
 
 # ======== 3. Trojan-Go 功能相关 ========
