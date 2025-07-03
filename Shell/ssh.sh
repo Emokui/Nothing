@@ -748,7 +748,7 @@ main_menu() {
         echo -e "${GREEN}  18.${PLAIN}一键 DDsystem"
         echo -e "${GREEN}  19.${PLAIN}提取 WireGuard"
         echo -e "${GREEN}   0.${PLAIN}离开 El Psy Kongroo"
-        read -p "$(echo -e "${BLUE}✦ Choice ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
