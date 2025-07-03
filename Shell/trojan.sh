@@ -4,14 +4,11 @@
 # https://github.com/gfw-report/trojan-go
 
 # ======== 1. 全局变量和设置 ========
-RED="\033[31m\033[01m"
-PURPLE='\033[35m\033[01m'
-YELLOW="\033[33m\033[01m"
+RED="\033[1;31m"
+YELLOW="\033[1;33m"
 GREEN="\033[1;32m"
 BLUE="\033[1;34m"
-CYAN="\033[1;36m"
-PLAIN='\033[0m'
-BOLD="\033[1m"
+PLAIN="\033[0m"
 
 # ======== 2. 通用函数 ========
 check_dependencies() {
@@ -44,7 +41,7 @@ pause_and_return() {
 }
 
 banner() {
-    echo -e "${CYAN}${BOLD}"
+    echo -e "${BLUE}"
     echo "✦ Trojan Go - Ver 1.6 ✦"
 }
 
@@ -52,13 +49,13 @@ banner() {
 install_trojan_go() {
     check_dependencies
     if [ -f "/root/trojan/trojan-go" ] && [ -f "/root/trojan/config.json" ]; then
-        echo -e "${YELLOW}${BOLD}检测到已安装并存在配置文件,无需重复安装${PLAIN}"
-        echo -e "${CYAN}如需修改配置,请选择主菜单的【3.管理 Trojan-Go】${PLAIN}"
+        echo -e "${YELLOW}检测到已安装并存在配置文件,无需重复安装${PLAIN}"
+        echo -e "${BLUE}如需修改配置,请选择主菜单的【3.管理 Trojan-Go】${PLAIN}"
         pause_and_return
         return
     fi
 
-    echo -e "${GREEN}${BOLD}准备安装 Trojan-Go 并配置……${PLAIN}"
+    echo -e "${GREEN}准备安装 Trojan-Go 并配置……${PLAIN}"
     mkdir -p /root/trojan && cd /root/trojan
 
     if [ -f ./trojan-go ]; then
@@ -93,16 +90,16 @@ install_trojan_go() {
     fi
 
     clear
-    read -p "$(echo -e "${CYAN}请输入节点端口 [默认:443]: ${PLAIN}")" local_port
+    read -p "$(echo -e "${BLUE}请输入节点端口 [默认:443]: ${PLAIN}")" local_port
     local_port=${local_port:-443}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认:speedtest.tele2.net]: ${PLAIN}")" remote_addr
+    read -p "$(echo -e "${BLUE}请输入转发目标地址 [默认:speedtest.tele2.net]: ${PLAIN}")" remote_addr
     remote_addr=${remote_addr:-speedtest.tele2.net}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:80]: ${PLAIN}")" remote_port
+    read -p "$(echo -e "${BLUE}请输入转发目标端口 [默认:80]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-80}
 
-    read -p "$(echo -e "${CYAN}请输入密码 ${GREEN}(回车随机生成)${CYAN}: ${PLAIN}")" psk
+    read -p "$(echo -e "${BLUE}请输入密码 ${GREEN}(回车随机生成)${BLUE}: ${PLAIN}")" psk
     [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
     echo -e "${GREEN}已自动生成密码: $psk${PLAIN}"
 
@@ -110,7 +107,7 @@ install_trojan_go() {
     certs=($(ls "$cert_dir"/*.crt 2>/dev/null))
 
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${CYAN}检测到以下域名证书,请选择: ${PLAIN}"
+        echo -e "${BLUE}检测到以下域名证书,请选择: ${PLAIN}"
         echo -e "${GREEN}0.手动输入证书路径${PLAIN}"
         for i in "${!certs[@]}"; do
             num=$((i+1))
@@ -118,7 +115,7 @@ install_trojan_go() {
         done
 
         while true; do
-            echo -ne "${CYAN}请输入序号: ${PLAIN}"
+            echo -ne "${BLUE}请输入序号: ${PLAIN}"
             read choice
             if [[ "$choice" =~ ^[0-9]+$ ]]; then
                 if [[ "$choice" == "0" ]]; then
@@ -146,9 +143,9 @@ install_trojan_go() {
             fi
         done
     else
-        echo -e "${CYAN} 未在 $cert_dir 中找到 .crt 文件,请手动输入证书路径 ${PLAIN}"
-        read -p "$(echo -e "${CYAN}请输入证书 cert 路径:${PLAIN}")" cert_path
-        read -p "$(echo -e "${CYAN}请输入私钥 key 路径:${PLAIN}")" key_path
+        echo -e "${BLUE} 未在 $cert_dir 中找到 .crt 文件,请手动输入证书路径 ${PLAIN}"
+        read -p "$(echo -e "${BLUE}请输入证书 cert 路径:${PLAIN}")" cert_path
+        read -p "$(echo -e "${BLUE}请输入私钥 key 路径:${PLAIN}")" key_path
     fi
 
     detected_domain=$(openssl x509 -in "$cert_path" -noout -subject 2>/dev/null | sed -n 's/^subject=.*CN=\s*\([^,\/]*\).*/\1/p')
@@ -165,12 +162,12 @@ install_trojan_go() {
         echo -e "${GREEN}证书域名自动识别为: $domain${PLAIN}"
     fi
 
-    read -p "$(echo -e "${CYAN}是否启用 WebSocket(y/n) [默认:y]: ${PLAIN}")" enable_ws
+    read -p "$(echo -e "${BLUE}是否启用 WebSocket(y/n) [默认:y]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
         ws_enabled=true
-        read -p "$(echo -e "${CYAN}请输入 ws 路径 [默认:/]: ${PLAIN}")" ws_path
+        read -p "$(echo -e "${BLUE}请输入 ws 路径 [默认:/]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-/}
-        read -p "$(echo -e "${CYAN}请输入 ws Host（默认:证书域名）: ${PLAIN}")" ws_host
+        read -p "$(echo -e "${BLUE}请输入 ws Host（默认:证书域名）: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$domain}
     else
         ws_enabled=false
@@ -178,15 +175,15 @@ install_trojan_go() {
         ws_host="$domain"
     fi
 
-    read -p "$(echo -e "${CYAN}是否启用 socks5 代理转发(y/n) [默认:n]: ${PLAIN}")" enable_fp
+    read -p "$(echo -e "${BLUE}是否启用 socks5 代理转发(y/n) [默认:n]: ${PLAIN}")" enable_fp
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
-        read -p "$(echo -e "${CYAN}请输入代理地址 [默认:127.0.0.1]: ${PLAIN}")" proxy_addr
+        read -p "$(echo -e "${BLUE}请输入代理地址 [默认:127.0.0.1]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-127.0.0.1}
-        read -p "$(echo -e "${CYAN}请输入代理端口 [默认:18443]: ${PLAIN}")" proxy_port
+        read -p "$(echo -e "${BLUE}请输入代理端口 [默认:18443]: ${PLAIN}")" proxy_port
         proxy_port=${proxy_port:-18443}
-        read -p "$(echo -e "${CYAN}请输入代理用户名（可留空）: ${PLAIN}")" fp_username
-        read -p "$(echo -e "${CYAN}请输入代理密码（可留空）: ${PLAIN}")" fp_password
+        read -p "$(echo -e "${BLUE}请输入代理用户名（可留空）: ${PLAIN}")" fp_username
+        read -p "$(echo -e "${BLUE}请输入代理密码（可留空）: ${PLAIN}")" fp_password
     else
         fp_enabled=false
         proxy_addr="127.0.0.1"
@@ -284,7 +281,7 @@ EOF
     else
         node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
     fi
-    echo -e "${CYAN}您的 Trojan 节点链接: ${PLAIN}"
+    echo -e "${BLUE}您的 Trojan 节点链接: ${PLAIN}"
     echo -e "${GREEN}$node_link${PLAIN}"
 
     pause_and_return
@@ -318,16 +315,16 @@ modify_trojan_config() {
     old_fp_username=$(jq -r '.forward_proxy.username' "$CONFIG" 2>/dev/null)
     old_fp_password=$(jq -r '.forward_proxy.password' "$CONFIG" 2>/dev/null)
 
-    read -p "$(echo -e "${CYAN}请输入节点端口 [默认:$old_local_port]: ${PLAIN}")" local_port
+    read -p "$(echo -e "${BLUE}请输入节点端口 [默认:$old_local_port]: ${PLAIN}")" local_port
     local_port=${local_port:-$old_local_port}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标地址 [默认:$old_remote_addr]: ${PLAIN}")" remote_addr
+    read -p "$(echo -e "${BLUE}请输入转发目标地址 [默认:$old_remote_addr]: ${PLAIN}")" remote_addr
     remote_addr=${remote_addr:-$old_remote_addr}
 
-    read -p "$(echo -e "${CYAN}请输入转发目标端口 [默认:$old_remote_port]: ${PLAIN}")" remote_port
+    read -p "$(echo -e "${BLUE}请输入转发目标端口 [默认:$old_remote_port]: ${PLAIN}")" remote_port
     remote_port=${remote_port:-$old_remote_port}
 
-    read -p "$(echo -e "${CYAN}请输入新密码 ${GREEN}[回车保持不变,输入r/R随机生成]${CYAN}: ${PLAIN}")" psk
+    read -p "$(echo -e "${BLUE}请输入新密码 ${GREEN}[回车保持不变,输入r/R随机生成]${BLUE}: ${PLAIN}")" psk
     if [[ "$psk" == "r" || "$psk" == "R" ]]; then
         psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
         echo -e "${GREEN}已自动生成密码: $psk${PLAIN}"
@@ -343,7 +340,7 @@ modify_trojan_config() {
     changed_cert=false
 
     if [[ ${#certs[@]} -gt 0 ]]; then
-        echo -e "${CYAN}检测到以下域名证书,请选择: ${PLAIN}"
+        echo -e "${BLUE}检测到以下域名证书,请选择: ${PLAIN}"
         echo -e "${GREEN}0.手动输入证书路径 ${PLAIN}"
         for i in "${!certs[@]}"; do
             num=$((i+1))
@@ -351,7 +348,7 @@ modify_trojan_config() {
         done
 
         while true; do
-            echo -ne "${CYAN}请输入序号: ${PLAIN}"
+            echo -ne "${BLUE}请输入序号: ${PLAIN}"
             read choice
             if [[ "$choice" =~ ^[0-9]+$ ]]; then
                 if [[ "$choice" == "0" ]]; then
@@ -381,14 +378,14 @@ modify_trojan_config() {
             fi
         done
     else
-        read -p "$(echo -e "${CYAN}请输入证书 cert 路径 [默认:$old_cert]: ${PLAIN}")" cert_path
+        read -p "$(echo -e "${BLUE}请输入证书 cert 路径 [默认:$old_cert]: ${PLAIN}")" cert_path
         if [ -z "$cert_path" ]; then
             cert_path=$old_cert
             changed_cert=false
         else
             changed_cert=true
         fi
-        read -p "$(echo -e "${CYAN}请输入私钥 key 路径 [默认:$old_key]: ${PLAIN}")" key_path
+        read -p "$(echo -e "${BLUE}请输入私钥 key 路径 [默认:$old_key]: ${PLAIN}")" key_path
         if [ -z "$key_path" ]; then
             key_path=$old_key
         fi
@@ -410,7 +407,7 @@ modify_trojan_config() {
 
     ws_host_default="$domain"
 
-    read -p "$(echo -e "${CYAN}是否启用 WebSocket (y/n) [默认:$( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
+    read -p "$(echo -e "${BLUE}是否启用 WebSocket (y/n) [默认:$( [[ "$old_ws_enabled" == "true" ]] && echo y || echo n ) ]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" ]]; then
         if [[ "$old_ws_enabled" == "true" ]]; then
             ws_enabled=true
@@ -424,10 +421,10 @@ modify_trojan_config() {
     fi
 
     if [[ "$ws_enabled" == true ]]; then
-        read -p "$(echo -e "${CYAN}请输入 ws 路径 [默认:$old_ws_path]: ${PLAIN}")" ws_path
+        read -p "$(echo -e "${BLUE}请输入 ws 路径 [默认:$old_ws_path]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-$old_ws_path}
         # ws_host 默认是当前证书域名
-        read -p "$(echo -e "${CYAN}请输入 ws Host（默认:证书域名） [默认: $ws_host_default]: ${PLAIN}")" ws_host
+        read -p "$(echo -e "${BLUE}请输入 ws Host（默认:证书域名） [默认: $ws_host_default]: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$ws_host_default}
     else
         ws_path="${old_ws_path:-/}"
@@ -438,19 +435,19 @@ modify_trojan_config() {
     if [[ "$old_fp_enabled" == "true" ]]; then
         default_fp_text="y"
     fi
-    read -p "$(echo -e "${CYAN}是否启用 socks5 代理转发 (y/n) [默认:$default_fp_text]: ${PLAIN}")" enable_fp
+    read -p "$(echo -e "${BLUE}是否启用 socks5 代理转发 (y/n) [默认:$default_fp_text]: ${PLAIN}")" enable_fp
     if [[ -z "$enable_fp" ]]; then
         enable_fp=$default_fp_text
     fi
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
-        read -p "$(echo -e "${CYAN}请输入代理地址 [默认:${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
+        read -p "$(echo -e "${BLUE}请输入代理地址 [默认:${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-${old_fp_addr:-127.0.0.1}}
-        read -p "$(echo -e "${CYAN}请输入代理端口 [默认:${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
+        read -p "$(echo -e "${BLUE}请输入代理端口 [默认:${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
         proxy_port=${proxy_port:-${old_fp_port:-18443}}
-        read -p "$(echo -e "${CYAN}请输入代理用户名（可留空） [默认:$old_fp_username]: ${PLAIN}")" fp_username
+        read -p "$(echo -e "${BLUE}请输入代理用户名（可留空） [默认:$old_fp_username]: ${PLAIN}")" fp_username
         fp_username=${fp_username:-$old_fp_username}
-        read -p "$(echo -e "${CYAN}请输入代理密码（可留空） [默认:$old_fp_password]: ${PLAIN}")" fp_password
+        read -p "$(echo -e "${BLUE}请输入代理密码（可留空） [默认:$old_fp_password]: ${PLAIN}")" fp_password
         fp_password=${fp_password:-$old_fp_password}
     else
         fp_enabled=false
@@ -520,7 +517,7 @@ show_trojan_config() {
     clear
     CONFIG="/root/trojan/config.json"
     if [ -f "$CONFIG" ]; then
-        echo -e "${CYAN}------------------------------------------------"
+        echo -e "${BLUE}------------------------------------------------"
         cat "$CONFIG"
         echo -e "------------------------------------------------${PLAIN}"
 
@@ -543,7 +540,7 @@ show_trojan_config() {
         else
             node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
         fi
-        echo -e "${CYAN}您的 Trojan 节点链接: ${PLAIN}"
+        echo -e "${BLUE}您的 Trojan 节点链接: ${PLAIN}"
         echo -e "${GREEN}$node_link${PLAIN}"
         # ---------------------------------
     else
@@ -554,7 +551,7 @@ show_trojan_config() {
 
 remove_trojan_go() {
     clear
-    echo -e "${RED}${BOLD}准备彻底删除 Trojan-Go 及相关配置……${PLAIN}"
+    echo -e "${RED}准备彻底删除 Trojan-Go 及相关配置……${PLAIN}"
     systemctl stop trojan-go 2>/dev/null
     systemctl disable trojan-go 2>/dev/null
 
@@ -585,7 +582,7 @@ remove_trojan_go() {
 
 start_trojan_go() {
     clear
-    echo -e "${GREEN}${BOLD}正在启动 Trojan-Go……${PLAIN}"
+    echo -e "${GREEN}正在启动 Trojan-Go……${PLAIN}"
     systemctl start trojan-go
     systemctl status trojan-go --no-pager
     echo -e "${GREEN}Trojan-Go 已经启动!${PLAIN}"
@@ -594,7 +591,7 @@ start_trojan_go() {
 
 stop_trojan_go() {
     clear
-    echo -e "${RED}${BOLD}正在停止 Trojan-Go……${PLAIN}"
+    echo -e "${RED}正在停止 Trojan-Go……${PLAIN}"
     systemctl stop trojan-go
     systemctl status trojan-go --no-pager
     echo -e "${RED}Trojan-Go 已经停止运行!${PLAIN}"
@@ -603,7 +600,7 @@ stop_trojan_go() {
 
 restart_trojan_go() {
     clear
-    echo -e "${GREEN}${BOLD}正在重启 Trojan-Go……${PLAIN}"
+    echo -e "${GREEN}正在重启 Trojan-Go……${PLAIN}"
     systemctl restart trojan-go
     systemctl status trojan-go --no-pager
     echo -e "${GREEN}Trojan-Go 已经重启!${PLAIN}"
@@ -618,7 +615,7 @@ manage_trojan_go() {
     fi
     while true; do
         clear
-        echo -e "${BLUE}${BOLD}✦ Trojan-Go Menu ✦${PLAIN}"
+        echo -e "${BLUE}✦ Trojan-Go Menu ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}启动 Trojan"
         echo -e "${GREEN}  2.${PLAIN}停止 Trojan"
         echo -e "${GREEN}  3.${PLAIN}重启 Trojan"
@@ -626,7 +623,7 @@ manage_trojan_go() {
         echo -e "${GREEN}  5.${PLAIN}修改 Trojan 配置"
         echo -e "${GREEN}  6.${PLAIN}删除 Trojan"
         echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
         case "$choice" in
             1) start_trojan_go ;;
             2) stop_trojan_go ;;
@@ -730,7 +727,7 @@ issue_acme_cert() {
     ipv6=$(curl -s6m8 ip.sb -k | sed -n 1p)
 
     echo -e "${YELLOW}请输入需要申请证书的域名(直接回车退出申请)${PLAIN}"
-    read -p "$(echo -e "${CYAN}域名: ${PLAIN}")" domain
+    read -p "$(echo -e "${BLUE}域名: ${PLAIN}")" domain
     [[ -z $domain ]] && echo -e "${RED}未输入域名,操作中止${PLAIN}" && pause_and_return && return
 
     domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
@@ -772,7 +769,7 @@ issue_acme_cert() {
 
 uninstall_acme() {
     clear
-    echo -e "${RED}${BOLD}正在卸载 acme.sh 及相关证书...${PLAIN}"
+    echo -e "${RED}正在卸载 acme.sh 及相关证书...${PLAIN}"
 
     if [ -d ~/.acme.sh ]; then
         ~/.acme.sh/acme.sh --uninstall
@@ -807,13 +804,13 @@ uninstall_acme() {
 web_menu() {
     while true; do
         clear
-        echo -e "${BLUE}${BOLD}✦ Nginx伪装网页 ✦${PLAIN}"
+        echo -e "${BLUE}✦ Nginx伪装网页 ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN} 配置 Nginx"
         echo -e "${GREEN}  2.${PLAIN} 修改 Nginx"
         echo -e "${GREEN}  3.${PLAIN} 重启 Nginx"
         echo -e "${GREEN}  4.${PLAIN} 删除 Nginx"
         echo -e "${GREEN}  0.${PLAIN} 返回主菜单"
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
         case "$sub_choice" in
             1) install_fake_web ;;
             2) modify_nginx_conf ;;
@@ -833,7 +830,7 @@ install_fake_web() {
         return
     fi
     echo -e "${GREEN}开始安装并配置伪装静态网页...${PLAIN}"
-    read -p "$(echo -e "${CYAN}请输入 Nginx 监听端口 [默认:80]: ${PLAIN}")" web_port
+    read -p "$(echo -e "${BLUE}请输入 Nginx 监听端口 [默认:80]: ${PLAIN}")" web_port
     web_port=${web_port:-80}
     sudo mkdir -p /var/www/trojan
     cd /var/www/trojan
@@ -874,7 +871,7 @@ modify_nginx_conf() {
         pause_and_return
         return
     fi
-    echo -e "${CYAN}当前 Nginx 配置如下:${PLAIN}"
+    echo -e "${BLUE}当前 Nginx 配置如下:${PLAIN}"
     cat "$conf_path"
     echo -e "${YELLOW}请修改上面内容,在编辑器中保存并退出"
     echo -e "${YELLOW}nano编辑器操作: Ctrl+O 保存,Ctrl+X 退出${PLAIN}"
@@ -917,13 +914,13 @@ main_menu() {
     while true; do
         clear
         banner
-        echo -e "${GREEN}  1.${PLAIN}Acme 证书申请"
-        echo -e "${GREEN}  2.${PLAIN}安装 Trojan-Go"
-        echo -e "${GREEN}  3.${PLAIN}管理 Trojan-Go"
-        echo -e "${GREEN}  4.${PLAIN}卸载 Acme及证书"
-        echo -e "${GREEN}  5.${PLAIN}配置 伪装静态网页"
+        echo -e "${GREEN}  1.${PLAIN}申请 证书"
+        echo -e "${GREEN}  2.${PLAIN}安装 Trojan"
+        echo -e "${GREEN}  3.${PLAIN}管理 Trojan"
+        echo -e "${GREEN}  4.${PLAIN}卸载 Acme+证书"
+        echo -e "${GREEN}  5.${PLAIN}配置 Nginx伪装"
         echo -e "${GREEN}  0.${PLAIN}离开 El Psy Kongroo"
-        read -p "$(echo -e "${PURPLE}✦ Steins Gate ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
             1) issue_acme_cert ;;
@@ -931,7 +928,7 @@ main_menu() {
             3) manage_trojan_go ;;
             4) uninstall_acme ;;
             5) web_menu ;;
-            0) echo -e "${CYAN}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; exit 0 ;;
+            0) exit 0 ;;
             *) echo -e "${RED}错误的命运抉择,请重新寻觅世界线。${PLAIN}"; pause_and_return ;;
         esac
     done
