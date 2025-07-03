@@ -168,13 +168,13 @@ set_swap_menu() {
         if (( current_swap > 0 )); then
             swap_info="${current_swap} MB"
         fi
-        echo -e "${BOLD}${BLUE}======== 虚拟内存(Swap)管理 =======${PLAIN}"
-        echo -e "${YELLOW}当前虚拟内存（Swap）大小：$swap_info${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 设置为 1024 MB (1GB)"
-        echo -e "${GREEN}2.${PLAIN} 设置为 2048 MB (2GB)"
-        echo -e "${GREEN}3.${PLAIN} 手动输入 Swap 大小"
-        echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${BLUE}===================================${PLAIN}"
+        echo -e "${BLUE}===== 虚拟内存(Swap)管理 ====${PLAIN}"
+        echo -e "${YELLOW} 当前 Swap 大小：$swap_info${PLAIN}"
+        echo -e "${GREEN} 1.设置为 1024 MB ${PLAIN} "
+        echo -e "${GREEN} 2.设置为 2048 MB ${PLAIN} "
+        echo -e "${GREEN} 3.输入设置 Swap 大小${PLAIN} "
+        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${BLUE}=============================${PLAIN}"
         read -rp "请输入选项 [0-3]: " opt
         opt=$(echo "$opt" | xargs)
         case "$opt" in
@@ -233,12 +233,12 @@ set_swap() {
 ssh_config_menu() {
     while true; do
         clear
-        echo -e "${BOLD}${BLUE}========== SSH 配置 ==========${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 修改 SSH端口"
-        echo -e "${GREEN}2.${PLAIN} 开启 root登录"
-        echo -e "${GREEN}3.${PLAIN} 修改 root密码"
-        echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${BLUE}==============================${PLAIN}"
+        echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
+        echo -e "${GREEN} 1.修改 SSH端口${PLAIN}"
+        echo -e "${GREEN} 2.开启 root登录${PLAIN}"
+        echo -e "${GREEN} 3.修改 root密码${PLAIN}"
+        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${BLUE}======================${PLAIN}"
         read -rp "请输入选项 [0-3]: " ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
@@ -344,12 +344,12 @@ change_timezone() {
 
     while true; do
         clear
-        echo -e "${BOLD}${BLUE}=========== 更改时区 ==========${PLAIN}"
-        echo -e "${YELLOW}   当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 推荐时区 (${YELLOW}$current_tz${PLAIN})"
-        echo -e "${GREEN}2.${PLAIN} 按国家代码选择"
-        echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${BLUE}===============================${PLAIN}"
+        echo -e "${BLUE}========= 更改时区 ========${PLAIN}"
+        echo -e "${YELLOW} 当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${PLAIN}"
+        echo -e "${GREEN} 1.推荐时区${PLAIN} (${YELLOW}$current_tz${PLAIN})"
+        echo -e "${GREEN} 2.按国家代码选择${PLAIN}"
+        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${BLUE}===========================${PLAIN}"
         read -rp "请输入选项 [0-2]: " choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
@@ -479,14 +479,14 @@ configure_firewall() {
 
     while true; do
         clear
-        echo -e "${BOLD}${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
+        echo -e "${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
         echo -e "${GREEN}1. 开启端口${PLAIN}"
         echo -e "${RED}2. 关闭端口${PLAIN}"
         echo -e "${GREEN}3. 开启全部端口${PLAIN}"
         echo -e "${RED}4. 关闭全部端口(保留SSH)${PLAIN}"
         echo -e "${BLUE}5. 显示已开启的端口${PLAIN}"
         echo -e "${YELLOW}0. 返回主菜单${PLAIN}"
-        echo -e "${BOLD}${BLUE}======================================${PLAIN}"
+        echo -e "${BLUE}======================================${PLAIN}"
         read -rp "请输入选项 [0-5]: " action_choice
         action_choice=$(echo "$action_choice" | xargs)
         [[ "$action_choice" == "0" ]] && return
@@ -593,14 +593,11 @@ configure_firewall() {
 safe_update_resolv_conf() {
     local primary_dns="$1"
     local secondary_dns="$2"
-    # 解锁
     chattr -i /etc/resolv.conf 2>/dev/null
-    # 写入DNS
     {
         echo "nameserver $primary_dns"
         [ -n "$secondary_dns" ] && echo "nameserver $secondary_dns"
     } > /etc/resolv.conf
-    # 上锁
     chattr +i /etc/resolv.conf 2>/dev/null
 }
 
@@ -618,7 +615,7 @@ detect_network_manager() {
 }
 
 show_current_dns() {
-    echo -e "${YELLOW}当前DNS配置:${PLAIN}"
+    echo -e "${YELLOW} 当前DNS配置:${PLAIN}"
     grep "nameserver" /etc/resolv.conf || echo "未找到DNS配置"
     network_manager=$(detect_network_manager)
     case $network_manager in
@@ -708,13 +705,13 @@ set_manual_dns() {
 dns_config_menu() {
     while true; do
         clear
-        echo -e "${BOLD}${BLUE}======== DNS配置工具 =======${PLAIN}"
+        echo -e "${BLUE}======== DNS配置工具 =======${PLAIN}"
         show_current_dns
         echo -e "${YELLOW}请选择操作:${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 修改DNS为8.8.8.8和1.1.1.1"
-        echo -e "${GREEN}2.${PLAIN} 手动修改DNS"
-        echo -e "${YELLOW}0.${PLAIN} 返回主菜单"
-        echo -e "${BOLD}${BLUE}============================${PLAIN}"
+        echo -e "${GREEN} 1.修改DNS为8.8.8.8和1.1.1.1${PLAIN}"
+        echo -e "${GREEN} 2.手动修改DNS${PLAIN}"
+        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${BLUE}============================${PLAIN}"
         read -rp "请输入选项 [0-2]: " option
         option=$(echo "$option" | xargs)
         case "$option" in
