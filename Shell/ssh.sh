@@ -7,6 +7,7 @@ GREEN="\033[1;32m"
 green="\033[0;32m"
 YELLOW="\033[1;33m"
 BLUE="\033[1;34m"
+blue="\033[0;34m"
 RED="\033[1;31m"
 PLAIN="\033[0m"
 
@@ -728,7 +729,7 @@ dns_config_menu() {
 main_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
+        echo -e "${blue}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
         echo -e "${green}  01.${PLAIN}系统更新"
         echo -e "${green}  02.${PLAIN}系统清理"
         echo -e "${green}  03.${PLAIN}设置时区"
@@ -749,7 +750,7 @@ main_menu() {
         echo -e "${green}  18.${PLAIN}一键 DDsystem"
         echo -e "${green}  19.${PLAIN}提取 WireGuard"
         echo -e "${green}   0.${PLAIN}离开 El Psy Kongroo"
-        read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${blue}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
