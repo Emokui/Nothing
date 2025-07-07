@@ -251,10 +251,10 @@ set_swap() {
 ssh_config_menu() {
     while true; do
         clear
-        echo -e "${blue}====== SSH 配置 ======${PLAIN}"
-        echo -e "${green} 1.修改 SSH端口${PLAIN}"
-        echo -e "${green} 2.开启 root登录${PLAIN}"
-        echo -e "${green} 3.修改 root密码${PLAIN}"
+        echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
+        echo -e "${GREEN} 1.修改 SSH端口${PLAIN}"
+        echo -e "${GREEN} 2.开启 root登录${PLAIN}"
+        echo -e "${GREEN} 3.修改 root密码${PLAIN}"
         echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" ssh_choice
