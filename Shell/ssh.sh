@@ -19,7 +19,7 @@ fi
 press_any_key_to_continue() {
     if [ -t 0 ]; then
         local msg="${1:-按任意键返回菜单...}"
-        echo -ne "$msg"
+        echo -ne "${GREEN}${msg}\033[0m"
         read -n 1 -s -r
         echo
     else
@@ -68,8 +68,7 @@ linux_update() {
 
     if is_gcp_instance; then
         echo -e "${BLUE}检测为GCP实例,跳过更新。${PLAIN}"
-        read -n 1 -s -r -p "按任意键继续..."
-        echo ""
+        press_any_key_to_continue
         return 0
     fi
 
