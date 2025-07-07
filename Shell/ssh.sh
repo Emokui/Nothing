@@ -730,16 +730,16 @@ main_menu() {
     while true; do
         clear
         echo -e "${blue}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
-        echo -e "${green}  01.${PLAIN}系统更新"
-        echo -e "${green}  02.${PLAIN}系统清理"
-        echo -e "${green}  03.${PLAIN}设置时区"
-        echo -e "${green}  04.${PLAIN}设置防火墙"
-        echo -e "${green}  05.${PLAIN}设置虚拟内存"
-        echo -e "${green}  06.${PLAIN}配置 SSH"
-        echo -e "${green}  07.${PLAIN}配置 DNS"
-        echo -e "${green}  08.${PLAIN}重启 VPS"
-        echo -e "${green}  09.${PLAIN}管理 BBR"
-        echo -e "${green}  10.${PLAIN}管理 WARP"
+        echo -e "${green}  01.${PLAIN}系统 更新"
+        echo -e "${green}  02.${PLAIN}系统 清理"
+        echo -e "${green}  03.${PLAIN}设置 时区"
+        echo -e "${green}  04.${PLAIN}设置 防火墙"
+        echo -e "${green}  05.${PLAIN}配置 SSH"
+        echo -e "${green}  06.${PLAIN}配置 DNS"
+        echo -e "${green}  07.${PLAIN}重启 VPS"
+        echo -e "${green}  08.${PLAIN}管理 BBR"
+        echo -e "${green}  09.${PLAIN}管理 WARP"
+        echo -e "${green}  10.${PLAIN}设置 Swap"
         echo -e "${green}  11.${PLAIN}配置 Acme"
         echo -e "${green}  12.${PLAIN}反代 Nginx"
         echo -e "${green}  13.${PLAIN}配置 Snell"
@@ -757,12 +757,12 @@ main_menu() {
             2)  linux_clean ;;
             3)  change_timezone ;;
             4)  configure_firewall ;;
-            5)  set_swap_menu ;;
-            6)  ssh_config_menu ;;
-            7)  dns_config_menu ;;
-            8)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            9)  bbr_menu ;;
-            10) warp_menu ;;
+            5)  ssh_config_menu ;;
+            6)  dns_config_menu ;;
+            7)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
+            8)  bbr_menu ;;
+            9) warp_menu ;;
+            10)  set_swap_menu ;;
             11) install_acme ;;
             12) install_nginx ;;
             13) install_snell ;;
