@@ -78,3 +78,12 @@ DOMAIN-SUFFIX,event.prod.bidr.io
 DOMAIN-SUFFIX,app-measurement.com
 DOMAIN-SUFFIX,ffbbbdc6d3c353211fe2ba39c9f744cd.com
 DOMAIN-SUFFIX,ffe390afd658c19dcbf707e0597b846d.de
+# Others
+DOMAIN,api.portalhq.io
+DOMAIN,www.recaptcha.net
+DOMAIN,fcmtoken.googleapis.com
+DOMAIN,cdn-settings.segment.com
+DOMAIN,mapsmobilesdks-pa.googleapis.com
+DOMAIN,firebase-settings.crashlytics.com
+DOMAIN,avalanche-c-chain-rpc.publicnode.com
+DOMAIN,service-platform.liquidity-financial.com
