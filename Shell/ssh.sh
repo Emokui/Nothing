@@ -3,12 +3,10 @@
 set -euo pipefail
 
 # ====== 颜色变量统一管理 ======
-GREEN="\033[1;32m"
-green="\033[0;32m"
-YELLOW="\033[1;33m"
-BLUE="\033[1;34m"
-blue="\033[0;34m"
-RED="\033[1;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[0;33m"
+BLUE="\033[0;34m"
+RED="\033[0;31m"
 PLAIN="\033[0m"
 
 # ====== 必须以 root 权限运行 ======
@@ -206,13 +204,33 @@ set_swap_menu() {
 }
 
 set_swap() {
-    size_mb="$1"
+    local size_mb="$1"
+    local avail_kb avail_mb
+
+    if ! [[ "$size_mb" =~ ^[0-9]+$ ]] || (( size_mb < 128 )); then
+        echo -e "${RED}无效的 Swap 大小（必须为大于等于128的整数）${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    avail_kb=$(df --output=avail / | tail -1)
+    avail_mb=$((avail_kb / 1024))
+    if (( avail_mb < size_mb )); then
+        echo -e "${RED}磁盘空间不足，无法创建${size_mb} MB的swap文件！${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
 
     sudo swapoff "$swapfile_path" 2>/dev/null || true
     sudo rm -f "$swapfile_path"
 
     echo -e "${YELLOW}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
-    if ! sudo fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
+    if command -v fallocate >/dev/null 2>&1; then
+        if ! sudo fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
+            echo -e "${YELLOW}fallocate 失败，尝试使用 dd...${PLAIN}"
+            sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+        fi
+    else
         sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
     fi
 
@@ -220,8 +238,8 @@ set_swap() {
     sudo mkswap "$swapfile_path"
     sudo swapon "$swapfile_path"
 
-    sudo sed -i '/^\/swapfile/d' /etc/fstab
-    echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+    sudo sed -i '\|^/swapfile |d' /etc/fstab
+    echo "$swapfile_path none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
 
     echo
     echo -e "${GREEN}Swap 设置完成，当前情况：${PLAIN}"
@@ -234,10 +252,10 @@ set_swap() {
 ssh_config_menu() {
     while true; do
         clear
-        echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
-        echo -e "${GREEN} 1.修改 SSH端口${PLAIN}"
-        echo -e "${GREEN} 2.开启 root登录${PLAIN}"
-        echo -e "${GREEN} 3.修改 root密码${PLAIN}"
+        echo -e "${blue}====== SSH 配置 ======${PLAIN}"
+        echo -e "${green} 1.修改 SSH端口${PLAIN}"
+        echo -e "${green} 2.开启 root登录${PLAIN}"
+        echo -e "${green} 3.修改 root密码${PLAIN}"
         echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" ssh_choice
@@ -729,28 +747,28 @@ dns_config_menu() {
 main_menu() {
     while true; do
         clear
-        echo -e "${blue}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
-        echo -e "${green}  01.${PLAIN}系统更新"
-        echo -e "${green}  02.${PLAIN}系统清理"
-        echo -e "${green}  03.${PLAIN}设置时区"
-        echo -e "${green}  04.${PLAIN}配置NFW"
-        echo -e "${green}  05.${PLAIN}配置SSH"
-        echo -e "${green}  06.${PLAIN}配置DNS"
-        echo -e "${green}  07.${PLAIN}重启VPS"
-        echo -e "${green}  08.${PLAIN}管理BBR"
-        echo -e "${green}  09.${PLAIN}管理WARP"
-        echo -e "${green}  10.${PLAIN}配置Swap"
-        echo -e "${green}  11.${PLAIN}配置Acme"
-        echo -e "${green}  12.${PLAIN}配置Nginx"
-        echo -e "${green}  13.${PLAIN}配置Snell"
-        echo -e "${green}  14.${PLAIN}配置Mihomo"
-        echo -e "${green}  15.${PLAIN}配置Trojan"
-        echo -e "${green}  16.${PLAIN}配置Hysteria"
-        echo -e "${green}  17.${PLAIN}配置SubStore"
-        echo -e "${green}  18.${PLAIN}设置DDsystem"
-        echo -e "${green}  19.${PLAIN}提取WireGuard"
-        echo -e "${green}   0.${PLAIN}离开BYE"
-        read -p "$(echo -e "${blue}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
+        echo -e "${BLUE}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
+        echo -e "${GREEN}  01.${PLAIN}系统更新"
+        echo -e "${GREEN}  02.${PLAIN}系统清理"
+        echo -e "${GREEN}  03.${PLAIN}设置时区"
+        echo -e "${GREEN}  04.${PLAIN}配置NFW"
+        echo -e "${GREEN}  05.${PLAIN}配置SSH"
+        echo -e "${GREEN}  06.${PLAIN}配置DNS"
+        echo -e "${GREEN}  07.${PLAIN}重启VPS"
+        echo -e "${GREEN}  08.${PLAIN}管理BBR"
+        echo -e "${GREEN}  09.${PLAIN}管理WARP"
+        echo -e "${GREEN}  10.${PLAIN}配置Swap"
+        echo -e "${GREEN}  11.${PLAIN}配置Acme"
+        echo -e "${GREEN}  12.${PLAIN}配置Nginx"
+        echo -e "${GREEN}  13.${PLAIN}配置Snell"
+        echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
+        echo -e "${GREEN}  15.${PLAIN}配置Trojan"
+        echo -e "${GREEN}  16.${PLAIN}配置Hysteria"
+        echo -e "${GREEN}  17.${PLAIN}配置SubStore"
+        echo -e "${GREEN}  18.${PLAIN}设置DDsystem"
+        echo -e "${GREEN}  19.${PLAIN}提取WireGuard"
+        echo -e "${GREEN}   0.${PLAIN}离开BYE"
+        read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
