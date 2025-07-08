@@ -1,0 +1,147 @@
+{
+  "name": "sukurain",
+  "description": "what's this?",
+  "icons": [
+    {
+      "name": "Apple",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Apple.PNG"
+    },
+    {
+      "name": "apple",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/apple.PNG"
+    },
+    {
+      "name": "ChatGPT",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/ChatGPT.PNG"
+    },
+    {
+      "name": "OpenAi",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/OpenAi.PNG"
+    },
+    {
+      "name": "YouTube",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/YouTube.png"
+    },
+    {
+      "name": "Youtube",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Youtube.png"
+    },
+    {
+      "name": "PayPal",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/PayPal.PNG"
+    },
+    {
+      "name": "Google",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Google.png"
+    },
+
+    {
+      "name": "ETH",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/ETH.png"
+    },
+    {
+      "name": "JujutsuKaisen.PNG",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/JujutsuKaisen.PNG"
+    },
+    {
+      "name": "Loon",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Loon.png"
+    },
+    {
+      "name": "Shadowrcoket",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Shadowrcoket.PNG"
+    },
+    {
+      "name": "Stash",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Stash.PNG"
+    },
+    {
+      "name": "Surge",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Surge.PNG"
+    },
+    {
+      "name": "Quantumult",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/icon/App/Quantumult.PNG"
+    },
+    {
+      "name": "Pokemmo",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Pokemmo.PNG"
+    },
+    {
+      "name": "Spotify",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Spotify.PNG"
+    },
+    {
+      "name": "Telegram",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Telegram.png"
+    },
+    {
+      "name": "Whatsapp",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Whatsapp.PNG"
+    },
+    {
+      "name": "Twitter",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/App/Twitter.png"
+    },
+    {
+      "name": "America",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/America.PNG"
+    },
+    {
+      "name": "Argentina",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Argentina.PNG"
+    },
+    {
+      "name": "Australia",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Australia.PNG"
+    },
+    {
+      "name": "Canada",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Canada.PNG"
+    },
+    {
+      "name": "China",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/China.PNG"
+    },
+    {
+      "name": "Finland",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Finland.PNG"
+    },
+    {
+      "name": "France",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/France.PNG"
+    },
+    {
+      "name": "Germany",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Germany.PNG"
+    },
+    {
+      "name": "HongKong",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/HongKong.PNG"
+    },
+    {
+      "name": "Janpan",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Janpan.PNG"
+    },
+    {
+      "name": "Singapore",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Singapore.PNG"
+    },
+    {
+      "name": "SouthKorea",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/SouthKorea.PNG"
+    },
+    {
+      "name": "Taiwan",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Taiwan.PNG"
+    },
+    {
+      "name": "Turkey",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/Turkey.PNG"
+    },
+    {
+      "name": "UnitedKingdom",
+      "url": "https://raw.githubusercontent.com/Emokui/Nothing/Zero/icon/Country/UnitedKingdom.PNG"
+    }
+  ]
+}
