@@ -1,7 +1,7 @@
 ## 𝐔𝐬𝐞  ##
 
 ```
-bash <(curl -sL https://snell.vercel.app)
+bash <(curl -sL https://snell.vercel.app/sh)
 ```
 ![SSH](./icon/Mine/ssh.png)
 
