@@ -12,13 +12,6 @@
 源自: https://github.com/Yu9191
 
 
-#### Talkatone ####
-*https://gits.eu.cc/Emokui/Nothing/Zero/Script/Surge/Talkatone.sgmodule*
-
-
-源自: https://github.com/emokui
-
-
 #### YouTube ####
 *https://gits.eu.cc/Emokui/Nothing/Zero/Script/Surge/YouTube.sgmodule*
 
