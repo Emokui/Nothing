@@ -749,8 +749,8 @@ main_menu() {
         echo -e "${BLUE}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
         echo -e "${GREEN}  01.${PLAIN}系统更新"
         echo -e "${GREEN}  02.${PLAIN}系统清理"
-        echo -e "${GREEN}  03.${PLAIN}设置时区"
-        echo -e "${GREEN}  04.${PLAIN}配置防火墙"
+        echo -e "${GREEN}  03.${PLAIN}重装系统"
+        echo -e "${GREEN}  04.${PLAIN}设置时区"
         echo -e "${GREEN}  05.${PLAIN}配置dns"
         echo -e "${GREEN}  06.${PLAIN}配置ssh"
         echo -e "${GREEN}  07.${PLAIN}重启vps"
@@ -763,32 +763,32 @@ main_menu() {
         echo -e "${GREEN}  14.${PLAIN}安装mihomo"
         echo -e "${GREEN}  15.${PLAIN}安装trojan"
         echo -e "${GREEN}  16.${PLAIN}安装hysteria"
-        echo -e "${GREEN}  17.${PLAIN}安装substore"
-        echo -e "${GREEN}  18.${PLAIN}提取wireguard"
-        echo -e "${GREEN}  19.${PLAIN}重装系统"
+        echo -e "${GREEN}  17.${PLAIN}配置firewall"
+        echo -e "${GREEN}  18.${PLAIN}安装substore"
+        echo -e "${GREEN}  19.${PLAIN}提取wireguard"
         echo -e "${GREEN}   0.${PLAIN}离开BYE"
         read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
             2)  linux_clean ;;
-            3)  change_timezone ;;
-            4)  configure_firewall ;;
+            3)  install_install ;;
+            4)  change_timezone ;;
             5)  dns_config_menu ;;
             6)  ssh_config_menu ;;
             7)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
             8)  bbr_menu ;;
-            9) warp_menu ;;
-            10)  set_swap_menu ;;
+            9)  warp_menu ;;
+            10) set_swap_menu ;;
             11) install_acme ;;
             12) install_nginx ;;
             13) install_snell ;;
             14) install_mihomo ;;
             15) install_trojan ;;
             16) install_hysteria ;;
-            17) install_substore ;;
-            18) install_wireguard ;;
-            19) install_install ;;
+            17) configure_firewall ;;
+            18) install_substore ;;
+            19) install_wireguard ;;
             0)  clear; echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
