@@ -750,22 +750,22 @@ main_menu() {
         echo -e "${GREEN}  01.${PLAIN}系统更新"
         echo -e "${GREEN}  02.${PLAIN}系统清理"
         echo -e "${GREEN}  03.${PLAIN}设置时区"
-        echo -e "${GREEN}  04.${PLAIN}配置NFW"
+        echo -e "${GREEN}  04.${PLAIN}配置防火墙"
         echo -e "${GREEN}  05.${PLAIN}配置SSH"
         echo -e "${GREEN}  06.${PLAIN}配置DNS"
         echo -e "${GREEN}  07.${PLAIN}重启VPS"
         echo -e "${GREEN}  08.${PLAIN}管理BBR"
         echo -e "${GREEN}  09.${PLAIN}管理WARP"
-        echo -e "${GREEN}  10.${PLAIN}配置Swap"
-        echo -e "${GREEN}  11.${PLAIN}配置Acme"
-        echo -e "${GREEN}  12.${PLAIN}配置Nginx"
-        echo -e "${GREEN}  13.${PLAIN}配置Snell"
-        echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
-        echo -e "${GREEN}  15.${PLAIN}配置Trojan"
-        echo -e "${GREEN}  16.${PLAIN}配置Hysteria"
-        echo -e "${GREEN}  17.${PLAIN}配置SubStore"
-        echo -e "${GREEN}  18.${PLAIN}设置DDsystem"
-        echo -e "${GREEN}  19.${PLAIN}提取WireGuard"
+        echo -e "${GREEN}  10.${PLAIN}配置SWAP"
+        echo -e "${GREEN}  11.${PLAIN}配置ACME"
+        echo -e "${GREEN}  12.${PLAIN}配置NGINX"
+        echo -e "${GREEN}  13.${PLAIN}安装Snell"
+        echo -e "${GREEN}  14.${PLAIN}安装Mihomo"
+        echo -e "${GREEN}  15.${PLAIN}安装Trojan"
+        echo -e "${GREEN}  16.${PLAIN}安装Hysteria"
+        echo -e "${GREEN}  17.${PLAIN}安装SubStore"
+        echo -e "${GREEN}  18.${PLAIN}提取WireGuard"
+        echo -e "${GREEN}  19.${PLAIN}重装系统"
         echo -e "${GREEN}   0.${PLAIN}离开BYE"
         read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -787,8 +787,8 @@ main_menu() {
             15) install_trojan ;;
             16) install_hysteria ;;
             17) install_substore ;;
-            18) install_install ;;
-            19) install_wireguard ;;
+            18) install_wireguard ;;
+            19) install_install ;;
             0)  clear; echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
