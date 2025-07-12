@@ -763,10 +763,10 @@ main_menu() {
         echo -e "${GREEN}  14.${PLAIN}安装Mihomo"
         echo -e "${GREEN}  15.${PLAIN}安装Trojan"
         echo -e "${GREEN}  16.${PLAIN}安装Hysteria"
-        echo -e "${GREEN}  17.${PLAIN}配置Firewall"
-        echo -e "${GREEN}  18.${PLAIN}安装Substore"
-        echo -e "${GREEN}  19.${PLAIN}提取Wireguard"
-        echo -e "${GREEN}   0.${PLAIN}离开BYE BYE"
+        echo -e "${GREEN}  17.${PLAIN}配置FireWall"
+        echo -e "${GREEN}  18.${PLAIN}安装SubStore"
+        echo -e "${GREEN}  19.${PLAIN}提取WireGuard"
+        echo -e "${GREEN}   0.${PLAIN}离开SteinsGate"
         read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
