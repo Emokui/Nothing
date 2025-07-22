@@ -789,7 +789,7 @@ main_menu() {
             17) configure_firewall ;;
             18) install_substore ;;
             19) install_wireguard ;;
-            0)  clear; echo -e "${BLUE}「运命石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
+            0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
     done
