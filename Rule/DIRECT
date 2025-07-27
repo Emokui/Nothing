@@ -23,7 +23,6 @@ DOMAIN-SUFFIX,zhisanzhao.com
 DOMAIN-SUFFIX,gylm2020.com
 DOMAIN-SUFFIX,manmanbuy.com
 DOMAIN,api.25mao.com
-DOMAIN-SUFFIX,localdomain
 DOMAIN-SUFFIX,c-t.work
 DOMAIN-SUFFIX,mijia.tech
 DOMAIN-SUFFIX,xunyou.mobi
@@ -32,11 +31,12 @@ DOMAIN-SUFFIX,haowu.link
 DOMAIN-SUFFIX,yqkk.link
 DOMAIN-SUFFIX,gorouter.info
 DOMAIN-SUFFIX,landian.vip
-DOMAIN-SUFFIX,snell.edu.deal
+DOMAIN,doh.pub
 DOMAIN-SUFFIX,icourse163.org
 DOMAIN-SUFFIX,miot-spec.org
 DOMAIN-SUFFIX,docschina.org
 DOMAIN-SUFFIX,solidot.org
+DOMAIN-SUFFIX,taobao.org
 DOMAIN-SUFFIX,aliapp.org
 DOMAIN-SUFFIX,9966.org
 DOMAIN-SUFFIX,8866.org
@@ -45,6 +45,7 @@ DOMAIN-SUFFIX,7766.org
 DOMAIN-SUFFIX,6600.org
 DOMAIN-SUFFIX,3322.org
 DOMAIN-SUFFIX,2288.org
+DOMAIN,kms.03k.org
 DOMAIN-SUFFIX,tencent-cloud.net
 DOMAIN-SUFFIX,coolapkmarket.net
 DOMAIN-SUFFIX,yunjiasu-cdn.net
@@ -184,6 +185,7 @@ DOMAIN-SUFFIX,bytednsdoc.com
 DOMAIN-SUFFIX,bosszhipin.com
 DOMAIN-SUFFIX,bilicomics.com
 DOMAIN-SUFFIX,alibabadns.com
+DOMAIN-SUFFIX,4008823823.com
 DOMAIN-SUFFIX,zuoyebang.com
 DOMAIN-SUFFIX,youzanyun.com
 DOMAIN-SUFFIX,yangkeduo.com
@@ -235,6 +237,7 @@ DOMAIN-SUFFIX,bytedance.com
 DOMAIN-SUFFIX,bytecdntp.com
 DOMAIN-SUFFIX,bilivideo.com
 DOMAIN-SUFFIX,bilicomic.com
+DOMAIN-SUFFIX,alipaydev.com
 DOMAIN-SUFFIX,alikunlun.com
 DOMAIN-SUFFIX,360buyimg.com
 DOMAIN-SUFFIX,zijieapi.com
@@ -388,6 +391,7 @@ DOMAIN-SUFFIX,baomitu.com
 DOMAIN-SUFFIX,baixing.com
 DOMAIN-SUFFIX,appsimg.com
 DOMAIN-SUFFIX,antpcdn.com
+DOMAIN-SUFFIX,alimama.com
 DOMAIN-SUFFIX,alibaba.com
 DOMAIN-SUFFIX,aixifan.com
 DOMAIN-SUFFIX,abchina.com
@@ -553,6 +557,7 @@ DOMAIN-SUFFIX,iqiyi.com
 DOMAIN-SUFFIX,ip138.com
 DOMAIN-SUFFIX,ifeng.com
 DOMAIN-SUFFIX,iciba.com
+DOMAIN-SUFFIX,hwwt8.com
 DOMAIN-SUFFIX,huxiu.com
 DOMAIN-SUFFIX,honor.com
 DOMAIN-SUFFIX,hdslb.com
@@ -647,6 +652,7 @@ DOMAIN-SUFFIX,127.com
 DOMAIN-SUFFIX,126.com
 DOMAIN-SUFFIX,115.com
 DOMAIN-SUFFIX,111.com
+DOMAIN-SUFFIX,110.com
 DOMAIN-SUFFIX,yy.com
 DOMAIN-SUFFIX,so.com
 DOMAIN-SUFFIX,qq.com
@@ -736,6 +742,7 @@ DOMAIN-SUFFIX,pplive.cn
 DOMAIN-SUFFIX,neixin.cn
 DOMAIN-SUFFIX,mybank.cn
 DOMAIN-SUFFIX,mifile.cn
+DOMAIN-SUFFIX,kfcapp.cn
 DOMAIN-SUFFIX,ipanda.cn
 DOMAIN-SUFFIX,hwccpc.cn
 DOMAIN-SUFFIX,huawei.cn
