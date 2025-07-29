@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 BLUE="\033[1;34m"
@@ -59,25 +58,18 @@ EOF
     sudo chmod 644 /etc/systemd/system/${SERVICE_NAME}.service
 }
 
-create_systemd_timer() {
-    sudo tee /etc/systemd/system/${TIMER_NAME} > /dev/null <<EOF
-[Unit]
-Description=Start Mihomo 2 minutes after boot
-
-[Timer]
-OnBootSec=2min
-AccuracySec=30s
-Unit=${SERVICE_NAME}.service
-
-[Install]
-WantedBy=timers.target
-EOF
-    sudo chmod 644 /etc/systemd/system/${TIMER_NAME}
+get_current_mihomo_version() {
+    if [ -f "${MIHOMO_DIR}/mihomo.version" ]; then
+        cat "${MIHOMO_DIR}/mihomo.version"
+    else
+        echo ""
+    fi
 }
 
-get_latest_mihomo_url() {
+get_latest_mihomo_url_and_version() {
     latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
-    echo "https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-v1-${latest_version}.gz"
+    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-v1-${latest_version}.gz"
+    echo "$url|${latest_version}"
 }
 
 install_mihomo() {
@@ -92,7 +84,10 @@ install_mihomo() {
     echo -e "${BLUE}[*] 开始安装并配置 Mihomo...${PLAIN}"
     mkdir -p "$MIHOMO_DIR" && cd "$MIHOMO_DIR" || exit 1
 
-    download_url=$(get_latest_mihomo_url)
+    result=$(get_latest_mihomo_url_and_version)
+    download_url="${result%|*}"
+    latest_version="${result#*|}"
+
     echo -e "${BLUE}[*] 下载 Mihomo: $download_url ${PLAIN}"
     wget "$download_url" -O "mihomo.gz"
     check_status "下载 Mihomo"
@@ -249,6 +244,7 @@ dns:
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter:
+    - '*'
     - '*.lan'
     - '*.local'
     - 'localhost'
@@ -285,32 +281,16 @@ rules:
 EOF
     check_status "创建配置文件"
 
-    echo -e "${BLUE}[*] 配置 systemd service 与 timer...${PLAIN}"
+    echo -e "${BLUE}[*] 配置 systemd service ...${PLAIN}"
     create_systemd_service
-    create_systemd_timer
 
     sudo systemctl daemon-reload
-    sudo systemctl enable --now ${TIMER_NAME}
-    echo -e "${GREEN}[*] Mihomo 安装完成，将于开机2分钟后自动启动。${PLAIN}"
-    echo -e "${BLUE}你也可以用 'sudo systemctl [start|stop|restart|status] ${SERVICE_NAME}' 管理"
-    echo "查看定时器状态：sudo systemctl status ${TIMER_NAME}${PLAIN}"
+    sudo systemctl enable --now ${SERVICE_NAME}.service
+    echo -e "${GREEN}[*] Mihomo 安装完成，已自动启动。${PLAIN}"
+    echo -e "${BLUE}你可以用 'sudo systemctl [start|stop|restart|status] ${SERVICE_NAME}' 管理 Mihomo${PLAIN}"
 
     read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
     clear
-}
-
-get_current_mihomo_version() {
-    if [ -f "${MIHOMO_DIR}/mihomo.version" ]; then
-        cat "${MIHOMO_DIR}/mihomo.version"
-    else
-        echo ""
-    fi
-}
-
-get_latest_mihomo_url_and_version() {
-    latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
-    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-v1-${latest_version}.gz"
-    echo "$url|${latest_version}"
 }
 
 update_mihomo() {
@@ -571,49 +551,41 @@ delete_mihomo() {
 manage_service() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Mihomo Menu ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}停止 Mihomo"
-        echo -e "${GREEN}  2.${PLAIN}启动 Mihomo"
-        echo -e "${GREEN}  3.${PLAIN}重启 Mihomo"
-        echo -e "${GREEN}  4.${PLAIN}查看 Mihomo 状态"
-        echo -e "${GREEN}  5.${PLAIN}修改 Mihomo 配置"
-        echo -e "${GREEN}  6.${PLAIN}删除 Mihomo"
-        echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
+        echo -e "${BLUE}✦ Mihomo_Menu ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}查看 状态"
+        echo -e "${GREEN}  2.${PLAIN}修改 配置"
+        echo -e "${GREEN}  3.${PLAIN}停止 Mihomo"
+        echo -e "${GREEN}  4.${PLAIN}重启 Mihomo"
+        echo -e "${GREEN}  5.${PLAIN}删除 Mihomo"
+        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
         read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" subchoice
 
         case $subchoice in
             1)
-                echo -e "${BLUE}[*] systemd 停止 Mihomo...${PLAIN}"
-                sudo systemctl stop ${SERVICE_NAME}.service
-                echo -e "${GREEN}[*] Mihomo 已停止${PLAIN}"
-                read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
-                clear
-                ;;
-            2)
-                echo -e "${BLUE}[*] systemd 启动 Mihomo...${PLAIN}"
-                sudo systemctl start ${SERVICE_NAME}.service
-                echo -e "${GREEN}[*] Mihomo 已启动${PLAIN}"
-                read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
-                clear
-                ;;
-            3)
-                echo -e "${BLUE}[*] systemd 重启 Mihomo...${PLAIN}"
-                sudo systemctl restart ${SERVICE_NAME}.service
-                echo -e "${GREEN}[*] Mihomo 已重启${PLAIN}"
-                read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
-                clear
-                ;;
-            4)
                 clear
                 echo -e "${BLUE}[*] systemd 查看 Mihomo 状态...${PLAIN}"
                 sudo systemctl status --no-pager ${SERVICE_NAME}.service
                 read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
                 clear
                 ;;
-            5)
+            2)
                 modify_mihomo_config
                 ;;
-            6)
+            3)
+                echo -e "${BLUE}[*] systemd 停止 Mihomo...${PLAIN}"
+                sudo systemctl stop ${SERVICE_NAME}.service
+                echo -e "${GREEN}[*] Mihomo 已停止${PLAIN}"
+                read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
+                clear
+                ;;
+            4)
+                echo -e "${BLUE}[*] systemd 重启 Mihomo...${PLAIN}"
+                sudo systemctl restart ${SERVICE_NAME}.service
+                echo -e "${GREEN}[*] Mihomo 已重启${PLAIN}"
+                read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
+                clear
+                ;;
+            5)
                 delete_mihomo
                 break
                 ;;
@@ -633,7 +605,7 @@ manage_service() {
 
 while true; do
     clear
-    echo -e "${BLUE}✦ Mihomo_Ver.1.1 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Mihomo_Ver.1.2 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}安装 Mihomo"
     echo -e "${GREEN}  2.${PLAIN}管理 Mihomo"
     echo -e "${GREEN}  3.${PLAIN}更新 Mihomo"
