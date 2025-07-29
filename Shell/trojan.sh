@@ -580,15 +580,6 @@ remove_trojan_go() {
     return 123
 }
 
-start_trojan_go() {
-    clear
-    echo -e "${GREEN}正在启动 Trojan-Go……${PLAIN}"
-    systemctl start trojan-go
-    systemctl status trojan-go --no-pager
-    echo -e "${GREEN}Trojan-Go 已经启动!${PLAIN}"
-    pause_and_return
-}
-
 stop_trojan_go() {
     clear
     echo -e "${RED}正在停止 Trojan-Go……${PLAIN}"
@@ -616,21 +607,19 @@ manage_trojan_go() {
     while true; do
         clear
         echo -e "${BLUE}✦ Trojan-Go Menu ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}启动 Trojan"
-        echo -e "${GREEN}  2.${PLAIN}停止 Trojan"
-        echo -e "${GREEN}  3.${PLAIN}重启 Trojan"
-        echo -e "${GREEN}  4.${PLAIN}查看 Trojan 配置"
-        echo -e "${GREEN}  5.${PLAIN}修改 Trojan 配置"
-        echo -e "${GREEN}  6.${PLAIN}删除 Trojan"
-        echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
+        echo -e "${GREEN}  1.${PLAIN}查看 配置"
+        echo -e "${GREEN}  2.${PLAIN}修改 配置"        
+        echo -e "${GREEN}  3.${PLAIN}停止 Trojan"
+        echo -e "${GREEN}  4.${PLAIN}重启 Trojan"
+        echo -e "${GREEN}  5.${PLAIN}删除 Trojan"
+        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
         case "$choice" in
-            1) start_trojan_go ;;
-            2) stop_trojan_go ;;
-            3) restart_trojan_go ;;
-            4) show_trojan_config ;;
-            5) modify_trojan_config ;;
-            6) remove_trojan_go; ret=$?; if [[ $ret -eq 123 ]]; then break; fi ;;
+            1) show_trojan_config ;;
+            2) modify_trojan_config ;;        
+            3) stop_trojan_go ;;
+            4) restart_trojan_go ;;
+            5) remove_trojan_go; ret=$?; if [[ $ret -eq 123 ]]; then break; fi ;;
             0) clear; break ;;
             *) echo -e "${RED}无效选择,请重新尝试${PLAIN}" ;;
         esac
@@ -914,12 +903,12 @@ main_menu() {
     while true; do
         clear
         banner
-        echo -e "${GREEN}  1.${PLAIN}申请 证书"
+        echo -e "${GREEN}  1.${PLAIN}配置 证书"
         echo -e "${GREEN}  2.${PLAIN}安装 Trojan"
         echo -e "${GREEN}  3.${PLAIN}管理 Trojan"
         echo -e "${GREEN}  4.${PLAIN}卸载 Acme+证书"
         echo -e "${GREEN}  5.${PLAIN}配置 Nginx伪装"
-        echo -e "${GREEN}  0.${PLAIN}离开 El Psy Kongroo"
+        echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
