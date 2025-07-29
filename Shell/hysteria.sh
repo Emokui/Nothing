@@ -433,7 +433,7 @@ port_jump_menu() {
         echo -e "${GREEN}  2.${PLAIN}修改 端口跳跃"
         echo -e "${GREEN}  3.${PLAIN}查看 端口跳跃"
         echo -e "${GREEN}  4.${PLAIN}删除 端口跳跃"
-        echo -e "${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
+        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
         case "$pjopt" in
             1) port_jump_set ;;
@@ -454,7 +454,7 @@ while true; do
     echo -e "${GREEN}  2.${PLAIN}安装 Hysteria"
     echo -e "${GREEN}  3.${PLAIN}管理 Hysteria"
     echo -e "${GREEN}  4.${PLAIN}设置 端口跳跃"
-    echo -e "${GREEN}  0.${PLAIN}离开 El Psy Kongroo"
+    echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
