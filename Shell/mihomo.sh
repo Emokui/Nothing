@@ -209,10 +209,6 @@ tun:
   strict-route: true
   auto-redirect: true
   auto-detect-interface: true
-geodata-mode: false
-geox-url:
-  mmdb: "https://raw.githubusercontent.com/NobyDa/geoip/release/Private-GeoIP-CN.mmdb"
-geo-update-interval: 24
 tcp-concurrent: true
 find-process-mode: off
 allow-lan: false
@@ -241,13 +237,7 @@ dns:
     - 8.8.8.8
   direct-nameserver:
     - system
-  enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
-  fake-ip-filter:
-    - '*'
-    - '*.lan'
-    - '*.local'
-    - 'localhost'
+  enhanced-mode: redir-host
 proxies:
   - name: "warp"
     type: wireguard
