@@ -1,3 +1,4 @@
+
 #!/bin/bash
 
 BLUE="\033[1;34m"
@@ -75,8 +76,8 @@ EOF
 }
 
 get_latest_mihomo_url() {
-    latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"v\([0-9.]*\)".*/v\1/')
-    echo "https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-${latest_version}.gz"
+    latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
+    echo "https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-v1-${latest_version}.gz"
 }
 
 install_mihomo() {
@@ -100,6 +101,7 @@ install_mihomo() {
     if [ -f "mihomo" ]; then
         chmod +x mihomo
         check_status "设置执行权限"
+        echo "${latest_version}" > "${MIHOMO_DIR}/mihomo.version"
     else
         echo -e "${RED}[!] 解压后未找到 mihomo 可执行文件，请检查下载或解压是否成功。${PLAIN}"
         exit 1
@@ -297,9 +299,17 @@ EOF
     clear
 }
 
+get_current_mihomo_version() {
+    if [ -f "${MIHOMO_DIR}/mihomo.version" ]; then
+        cat "${MIHOMO_DIR}/mihomo.version"
+    else
+        echo ""
+    fi
+}
+
 get_latest_mihomo_url_and_version() {
     latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
-    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-${latest_version}.gz"
+    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-v1-${latest_version}.gz"
     echo "$url|${latest_version}"
 }
 
@@ -309,6 +319,16 @@ update_mihomo() {
     cd "$MIHOMO_DIR" || { echo -e "${RED}[!] 无法进入 $MIHOMO_DIR 目录。${PLAIN}"; exit 1; }
     result=$(get_latest_mihomo_url_and_version)
     download_url="${result%|*}"
+    latest_version="${result#*|}"
+
+    current_version=$(get_current_mihomo_version)
+
+    if [ "$current_version" = "$latest_version" ]; then
+        echo -e "${GREEN}[*] 当前已是最新版 Mihomo ($latest_version)，无需更新。${PLAIN}"
+        read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
+        clear
+        return
+    fi
 
     echo -e "${BLUE}[*] 下载 Mihomo: $download_url ${PLAIN}"
     wget "$download_url" -O "mihomo.gz"
@@ -318,6 +338,7 @@ update_mihomo() {
     if [ -f "mihomo" ]; then
         chmod +x mihomo
         check_status "设置执行权限"
+        echo "${latest_version}" > "${MIHOMO_DIR}/mihomo.version"
     else
         echo -e "${RED}[!] 解压后未找到 mihomo 可执行文件，请检查下载或解压是否成功。${PLAIN}"
         exit 1
@@ -616,7 +637,7 @@ while true; do
     echo -e "${GREEN}  1.${PLAIN}安装 Mihomo"
     echo -e "${GREEN}  2.${PLAIN}管理 Mihomo"
     echo -e "${GREEN}  3.${PLAIN}更新 Mihomo"
-    echo -e "${GREEN}  0.${PLAIN}退出 El Psy Kongroo"
+    echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
     read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
     case $choice in
