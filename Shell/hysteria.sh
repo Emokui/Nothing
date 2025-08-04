@@ -627,13 +627,12 @@ EOF
             while true; do
                 clear
                 echo -e "${BLUE}✦ Hysteria_Menu ✦${PLAIN}"
-                echo -e "${GREEN}  1.${PLAIN}查看状态"
-                echo -e "${GREEN}  2.${PLAIN}查看配置"
-                echo -e "${GREEN}  3.${PLAIN}停止服务"
-                echo -e "${GREEN}  4.${PLAIN}重启服务"
-                echo -e "${GREEN}  5.${PLAIN}修改配置"
-                echo -e "${GREEN}  6.${PLAIN}更新内核"
-                echo -e "${GREEN}  7.${PLAIN}删除服务"
+                echo -e "${GREEN}  1.${PLAIN}查看服务"
+                echo -e "${GREEN}  2.${PLAIN}停止服务"
+                echo -e "${GREEN}  3.${PLAIN}重启服务"
+                echo -e "${GREEN}  4.${PLAIN}修改配置"
+                echo -e "${GREEN}  5.${PLAIN}更新内核"
+                echo -e "${GREEN}  6.${PLAIN}删除服务"
                 echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
                 read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
 
@@ -641,28 +640,30 @@ EOF
                     1)
                         clear
                         echo -e "${BLUE}Hysteria 服务当前状态: ${PLAIN}"
-                        sudo systemctl status --no-pager $SERVICE_NAME
-                        pause_and_return
-                        ;;
-                    2)
+                        sudo systemctl status --no-pager hysteria
+                        read -p "$(echo -e "${BLUE}按回车查看配置...${PLAIN}")"
                         clear
                         show_hysteria_config
                         ;;
-                    3)
+                    2)
                         clear
-                        echo -e "${BLUE}正在停止 Hysteria 服务...${PLAIN}"
-                        sudo systemctl stop $SERVICE_NAME
-                        echo -e "${GREEN}已停止${PLAIN}"
-                        pause_and_return
-                        ;;
-                    4)
+                         echo -e "${BLUE}正在停止 Hysteria 服务...${PLAIN}"
+                         sudo systemctl stop $SERVICE_NAME
+                         echo -e "${GREEN}已停止${PLAIN}"
+                         echo
+                         sudo systemctl status --no-pager $SERVICE_NAME
+                         pause_and_return
+                         ;;
+                    3)
                         clear
                         echo -e "${BLUE}正在重启 Hysteria 服务...${PLAIN}"
                         sudo systemctl restart $SERVICE_NAME
                         echo -e "${GREEN}已重启${PLAIN}"
+                        echo
+                        sudo systemctl status --no-pager $SERVICE_NAME
                         pause_and_return
                         ;;
-                    5)
+                    4)
                         clear
                         if [ ! -f "$CONFIG_PATH" ]; then
                             echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
@@ -784,7 +785,7 @@ EOF2
                         sudo systemctl status --no-pager $SERVICE_NAME
                         pause_and_return
                         ;;
-                    6)
+                    5)
                         clear
                         echo -e "${BLUE}正在更新 Hysteria 内核...${PLAIN}"
                         echo -e "${BLUE}先停止 Hysteria 服务...${PLAIN}"
@@ -804,7 +805,7 @@ EOF2
                         sudo systemctl start $SERVICE_NAME
                         pause_and_return
                         ;;
-                    7)
+                    6)
                         clear
                         echo -e "${BLUE}正在删除 Hysteria 相关资源...${PLAIN}"
                         sudo systemctl stop $SERVICE_NAME
