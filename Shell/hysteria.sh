@@ -174,9 +174,9 @@ cert_menu() {
     while true; do
         clear
         echo -e " ${BLUE}✦ 证书配置 ✦${PLAIN}"
-        echo -e " ${GREEN}  1.${PLAIN}生成 自签证书"
-        echo -e " ${GREEN}  2.${PLAIN}申请 域名证书"
-        echo -e " ${GREEN}  0.${PLAIN}返回 El Psy Kongroo"
+        echo -e " ${GREEN}  1.${PLAIN}自签证书"
+        echo -e " ${GREEN}  2.${PLAIN}域名证书"
+        echo -e " ${GREEN}  0.${PLAIN}返回Kongroo"
 
         read -p "$(echo -e "${BLUE} ✦ Steins Gate ✦ : ${PLAIN}")" choice
 
@@ -450,11 +450,11 @@ port_jump_menu() {
 while true; do
     clear
     echo -e "${BLUE}✦ Hysteria_Ver.1.4 ✦${PLAIN}"
-    echo -e "${GREEN}  1.${PLAIN}配置 证书"
-    echo -e "${GREEN}  2.${PLAIN}安装 Hysteria"
-    echo -e "${GREEN}  3.${PLAIN}管理 Hysteria"
-    echo -e "${GREEN}  4.${PLAIN}设置 端口跳跃"
-    echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
+    echo -e "${GREEN}  1.${PLAIN}配置证书"
+    echo -e "${GREEN}  2.${PLAIN}安装服务"
+    echo -e "${GREEN}  3.${PLAIN}管理服务"
+    echo -e "${GREEN}  4.${PLAIN}端口跳跃"
+    echo -e "${GREEN}  0.${PLAIN}退出脚本"
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
