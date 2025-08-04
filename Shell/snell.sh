@@ -302,10 +302,10 @@ update_snell_beta() {
 
 update_snell_menu() {
   clear
-  echo -e "${BLUE}✦ Snell 更新菜单 ✦${PLAIN}"
+  echo -e "${BLUE}✦ Snell_Update ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}更新正式版"
   echo -e "${GREEN}  2.${PLAIN}更新测试版"
-  echo -e "${GREEN}  0.${PLAIN}返回"
+  echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
   read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
   case $update_choice in
     1) update_snell_stable ;;
@@ -628,24 +628,24 @@ config_snell_menu() {
 
 show_sub_menu() {
   clear
-  echo -e "${BLUE}✦ Snell 多配置管理 ✦${PLAIN}"
-  echo -e "${GREEN}  1.${PLAIN}生成 配置"
-  echo -e "${GREEN}  2.${PLAIN}启动 配置"
-  echo -e "${GREEN}  3.${PLAIN}查看 配置"
-  echo -e "${GREEN}  4.${PLAIN}删除 配置"
-  echo -e "${GREEN}  5.${PLAIN}修改 配置"
-  echo -e "${GREEN}  6.${PLAIN}停止 Snell"
-  echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
+  echo -e "${BLUE}✦ Confing_Menu ✦${PLAIN}"
+  echo -e "${GREEN}  1.${PLAIN}生成配置"
+  echo -e "${GREEN}  2.${PLAIN}启动配置"
+  echo -e "${GREEN}  3.${PLAIN}查看配置"
+  echo -e "${GREEN}  4.${PLAIN}删除配置"
+  echo -e "${GREEN}  5.${PLAIN}修改配置"
+  echo -e "${GREEN}  6.${PLAIN}停止Snell"
+  echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
 }
 
 show_main_menu() {
   clear
   echo -e "${BLUE}✦ Snell_Ver.1.1 ✦${PLAIN}"
-  echo -e "${GREEN}  1.${PLAIN}安装 Snell"
-  echo -e "${GREEN}  2.${PLAIN}配置 Snell"
-  echo -e "${GREEN}  3.${PLAIN}删除 Snell"
-  echo -e "${GREEN}  4.${PLAIN}更新 Snell"
-  echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
+  echo -e "${GREEN}  1.${PLAIN}安装Snell"
+  echo -e "${GREEN}  2.${PLAIN}配置Snell"
+  echo -e "${GREEN}  3.${PLAIN}删除Snell"
+  echo -e "${GREEN}  4.${PLAIN}更新Snell"
+  echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
 }
 
 main() {
