@@ -232,14 +232,23 @@ update_snell_stable() {
       echo -e "${RED}Snell 正式版解压失败!${PLAIN}"
       pause_and_clear
       return 1
-  else
-      rm -f "$SNELL_ZIP"
-      chmod +x snell-server
-      mv -f snell-server "${SNELL_BIN}"
-      echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
-      echo -e "${GREEN}Snell 已更新到正式版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
-      pause_and_clear
-      return 0
+else
+    rm -f "$SNELL_ZIP"
+    chmod +x snell-server
+    mv -f snell-server "${SNELL_BIN}"
+    echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+    echo -e "${GREEN}Snell 已更新到正式版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
+    echo -e "${YELLOW}正在重启所有 Snell systemd 服务...${PLAIN}"
+    systemctl daemon-reload
+    for svc in /etc/systemd/system/snell@*.service; do
+      [ ! -e "$svc" ] && continue
+      svc_name=$(basename "$svc")
+      systemctl restart "$svc_name"
+      echo -e "${GREEN}已重启服务: $svc_name${PLAIN}"
+    done
+    echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+    pause_and_clear
+    return 0
   fi
 }
 
@@ -289,14 +298,23 @@ update_snell_beta() {
       echo -e "${RED}Snell 测试版解压失败!${PLAIN}"
       pause_and_clear
       return 1
-  else
-      rm -f "$SNELL_ZIP"
-      chmod +x snell-server
-      mv -f snell-server "${SNELL_BIN}"
-      echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
-      echo -e "${GREEN}Snell 已更新到测试版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
-      pause_and_clear
-      return 0
+else
+    rm -f "$SNELL_ZIP"
+    chmod +x snell-server
+    mv -f snell-server "${SNELL_BIN}"
+    echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+    echo -e "${GREEN}Snell 已更新到测试版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
+    echo -e "${YELLOW}正在重启所有 Snell systemd 服务...${PLAIN}"
+    systemctl daemon-reload
+    for svc in /etc/systemd/system/snell@*.service; do
+      [ ! -e "$svc" ] && continue
+      svc_name=$(basename "$svc")
+      systemctl restart "$svc_name"
+      echo -e "${GREEN}已重启服务: $svc_name${PLAIN}"
+    done
+    echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+    pause_and_clear
+    return 0
   fi
 }
 
