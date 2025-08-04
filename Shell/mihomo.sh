@@ -204,7 +204,7 @@ tun:
   enable: $tun_enable
   stack: mixed
   dns-hijack:
-    - 0.0.0.0:53
+    - any:53
   auto-route: true
   strict-route: true
   auto-redirect: true
@@ -212,8 +212,6 @@ tun:
 tcp-concurrent: true
 find-process-mode: off
 allow-lan: false
-skip-auth-prefixes:
-- 127.0.0.1/8
 socks-port: $socks_port
 bind-address: "$bind_address"
 external-controller: "$external_controller"
@@ -229,12 +227,14 @@ sniffer:
   enable: false
 dns:
   enable: true
-  listen: 0.0.0.0:53
+  listen: any:53
   ipv6: false
   nameserver:
+    - 8.8.8.8
     - 1.1.1.1
   fallback:
-    - 8.8.8.8
+    - 8.8.4.4
+    - 1.0.0.1
   direct-nameserver:
     - system
   enhanced-mode: redir-host
