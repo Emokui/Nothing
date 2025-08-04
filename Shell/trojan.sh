@@ -606,13 +606,13 @@ manage_trojan_go() {
     fi
     while true; do
         clear
-        echo -e "${BLUE}✦ Trojan-Go Menu ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}查看 配置"
-        echo -e "${GREEN}  2.${PLAIN}修改 配置"        
-        echo -e "${GREEN}  3.${PLAIN}停止 Trojan"
-        echo -e "${GREEN}  4.${PLAIN}重启 Trojan"
-        echo -e "${GREEN}  5.${PLAIN}删除 Trojan"
-        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
+        echo -e "${BLUE}✦ Trojan_Menu ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}查看配置"
+        echo -e "${GREEN}  2.${PLAIN}修改配置"        
+        echo -e "${GREEN}  3.${PLAIN}停止服务"
+        echo -e "${GREEN}  4.${PLAIN}重启服务"
+        echo -e "${GREEN}  5.${PLAIN}删除服务"
+        echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
         case "$choice" in
             1) show_trojan_config ;;
@@ -793,12 +793,12 @@ uninstall_acme() {
 web_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Nginx伪装网页 ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN} 配置 Nginx"
-        echo -e "${GREEN}  2.${PLAIN} 修改 Nginx"
-        echo -e "${GREEN}  3.${PLAIN} 重启 Nginx"
-        echo -e "${GREEN}  4.${PLAIN} 删除 Nginx"
-        echo -e "${GREEN}  0.${PLAIN} 返回主菜单"
+        echo -e "${BLUE}✦ Trojan_Nginx ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN} 配置Nginx"
+        echo -e "${GREEN}  2.${PLAIN} 修改Nginx"
+        echo -e "${GREEN}  3.${PLAIN} 重启Nginx"
+        echo -e "${GREEN}  4.${PLAIN} 删除Nginx"
+        echo -e "${GREEN}  0.${PLAIN} 返回Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
         case "$sub_choice" in
             1) install_fake_web ;;
@@ -903,12 +903,12 @@ main_menu() {
     while true; do
         clear
         banner
-        echo -e "${GREEN}  1.${PLAIN}配置 证书"
-        echo -e "${GREEN}  2.${PLAIN}安装 Trojan"
-        echo -e "${GREEN}  3.${PLAIN}管理 Trojan"
-        echo -e "${GREEN}  4.${PLAIN}卸载 Acme+证书"
-        echo -e "${GREEN}  5.${PLAIN}配置 Nginx伪装"
-        echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
+        echo -e "${GREEN}  1.${PLAIN}配置证书"
+        echo -e "${GREEN}  2.${PLAIN}安装服务"
+        echo -e "${GREEN}  3.${PLAIN}管理服务"
+        echo -e "${GREEN}  4.${PLAIN}卸载证书"
+        echo -e "${GREEN}  5.${PLAIN}伪装网页"
+        echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
