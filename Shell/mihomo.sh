@@ -542,12 +542,12 @@ manage_service() {
     while true; do
         clear
         echo -e "${BLUE}✦ Mihomo_Menu ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}查看 状态"
-        echo -e "${GREEN}  2.${PLAIN}修改 配置"
-        echo -e "${GREEN}  3.${PLAIN}停止 Mihomo"
-        echo -e "${GREEN}  4.${PLAIN}重启 Mihomo"
-        echo -e "${GREEN}  5.${PLAIN}删除 Mihomo"
-        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
+        echo -e "${GREEN}  1.${PLAIN}查看状态"
+        echo -e "${GREEN}  2.${PLAIN}修改配置"
+        echo -e "${GREEN}  3.${PLAIN}停止Mihomo"
+        echo -e "${GREEN}  4.${PLAIN}重启Mihomo"
+        echo -e "${GREEN}  5.${PLAIN}删除Mihomo"
+        echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
         read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" subchoice
 
         case $subchoice in
@@ -596,10 +596,10 @@ manage_service() {
 while true; do
     clear
     echo -e "${BLUE}✦ Mihomo_Ver.1.2 ✦${PLAIN}"
-    echo -e "${GREEN}  1.${PLAIN}安装 Mihomo"
-    echo -e "${GREEN}  2.${PLAIN}管理 Mihomo"
-    echo -e "${GREEN}  3.${PLAIN}更新 Mihomo"
-    echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
+    echo -e "${GREEN}  1.${PLAIN}安装Mihomo"
+    echo -e "${GREEN}  2.${PLAIN}管理Mihomo"
+    echo -e "${GREEN}  3.${PLAIN}更新Mihomo"
+    echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
     read -e -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
     case $choice in
