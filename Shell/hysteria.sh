@@ -173,7 +173,7 @@ issue_acme_cert() {
 cert_menu() {
     while true; do
         clear
-        echo -e " ${BLUE}✦ 证书配置 ✦${PLAIN}"
+        echo -e " ${BLUE}✦ Hysteria_Cert ✦${PLAIN}"
         echo -e " ${GREEN}  1.${PLAIN}自签证书"
         echo -e " ${GREEN}  2.${PLAIN}域名证书"
         echo -e " ${GREEN}  0.${PLAIN}返回Kongroo"
@@ -192,7 +192,6 @@ cert_menu() {
 select_cert_for_hysteria() {
     local allow_exit=$1
     while true; do
-        clear
         echo -e "${BLUE}✦ 请选择证书 ✦ : ${PLAIN}"
         echo -e "${GREEN}  1.自签证书${PLAIN}"
         echo -e "${BLUE}  2.域名证书${PLAIN}"
@@ -428,12 +427,12 @@ port_jump_delete() {
 port_jump_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ 端口跳跃 ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}设置 端口跳跃"
-        echo -e "${GREEN}  2.${PLAIN}修改 端口跳跃"
-        echo -e "${GREEN}  3.${PLAIN}查看 端口跳跃"
-        echo -e "${GREEN}  4.${PLAIN}删除 端口跳跃"
-        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
+        echo -e "${BLUE}✦ Port jump ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}设置端口跳跃"
+        echo -e "${GREEN}  2.${PLAIN}修改端口跳跃"
+        echo -e "${GREEN}  3.${PLAIN}查看端口跳跃"
+        echo -e "${GREEN}  4.${PLAIN}删除端口跳跃"
+        echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
         case "$pjopt" in
             1) port_jump_set ;;
@@ -449,12 +448,12 @@ port_jump_menu() {
 # ======== 6. 主菜单循环 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Hysteria_Ver.1.4 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Hysteria_v1.5 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}配置证书"
     echo -e "${GREEN}  2.${PLAIN}安装服务"
     echo -e "${GREEN}  3.${PLAIN}管理服务"
     echo -e "${GREEN}  4.${PLAIN}端口跳跃"
-    echo -e "${GREEN}  0.${PLAIN}退出脚本"
+    echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
@@ -627,15 +626,15 @@ EOF
 
             while true; do
                 clear
-                echo -e "${BLUE}✦ Hysteria Menu ✦${PLAIN}"
-                echo -e "${GREEN}  1.${PLAIN}查看 状态"
-                echo -e "${GREEN}  2.${PLAIN}查看 配置"
-                echo -e "${GREEN}  3.${PLAIN}停止 服务"
-                echo -e "${GREEN}  4.${PLAIN}重启 服务"
-                echo -e "${GREEN}  5.${PLAIN}修改 配置"
-                echo -e "${GREEN}  6.${PLAIN}更新 内核"
-                echo -e "${GREEN}  7.${PLAIN}删除 服务"
-                echo -e "${GREEN}  0.${PLAIN}返回 菜单"
+                echo -e "${BLUE}✦ Hysteria_Menu ✦${PLAIN}"
+                echo -e "${GREEN}  1.${PLAIN}查看状态"
+                echo -e "${GREEN}  2.${PLAIN}查看配置"
+                echo -e "${GREEN}  3.${PLAIN}停止服务"
+                echo -e "${GREEN}  4.${PLAIN}重启服务"
+                echo -e "${GREEN}  5.${PLAIN}修改配置"
+                echo -e "${GREEN}  6.${PLAIN}更新内核"
+                echo -e "${GREEN}  7.${PLAIN}删除服务"
+                echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
                 read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
 
                 case "$ACTION" in
