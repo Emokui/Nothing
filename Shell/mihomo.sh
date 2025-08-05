@@ -10,7 +10,6 @@ MIHOMO_DIR="${HOME}/clash"
 MIHOMO_PATH="${MIHOMO_DIR}/mihomo"
 CONFIG_PATH="${MIHOMO_DIR}/config.yaml"
 SERVICE_NAME="mihomo-user"
-TIMER_NAME="mihomo-user.timer"
 
 check_yq() {
     if ! command -v yq >/dev/null 2>&1; then
@@ -510,13 +509,10 @@ delete_mihomo() {
     echo -e "${RED}[!] 此操作将停止并彻底删除 Mihomo 及其配置，无法恢复！${PLAIN}"
     read -e -p "$(echo -e "${YELLOW}确定要删除 Mihomo 及配置吗？(y/n): ${PLAIN}")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-        echo -e "${BLUE}[*] 停止并禁用 Mihomo systemd/timer...${PLAIN}"
+        echo -e "${BLUE}[*] 停止并禁用 Mihomo systemd...${PLAIN}"
         sudo systemctl stop ${SERVICE_NAME}.service
         sudo systemctl disable ${SERVICE_NAME}.service
-        sudo systemctl stop ${TIMER_NAME}
-        sudo systemctl disable ${TIMER_NAME}
         sudo rm -f /etc/systemd/system/${SERVICE_NAME}.service
-        sudo rm -f /etc/systemd/system/${TIMER_NAME}
         sudo systemctl daemon-reload
 
         if [ -d "$MIHOMO_DIR" ]; then
