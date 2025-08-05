@@ -362,6 +362,7 @@ enable_root_key_login() {
 
     if [[ "$set_passwd" != "1" && "$set_passwd" != "2" ]]; then
         echo -e "\033[31m输入无效，已返回主菜单。\033[0m"
+        sleep 0.3
         return
     fi
 
