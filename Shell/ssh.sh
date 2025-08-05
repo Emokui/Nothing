@@ -256,15 +256,17 @@ ssh_config_menu() {
         echo -e "${GREEN} 2.${PLAIN}开启root密码"
         echo -e "${GREEN} 3.${PLAIN}修改root密码"
         echo -e "${GREEN} 4.${PLAIN}开启root密钥"
+        echo -e "${GREEN} 5.${PLAIN}关闭登陆方式"
         echo -e "${GREEN} 0.${PLAIN}返回Kongroo"
         echo -e "${BLUE}======================${PLAIN}"
-        read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
+        read -p "$(echo -e "${BLUE}请输入选项 [0-5]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
             1) change_ssh_port ;;
             2) enable_root_login ;;
             3) change_root_password ;;
             4) enable_root_key_login ;;
+            5) disable_ssh_login_menu ;;
             0) return ;;
             *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 1 ;;
         esac
@@ -343,6 +345,7 @@ change_root_password() {
 }
 
 enable_root_key_login() {
+    clear
     echo "==== 配置 root 密钥登录 ===="
     ROOT_HOME="/root"
     SSH_DIR="$ROOT_HOME/.ssh"
@@ -410,6 +413,70 @@ enable_root_key_login() {
     echo -e "\033[32mroot ed25519 密钥登录已配置完成。\033[0m"
     read -n 1 -s -r -p "按任意键继续..."
     echo
+}
+
+disable_ssh_login_menu() {
+    clear
+    local has_password=0
+    local has_pubkey=0
+    local sshd_conf="/etc/ssh/sshd_config"
+    local pass_auth="yes"
+    local pubkey_auth="yes"
+    local line
+
+    if grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" >/dev/null; then
+        line=$(grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" | tail -1)
+        pass_auth=$(echo "$line" | awk '{print tolower($2)}')
+    fi
+
+    if grep -Ei '^[#[:space:]]*PubkeyAuthentication[[:space:]]+(yes|no)' "$sshd_conf" >/dev/null; then
+        line=$(grep -Ei '^[#[:space:]]*PubkeyAuthentication[[:space:]]+(yes|no)' "$sshd_conf" | tail -1)
+        pubkey_auth=$(echo "$line" | awk '{print tolower($2)}')
+    fi
+
+    [[ "$pass_auth" == "yes" ]] && has_password=1
+    [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1
+
+    local enabled_count=$((has_password + has_pubkey))
+
+    if [[ $enabled_count -le 1 ]]; then
+        echo -e "${RED}当前仅剩一种登录方式，禁止关闭全部登录方式 ${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+
+    echo -e "${BLUE}关闭哪种登录方式？${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}关闭密码登录"
+    echo -e "${GREEN}2.${PLAIN}关闭密钥登录"
+    read -p "choice [1-2]: " disable_choice
+    disable_choice=$(echo "$disable_choice" | xargs)
+    case "$disable_choice" in
+        1)
+            if [[ $has_password -eq 1 ]]; then
+                sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
+                echo 'PasswordAuthentication no' >> "$sshd_conf"
+                systemctl restart sshd
+                echo -e "${GREEN}[✓] 密码登录已关闭${PLAIN}"
+            else
+                echo -e "${YELLOW}密码登录本就已关闭,无需操作${PLAIN}"
+            fi
+            press_any_key_to_continue
+            ;;
+        2)
+            if [[ $has_pubkey -eq 1 ]]; then
+                sed -i '/^[#[:space:]]*PubkeyAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
+                echo 'PubkeyAuthentication no' >> "$sshd_conf"
+                systemctl restart sshd
+                echo -e "${GREEN}[✓] 密钥登录已关闭${PLAIN}"
+            else
+                echo -e "${YELLOW}密钥登录本就已关闭,无需操作${PLAIN}"
+            fi
+            press_any_key_to_continue
+            ;;
+        *)
+            return
+            ;;
+    esac
 }
 
 # ====== 时区管理 ======
