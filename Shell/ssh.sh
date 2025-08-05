@@ -351,7 +351,7 @@ enable_root_key_login() {
     echo -e "是否需要为私钥设置密码？"
     echo -e "1) 是"
     echo -e "2) 否"
-    read -p "choice [1/2]: " set_passwd
+    read -p "choice [1/2](输入其他返回菜单): " set_passwd
 
     if [[ "$set_passwd" != "1" && "$set_passwd" != "2" ]]; then
         echo -e "\033[31m输入无效，已返回主菜单。\033[0m"
