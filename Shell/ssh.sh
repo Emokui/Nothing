@@ -252,11 +252,11 @@ ssh_config_menu() {
     while true; do
         clear
         echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
-        echo -e "${GREEN} 1.${PLAIN}修改ssh端口"
-        echo -e "${GREEN} 2.${PLAIN}开启root密码登录"
-        echo -e "${GREEN} 3.${PLAIN}修改root登录密码"
-        echo -e "${GREEN} 4.${PLAIN}设置root密钥登录"
-        echo -e "${GREEN} 0.${PLAIN}返回Kongroo"
+        echo -e "${GREEN} 1.${PLAIN}修改SSH 端口"
+        echo -e "${GREEN} 2.${PLAIN}开启root密码"
+        echo -e "${GREEN} 3.${PLAIN}修改root密码"
+        echo -e "${GREEN} 4.${PLAIN}开启root密钥"
+        echo -e "${GREEN} 0.${PLAIN}返回"
         echo -e "${BLUE}======================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
