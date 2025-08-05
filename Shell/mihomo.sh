@@ -54,6 +54,9 @@ ExecStart=${MIHOMO_PATH} -f ${CONFIG_PATH}
 WorkingDirectory=${MIHOMO_DIR}
 Restart=on-failure
 User=${USER}
+
+[Install]
+WantedBy=multi-user.target
 EOF
     sudo chmod 644 /etc/systemd/system/${SERVICE_NAME}.service
 }
