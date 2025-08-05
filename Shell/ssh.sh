@@ -254,19 +254,17 @@ ssh_config_menu() {
         echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
         echo -e "${GREEN} 1.${PLAIN}修改ssh 端口"
         echo -e "${GREEN} 2.${PLAIN}开启root密码"
-        echo -e "${GREEN} 3.${PLAIN}修改root密码"
-        echo -e "${GREEN} 4.${PLAIN}开启root密钥"
-        echo -e "${GREEN} 5.${PLAIN}关闭登陆方式"
+        echo -e "${GREEN} 3.${PLAIN}开启root密钥"
+        echo -e "${GREEN} 4.${PLAIN}关闭登录方式"
         echo -e "${GREEN} 0.${PLAIN}返回Kongroo"
         echo -e "${BLUE}======================${PLAIN}"
-        read -p "$(echo -e "${BLUE}请输入选项 [0-5]: ${PLAIN}")" ssh_choice
+        read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
             1) change_ssh_port ;;
-            2) enable_root_login ;;
-            3) change_root_password ;;
-            4) enable_root_key_login ;;
-            5) disable_ssh_login_menu ;;
+            2) enable_or_change_root_password ;;
+            3) enable_root_key_login ;;
+            4) disable_ssh_login_menu ;;
             0) return ;;
             *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 1 ;;
         esac
@@ -300,48 +298,40 @@ change_ssh_port() {
     done
 }
 
-enable_root_login() {
-    while true; do
-        echo "==== 开启 Root 登录 ===="
-        read -rp "按回车继续，输入0返回: " input
-        input=$(echo "$input" | xargs)
-        if [[ "$input" == "0" ]]; then
-            return
-        fi
+enable_or_change_root_password() {
+    local sshd_conf="/etc/ssh/sshd_config"
+    local pass_auth="no"
+    local line
 
-        passwd root
-        echo "[✓] Root 密码已设置"
+    if grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" >/dev/null; then
+        line=$(grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" | tail -1)
+        pass_auth=$(echo "$line" | awk '{print tolower($2)}')
+    fi
 
-        sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
-        echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+    echo "==== 开启/修改 root 登陆 ===="
+    read -rp "按回车继续，输入0返回: " input
+    input=$(echo "$input" | xargs)
+    if [[ "$input" == "0" ]]; then
+        return
+    fi
 
-        sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
-        echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
-
+    passwd root
+    if [[ "$pass_auth" != "yes" ]]; then
+        sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' "$sshd_conf"
+        echo 'PermitRootLogin yes' >> "$sshd_conf"
+        sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
+        echo 'PasswordAuthentication yes' >> "$sshd_conf"
         if ! sshd -t 2>/dev/null; then
-            echo -e "${RED}sshd 配置有误，未重启 sshd！请检查 /etc/ssh/sshd_config${PLAIN}"
+            echo -e "${RED}sshd 配置有误,未重启 sshd 请检查 /etc/ssh/sshd_config${PLAIN}"
             press_any_key_to_continue
             return
         fi
         systemctl restart sshd
         echo "[✓] Root 登录和密码登录已启用"
-        press_any_key_to_continue
-        return
-    done
-}
-
-change_root_password() {
-    while true; do
-        echo "==== 修改 root 密码 ===="
-        read -rp "按回车继续，输入0返回: " input
-        input=$(echo "$input" | xargs)
-        if [[ "$input" == "0" ]]; then
-            return
-        fi
-        passwd root
-        press_any_key_to_continue
-        return
-    done
+    else
+        echo "[✓] Root 密码已修改"
+    fi
+    press_any_key_to_continue
 }
 
 enable_root_key_login() {
