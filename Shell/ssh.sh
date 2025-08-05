@@ -355,19 +355,15 @@ enable_root_key_login() {
     touch "$AUTH_KEYS"
     chmod 600 "$AUTH_KEYS"
 
-    while true; do
-        echo -e "是否需要为私钥设置密码？"
-        echo -e "1) 是"
-        echo -e "2) 否"
-        read -p "choice [1-2]: " set_passwd
-        if [[ "$set_passwd" == "1" || "$set_passwd" == "2" ]]; then
-            break
-        else
-            echo -e "\033[31m输入无效，返回主菜单。\033[0m"
-            ssh_config_menu
-            return
-        fi
-    done
+    echo -e "是否需要为私钥设置密码？"
+    echo -e "1) 是"
+    echo -e "2) 否"
+    read -p "choice [1/2]: " set_passwd
+
+    if [[ "$set_passwd" != "1" && "$set_passwd" != "2" ]]; then
+        echo -e "\033[31m输入无效，已返回主菜单。\033[0m"
+        return
+    fi
 
     if [ "$set_passwd" = "1" ]; then
         echo "请输入私钥密码（不显示）："
