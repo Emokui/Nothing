@@ -252,17 +252,19 @@ ssh_config_menu() {
     while true; do
         clear
         echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
-        echo -e "${GREEN} 1.修改 SSH端口${PLAIN}"
-        echo -e "${GREEN} 2.开启 root登录${PLAIN}"
-        echo -e "${GREEN} 3.修改 root密码${PLAIN}"
-        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${GREEN} 1.${PLAIN}修改ssh端口"
+        echo -e "${GREEN} 2.${PLAIN}开启root密码登录"
+        echo -e "${GREEN} 3.${PLAIN}修改root登录密码"
+        echo -e "${GREEN} 4.${PLAIN}设置root密钥登录"
+        echo -e "${GREEN} 0.${PLAIN}返回Kongroo"
         echo -e "${BLUE}======================${PLAIN}"
-        read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" ssh_choice
+        read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
             1) change_ssh_port ;;
             2) enable_root_login ;;
             3) change_root_password ;;
+            4) enable_root_key_login ;;
             0) return ;;
             *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 1 ;;
         esac
@@ -338,6 +340,71 @@ change_root_password() {
         press_any_key_to_continue
         return
     done
+}
+
+enable_root_key_login() {
+    echo "==== 配置 root 密钥登录 ===="
+    ROOT_HOME="/root"
+    SSH_DIR="$ROOT_HOME/.ssh"
+    AUTH_KEYS="$SSH_DIR/authorized_keys"
+    TMP_KEY="$SSH_DIR/id_ed25519"
+    TMP_PUB="$SSH_DIR/id_ed25519.pub"
+
+    # 创建 .ssh 文件夹和 authorized_keys 文件
+    mkdir -p "$SSH_DIR"
+    chmod 700 "$SSH_DIR"
+    touch "$AUTH_KEYS"
+    chmod 600 "$AUTH_KEYS"
+
+    # 询问是否为私钥设置密码
+    echo -e "是否需要为私钥设置密码？"
+    echo -e "1) 是"
+    echo -e "2) 否"
+    read -p "请选择 [1/2]: " set_passwd
+
+    if [ "$set_passwd" = "1" ]; then
+        echo "请输入私钥密码（不显示）："
+        read -s key_passphrase
+        echo
+        rm -f "$TMP_KEY" "$TMP_PUB"
+        ssh-keygen -t ed25519 -N "$key_passphrase" -f "$TMP_KEY"
+    else
+        rm -f "$TMP_KEY" "$TMP_PUB"
+        ssh-keygen -t ed25519 -N "" -f "$TMP_KEY"
+    fi
+
+    PUB_CONTENT=$(cat "$TMP_PUB")
+    if ! grep -qxF "$PUB_CONTENT" "$AUTH_KEYS"; then
+        echo "$PUB_CONTENT" >> "$AUTH_KEYS"
+    fi
+
+    if [ -f "$TMP_KEY" ]; then
+        echo -e "\033[32m请复制以下私钥内容（显示后立即删除）：\033[0m"
+        echo "-----------------------------------------------------"
+        cat "$TMP_KEY"
+        echo "-----------------------------------------------------"
+        rm -f "$TMP_KEY"
+    else
+        echo -e "\033[31m私钥生成失败！\033[0m"
+    fi
+
+    echo -e "\033[33m私钥内容已显示并删除。请务必妥善保存！\033[0m"
+
+    sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
+    sed -i '/^[#[:space:]]*PubkeyAuthentication[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
+    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+    echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
+
+    if ! sshd -t 2>/dev/null; then
+        echo -e "\033[31msshd 配置有误,未重启 ssh 请检查 /etc/ssh/sshd_config\033[0m"
+        read -n 1 -s -r -p "按任意键继续..."
+        echo
+        return
+    fi
+    systemctl restart sshd
+    echo -e "\033[32mroot ed25519 密钥登录已配置完成。\033[0m"
+    read -n 1 -s -r -p "按任意键继续..."
+    echo
 }
 
 # ====== 时区管理 ======
