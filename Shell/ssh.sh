@@ -350,17 +350,24 @@ enable_root_key_login() {
     TMP_KEY="$SSH_DIR/id_ed25519"
     TMP_PUB="$SSH_DIR/id_ed25519.pub"
 
-    # 创建 .ssh 文件夹和 authorized_keys 文件
     mkdir -p "$SSH_DIR"
     chmod 700 "$SSH_DIR"
     touch "$AUTH_KEYS"
     chmod 600 "$AUTH_KEYS"
 
-    # 询问是否为私钥设置密码
-    echo -e "是否需要为私钥设置密码？"
-    echo -e "1) 是"
-    echo -e "2) 否"
-    read -p "请选择 [1/2]: " set_passwd
+    while true; do
+        echo -e "是否需要为私钥设置密码？"
+        echo -e "1) 是"
+        echo -e "2) 否"
+        read -p "choice [1-2]: " set_passwd
+        if [[ "$set_passwd" == "1" || "$set_passwd" == "2" ]]; then
+            break
+        else
+            echo -e "\033[31m输入无效，返回主菜单。\033[0m"
+            ssh_config_menu
+            return
+        fi
+    done
 
     if [ "$set_passwd" = "1" ]; then
         echo "请输入私钥密码（不显示）："
@@ -384,6 +391,7 @@ enable_root_key_login() {
         cat "$TMP_KEY"
         echo "-----------------------------------------------------"
         rm -f "$TMP_KEY"
+        rm -f "$TMP_PUB"
     else
         echo -e "\033[31m私钥生成失败！\033[0m"
     fi
@@ -396,7 +404,7 @@ enable_root_key_login() {
     echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
 
     if ! sshd -t 2>/dev/null; then
-        echo -e "\033[31msshd 配置有误,未重启 ssh 请检查 /etc/ssh/sshd_config\033[0m"
+        echo -e "\033[31msshd 配置有误,未重启 sshd 请检查 /etc/ssh/sshd_config\033[0m"
         read -n 1 -s -r -p "按任意键继续..."
         echo
         return
