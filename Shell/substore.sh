@@ -387,15 +387,13 @@ EOF
 main_menu() {
     while true; do
         clear
-        echo -e "${BLUE}=======================${PLAIN}"
-        echo -e "${CYAN}      Sub-Store 脚本${PLAIN}"
-        echo -e "${BLUE}=======================${PLAIN}"
-        echo -e "${YELLOW}1.${PLAIN} 安装 Sub-Store"
-        echo -e "${YELLOW}2.${PLAIN} 管理 Sub-Store"
-        echo -e "${YELLOW}0.${PLAIN} 退出"
-        read -p "请选择操作：" main_choice
+        echo -e "${BLUE}✦ SubStore_Ver.1.2 ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}安装substore"
+        echo -e "${GREEN}  2.${PLAIN}管理substore"
+        echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
+        read -p "✦ Steins Gate ✦ : " main_choice
         case $main_choice in
-            1) install_substore ;;  # 修改：去掉多余的 read，install_substore 里已处理
+            1) install_substore ;;
             2) substore_manage_menu ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项，请重新选择。${PLAIN}"; read -p "按回车键返回菜单..." ;;
