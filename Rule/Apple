@@ -2,6 +2,7 @@ DOMAIN,beta.apple.com
 DOMAIN,testflight.apple.com
 DOMAIN,token.safebrowsing.apple
 DOMAIN,proxy.safebrowsing.apple
+DOMAIN,afs.ampaeservices.com
 DOMAIN,this_ruleset_is_made_by_sukkaw.ruleset.skk.moe
 DOMAIN,www-mail.icloud-sandbox.com
 DOMAIN,images-mercury.mzstatic.com
