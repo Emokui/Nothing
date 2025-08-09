@@ -6,7 +6,7 @@ bash <(curl -sL https://snell.vercel.app/sh)
 ![SSH](./icon/Mine/ssh.png)
 
 ## 𝐁𝐥𝐨𝐠 ##
-https://snell.eu.cc
+https://snell.us.kg
 
 
 ## 𝐆𝐫𝐨𝐮𝐩 ##
