@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# 彩色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -360,11 +359,11 @@ manage_proxies_menu() {
     while true; do
         clear_screen
         echo -e "${BLUE}✦ Nginx_Menu ✦${NC}"
-        echo -e "${GREEN}1${NC}. 查看反代"
-        echo -e "${GREEN}2${NC}. 删除反代"
-        echo -e "${GREEN}3${NC}. 删除Nginx"
-        echo -e "${GREEN}0${NC}. 返回Kongroo"
-        read -p "✦ Steins Gate ✦ :" sel
+        echo -e "${GREEN}  1.${NC}查看反代"
+        echo -e "${GREEN}  2.${NC}删除反代"
+        echo -e "${GREEN}  3.${NC}删除Nginx"
+        echo -e "${GREEN}  0.${NC}返回Kongroo"
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ :${NC}")" sel
         case "$sel" in
             1) view_and_modify_proxy ;;
             2) delete_proxy ;;
@@ -394,12 +393,12 @@ show_menu() {
     while true; do
         clear_screen
         echo -e "${BLUE}✦ Nginx_Ver.1.2 ✦${NC}"
-        echo -e "${GREEN}1${NC}. 新建反代"
-        echo -e "${GREEN}2${NC}. 管理反代"
-        echo -e "${GREEN}3${NC}. 重启反代"
-        echo -e "${GREEN}4${NC}. 停止反代"
-        echo -e "${GREEN}0${NC}. 退出Kongroo"
-        read -p "✦ Steins Gate ✦ :" opt
+        echo -e "${GREEN}  1.${NC}新建反代"
+        echo -e "${GREEN}  2.${NC}管理反代"
+        echo -e "${GREEN}  3.${NC}重启反代"
+        echo -e "${GREEN}  4.${NC}停止反代"
+        echo -e "${GREEN}  0.${NC}退出Kongroo"
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ :${NC}")" opt
 
         case "$opt" in
             1) setup_reverse_proxy ;;
