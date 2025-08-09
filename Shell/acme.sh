@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ====== 颜色变量（加粗，方法一）======
+# ====== 颜色变量 ======
 RED="\033[31m\033[01m"
 GREEN="\033[32m\033[01m"
 YELLOW="\033[33m\033[01m"
@@ -400,27 +400,25 @@ generate_self_signed_cert() {
 # ====== 主菜单 ======
 menu() {
     clear
-    echo "#############################################################"
-    echo -e "#                   ${RED}证书申请 OR 自签证书${PLAIN}                  #"
-    echo -e "#             ${GREEN}命运石之门的选择,El Psy Kongroo${PLAIN}             #"
-    echo "#############################################################"
+    echo "==============================="
+    echo -e "         ${RED}证书申请 OR 自签${PLAIN}"
+    echo "==============================="
+    echo -e " ${GREEN} 1.${PLAIN}安装Acme"
+    echo -e " ${GREEN} 2.${PLAIN}卸载Acme"
+    echo " -------------"
+    echo -e " ${GREEN} 3.${PLAIN}申请单域名证书 ${YELLOW}(80 端口申请)${PLAIN}"
+    echo -e " ${GREEN} 4.${PLAIN}申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+    echo -e " ${GREEN} 5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+    echo " -------------"
+    echo -e " ${GREEN} 6.${PLAIN}查看已申请的证书"
+    echo -e " ${GREEN} 7.${PLAIN}撤销已申请的证书"
+    echo -e " ${GREEN} 8.${PLAIN}续期已申请的证书"
+    echo -e " ${GREEN} 9.${PLAIN}切换证书颁发机构"
+    echo -e " ${GREEN} 10.${PLAIN}生成自签证书"
+    echo " -------------"
+    echo -e " ${GREEN} 0.${PLAIN}退出脚本"
     echo ""
-    echo -e " ${GREEN}1.${PLAIN}  安装 Acme.sh 域名证书申请脚本"
-    echo -e " ${GREEN}2.${PLAIN} ${RED} 卸载 Acme.sh 域名证书申请脚本${PLAIN}"
-    echo " -------------"
-    echo -e " ${GREEN}3.${PLAIN}  申请单域名证书 ${YELLOW}(80 端口申请)${PLAIN}"
-    echo -e " ${GREEN}4.${PLAIN}  申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN} ${GREEN}(无需解析)${PLAIN}"
-    echo -e " ${GREEN}5.${PLAIN}  申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN} ${GREEN}(无需解析)${PLAIN}"
-    echo " -------------"
-    echo -e " ${GREEN}6.${PLAIN}  查看已申请的证书"
-    echo -e " ${GREEN}7.${PLAIN}  撤销并删除已申请的证书"
-    echo -e " ${GREEN}8.${PLAIN}  手动续期已申请的证书"
-    echo -e " ${GREEN}9.${PLAIN}  切换证书颁发机构"
-    echo -e " ${GREEN}10.${PLAIN} 生成自签名证书"
-    echo " -------------"
-    echo -e " ${GREEN}0.${PLAIN}  退出脚本"
-    echo ""
-    read -rp "请输入选项 [0-10]: " menuInput
+    read -rp "$(echo -e "${RED}请输入选项 [0-10]: ${PLAIN}")" menuInput
     case "$menuInput" in
         1 ) inst_acme ;;
         2 ) unst_acme ;;
