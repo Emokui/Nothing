@@ -299,14 +299,14 @@ substore_manage_menu() {
 substore_manage_menu() {
     while true; do
         clear
-        echo -e "${MAGENTA}============== Sub-Store 管理 ==============${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN} 查看当前 Sub-Store 地址及后端"
-        echo -e "${GREEN}2.${PLAIN} 重启 Sub-Store"
-        echo -e "${GREEN}3.${PLAIN} 更新 Sub-Store"
-        echo -e "${GREEN}4.${PLAIN} 修改 Sub-Store 配置"
-        echo -e "${GREEN}5.${PLAIN} 删除 Sub-Store 及相关"        
-        echo -e "${GREEN}0.${PLAIN} 返回主菜单"
-        read -p "请选择操作：" sub_choice
+        echo -e "${BLUE}✦ SubStore_Menu ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}查看SubStore"
+        echo -e "${GREEN}  2.${PLAIN}重启SubStore"
+        echo -e "${GREEN}  3.${PLAIN}更新SubStore"
+        echo -e "${GREEN}  4.${PLAIN}修改SubStore"
+        echo -e "${GREEN}  5.${PLAIN}删除SubStore"        
+        echo -e "${GREEN}  0.${PLAIN}返回 Kongroo"
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦${PLAIN} : ")" sub_choice
         case $sub_choice in
             1) show_substore_info; read -p "按回车键返回管理菜单..." ;;
             2) restart_substore; read -p "按回车键返回管理菜单..." ;;
@@ -390,8 +390,8 @@ main_menu() {
         echo -e "${BLUE}✦ SubStore_Ver.1.2 ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}安装substore"
         echo -e "${GREEN}  2.${PLAIN}管理substore"
-        echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
-        read -p "✦ Steins Gate ✦ : " main_choice
+        echo -e "${GREEN}  0.${PLAIN}退出 Kongroo"
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦${PLAIN} : ")" main_choice
         case $main_choice in
             1) install_substore ;;
             2) substore_manage_menu ;;
