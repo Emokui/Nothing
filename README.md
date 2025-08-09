@@ -9,11 +9,11 @@ bash <(curl -sL https://snell.vercel.app/sh)
 https://snell.us.kg
 
 
-## 𝐆𝐫𝐨𝐮𝐩 ##
+## 𝐂𝐡𝐚𝐧𝐧𝐞𝐥 ##
 https://t.me/ygking
 
 
-## 𝐑𝐮𝐥𝐞 ##
+## 𝐑𝐨𝐮𝐭𝐢𝐧𝐠 𝐑𝐮𝐥𝐞𝐬 ##
 
 https://github.com/SukkaW/Surge
 
