@@ -9,8 +9,8 @@ bash <(curl -sL https://snell.vercel.app/sh)
 https://snell.eu.cc
 
 
-## 𝐂𝐥𝐨𝐮𝐝 ##
-https://noho.eu.cc
+## 𝐆𝐫𝐨𝐮𝐩 ##
+https://t.me/ygking
 
 
 ## 𝐑𝐮𝐥𝐞 ##
