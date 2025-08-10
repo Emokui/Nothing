@@ -29,10 +29,10 @@
 #### Talkatone ####
 *https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/Surge/Talkatone.sgmodule*
 
-注意事项: 此模块仅6.8.1及之前版本可用
+注意事项: 此直连模块仅 6.8.1 及之前版本可用
 
 
-最新版app仅需将 DOMAIN-SUFFIX,tktn.be 分流到 俄罗斯IP 或者 webshare的免费克罗地亚socks
+最新版App仅需将 DOMAIN-SUFFIX,tktn.be 分流到 🇷🇺IP 或者 webshare免费的 🇭🇷socks
 
 
 源自: https://github.com/Emokui
