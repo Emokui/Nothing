@@ -17,6 +17,7 @@ DOMAIN-SUFFIX,wx.qq.com
 DOMAIN-SUFFIX,mybank.cn
 DOMAIN-SUFFIX,alibaba.com
 DOMAIN-SUFFIX,alipay-eco.com
+DOMAIN-SUFFIX,talkatone.com
 DOMAIN-SUFFIX,alibabachengdun.com
 DOMAIN-SUFFIX,bangdao-tech.com
 DOMAIN-SUFFIX,zhisanzhao.com
@@ -988,6 +989,9 @@ DOMAIN-SUFFIX,alpharatio.cc
 DOMAIN-SUFFIX,m-team.cc
 DOMAIN-SUFFIX,ncore.cc
 DOMAIN-SUFFIX,avgv.cc
+IP-CIDR,205.164.56.0/24,no-resolve
+IP-CIDR,50.117.27.0/24,no-resolve
+IP-CIDR,69.46.75.0/24,no-resolve
 IP-CIDR,1.1.8.0/24,no-resolve
 IP-CIDR,1.2.4.0/24,no-resolve
 IP-CIDR,1.8.1.0/24,no-resolve
