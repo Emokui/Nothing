@@ -198,7 +198,7 @@ update_snell_stable() {
   get_latest_snell_version
 
   if [[ -z "$SNELL_VERSION" || -z "$SNELL_URL" ]]; then
-      echo -e "${RED}未获取到 Snell 最新正式版信息，请检查网络或稍后再试！${PLAIN}"
+      echo -e "${RED}未获取到 Snell 最新正式版信息,请检查网络或稍后再试！${PLAIN}"
       pause_and_clear
       return 1
   fi
@@ -264,7 +264,7 @@ update_snell_beta() {
   get_latest_snell_beta_version
 
   if [[ -z "$SNELL_VERSION" || -z "$SNELL_URL" ]]; then
-    echo -e "${RED}未检测到任何 Snell 测试版！${PLAIN}"
+    echo -e "${RED}未检测到任何 Snell 测试版!${PLAIN}"
     pause_and_clear
     return 1
   fi
@@ -323,7 +323,7 @@ update_snell_menu() {
   echo -e "${BLUE}✦ Snell_Update ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}更新正式版"
   echo -e "${GREEN}  2.${PLAIN}更新测试版"
-  echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
+  echo -e "${GREEN}  0.${PLAIN}返回主菜单"
   read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
   case $update_choice in
     1) update_snell_stable ;;
