@@ -381,12 +381,29 @@ generate_config() {
   [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   obfs="off"
   obfs_host=""
-  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(回车默认不开启, y开启)${BLUE}: ${PLAIN}")" enable_obfs
+  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(默认不开启 Y/N)${BLUE}: ${PLAIN}")" enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(回车默认为 icloud.com)${BLUE}: ${PLAIN}")" obfs_host
+    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(默认 icloud.com)${BLUE}: ${PLAIN}")" obfs_host
     obfs_host=${obfs_host:-icloud.com}
   fi
+
+  read -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(默认开启 Y/N)${BLUE}: ${PLAIN}")" enable_tfo
+  if [[ "$enable_tfo" =~ ^[nN]$ ]]; then
+    tfo="false"
+  else
+    tfo="true"
+  fi
+
+  read -p "$(echo -e "${BLUE}是否自定义DNS ${YELLOW}(默认8.8.8.8,1.1.1.1 Y/N)${BLUE}: ${PLAIN}")" custom_dns
+  if [[ "$custom_dns" =~ ^[yY]$ ]]; then
+    read -p "$(echo -e "${BLUE}请输入 DNS ${YELLOW}(用英文逗号分隔)${BLUE}: ${PLAIN}")" dns
+    dns=${dns:-"8.8.8.8, 1.1.1.1"}
+    dns=$(echo "$dns" | sed 's/, */, /g')
+  else
+    dns="8.8.8.8, 1.1.1.1"
+  fi
+
   cat > "$config_file" << EOF
 [snell-server]
 listen = 0.0.0.0:${port}
@@ -394,8 +411,8 @@ psk = ${psk}
 obfs = ${obfs}
 $(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
 ipv6 = false
-tfo = true
-dns = 1.1.1.1, 8.8.8.8
+tfo = ${tfo}
+dns = ${dns}
 EOF
   echo -e "${GREEN}配置文件已生成: $config_file${PLAIN}"
   pause_and_clear
@@ -405,7 +422,7 @@ start_and_enable_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
   if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
+    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
     pause_and_clear
     return
   fi
@@ -445,7 +462,7 @@ view_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
   if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
+    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
     pause_and_clear
     return
   fi
@@ -467,13 +484,13 @@ view_config() {
   local status
   status=$(systemctl is-active "$service_name" 2>/dev/null)
   if [[ "$status" == "active" ]]; then
-    echo -e "${GREEN}$service_name 状态：已启动 (active)${PLAIN}"
+    echo -e "${GREEN}$service_name 状态:已启动(active)${PLAIN}"
   elif [[ "$status" == "inactive" ]]; then
-    echo -e "${YELLOW}$service_name 状态：已停止 (inactive)${PLAIN}"
+    echo -e "${YELLOW}$service_name 状态:已停止(inactive)${PLAIN}"
   elif [[ "$status" == "failed" ]]; then
-    echo -e "${RED}$service_name 状态：启动失败 (failed)${PLAIN}"
+    echo -e "${RED}$service_name 状态:启动失败(failed)${PLAIN}"
   else
-    echo -e "${BLUE}$service_name 状态：未知或未安装${PLAIN}"
+    echo -e "${BLUE}$service_name 状态:未知或未安装${PLAIN}"
   fi
   echo -e "${BLUE}---------------------${PLAIN}"
   pause_and_clear
@@ -483,19 +500,19 @@ delete_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
   if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
+    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
     pause_and_clear
     return
   fi
   echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${BLUE}(如: config1)${PLAIN}${YELLOW}，输入99删除全部配置:${PLAIN}"
+  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${BLUE}(如: config1)${PLAIN}${YELLOW},输入99删除全部配置:${PLAIN}"
   read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
   if [[ "$config_name" == "99" ]]; then
     delete_all_configs
     return
   fi
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
   if [[ ! -f "$config_file" ]]; then
@@ -513,12 +530,12 @@ delete_all_configs() {
   clear
   local config_dir="$SNELL_CONFIGS"
   if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,无需删除${PLAIN}"
+    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
     pause_and_clear
     return
   fi
   local service_prefix="snell@"
-  echo -e "${RED}警告: 即将删除所有配置及服务!${PLAIN}"
+  echo -e "${RED}警告:即将删除所有配置及服务!${PLAIN}"
   read -p "$(echo -e "${YELLOW}确定继续?[y/N]: ${PLAIN}")" choice
   [[ ! "$choice" =~ ^[yY]$ ]] && pause_and_clear && return
   for config_file in "$config_dir"/*.conf; do
@@ -557,30 +574,59 @@ modify_config() {
   local current_psk=$(grep "^psk = " "$config_file" | cut -d' ' -f3)
   local current_obfs=$(grep "^obfs = " "$config_file" | cut -d' ' -f3)
   local current_obfs_host=$(grep "^obfs-host = " "$config_file" | cut -d' ' -f3)
+  local current_tfo=$(grep "^tfo = " "$config_file" | cut -d' ' -f3)
+  local current_dns=$(grep "^dns = " "$config_file" | cut -d' ' -f3-)
+
   echo -e "${BLUE}当前配置内容:${PLAIN}"
   echo -e "端口: ${GREEN}${current_port}${PLAIN}"
   echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
   echo -e "OBFS: ${GREEN}${current_obfs}${PLAIN}"
   [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
-  echo -e "${YELLOW}开始修改配置...${PLAIN}"
-  read -p "$(echo -e "${BLUE}请输入新端口 ${YELLOW}(当前${current_port},回车不变)${BLUE}: ${PLAIN}")" port
+  echo -e "TFO: ${GREEN}${current_tfo:-true}${PLAIN}"
+  echo -e "DNS: ${GREEN}${current_dns:-8.8.8.8, 1.1.1.1}${PLAIN}"
+
+  echo -e "${YELLOW}开始修改配置(回车不变)...${PLAIN}"
+  read -p "$(echo -e "${BLUE}请输入新端口 ${YELLOW}(当前${current_port})${BLUE}: ${PLAIN}")" port
   port=${port:-$current_port}
-  read -p "$(echo -e "${BLUE}请输入新PSK密钥 ${YELLOW}(当前${current_psk},r随机,回车不变)${BLUE}: ${PLAIN}")" psk
+  read -p "$(echo -e "${BLUE}请输入新PSK密钥 ${YELLOW}(当前${current_psk} R随机生成)${BLUE}: ${PLAIN}")" psk
   if [[ "$psk" == "r" ]]; then
     psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   elif [[ -z "$psk" ]]; then
     psk=$current_psk
   fi
-  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(当前${current_obfs}, y开启,回车关闭)${BLUE}: ${PLAIN}")" enable_obfs
+  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(当前${current_obfs} Y/N)${BLUE}: ${PLAIN}")" enable_obfs
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-icloud.com},回车不变)${BLUE}: ${PLAIN}")" obfs_host
+    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-icloud.com})${BLUE}: ${PLAIN}")" obfs_host
     obfs_host=${obfs_host:-$current_obfs_host}
     obfs_host=${obfs_host:-icloud.com}
   else
     obfs="off"
     obfs_host=""
   fi
+
+  read -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(当前${current_tfo:-true} Y/N)${BLUE}: ${PLAIN}")" enable_tfo
+  if [[ "$enable_tfo" =~ ^[nN]$ ]]; then
+    tfo="false"
+  elif [[ -z "$enable_tfo" ]]; then
+    tfo=${current_tfo:-true}
+  else
+    tfo="true"
+  fi
+
+  read -p "$(echo -e "${BLUE}是否自定义DNS ${YELLOW}(当前${current_dns:-8.8.8.8, 1.1.1.1}, Y/N)${BLUE}: ${PLAIN}")" custom_dns
+  if [[ "$custom_dns" =~ ^[yY]$ ]]; then
+    read -p "$(echo -e "${BLUE}请输入 DNS ${YELLOW}(用英文逗号分隔)${BLUE}: ${PLAIN}")" dns
+    dns=${dns:-"8.8.8.8, 1.1.1.1"}
+    dns=$(echo "$dns" | sed 's/, */, /g')
+  elif [[ -z "$custom_dns" ]]; then
+    dns=${current_dns:-"8.8.8.8, 1.1.1.1"}
+    dns=$(echo "$dns" | sed 's/, */, /g')
+  else
+    dns=${current_dns:-"8.8.8.8, 1.1.1.1"}
+    dns=$(echo "$dns" | sed 's/, */, /g')
+  fi
+
   cat > "$config_file" << EOF
 [snell-server]
 listen = 0.0.0.0:${port}
@@ -588,8 +634,8 @@ psk = ${psk}
 obfs = ${obfs}
 $(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
 ipv6 = false
-tfo = true
-dns = 1.1.1.1, 8.8.8.8
+tfo = ${tfo}
+dns = ${dns}
 EOF
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
   systemctl restart "$service_name"
@@ -634,10 +680,10 @@ config_snell_menu() {
     case $sub_choice in
       1) generate_config ;;
       2) start_and_enable_config ;;
-      3) view_config ;;
-      4) delete_config ;;
+      3) stop_snell ;;
+      4) view_config ;;
       5) modify_config ;;
-      6) stop_snell ;;
+      6) delete_config ;;
       0) break ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
@@ -649,11 +695,11 @@ show_sub_menu() {
   echo -e "${BLUE}✦ Confing_Menu ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}生成配置"
   echo -e "${GREEN}  2.${PLAIN}启动配置"
-  echo -e "${GREEN}  3.${PLAIN}查看配置"
-  echo -e "${GREEN}  4.${PLAIN}删除配置"
+  echo -e "${GREEN}  3.${PLAIN}停止服务"
+  echo -e "${GREEN}  4.${PLAIN}查看配置"
   echo -e "${GREEN}  5.${PLAIN}修改配置"
-  echo -e "${GREEN}  6.${PLAIN}停止服务"
-  echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
+  echo -e "${GREEN}  6.${PLAIN}删除配置"
+  echo -e "${GREEN}  0.${PLAIN}返回上级"
 }
 
 show_main_menu() {
