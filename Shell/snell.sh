@@ -458,44 +458,6 @@ EOF
   pause_and_clear
 }
 
-view_config() {
-  clear
-  local config_dir="$SNELL_CONFIGS"
-  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
-    pause_and_clear
-    return
-  fi
-  echo -e "${BLUE}当前可用配置:${PLAIN}"
-  list_configs
-  echo -e "${BLUE}请选择要查看的配置名称:${PLAIN}"
-  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear
-  local config_file="${config_dir}/${config_name}.conf"
-  local service_name="snell@${config_name}.service"
-  if [[ ! -f "$config_file" ]]; then
-    echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
-    pause_and_clear
-    return
-  fi
-  echo -e "${BLUE}------ 配置内容 ------${PLAIN}"
-  cat "$config_file"
-  echo -e "${BLUE}------ 服务状态 ------${PLAIN}"
-  local status
-  status=$(systemctl is-active "$service_name" 2>/dev/null)
-  if [[ "$status" == "active" ]]; then
-    echo -e "${GREEN}$service_name 状态:已启动(active)${PLAIN}"
-  elif [[ "$status" == "inactive" ]]; then
-    echo -e "${YELLOW}$service_name 状态:已停止(inactive)${PLAIN}"
-  elif [[ "$status" == "failed" ]]; then
-    echo -e "${RED}$service_name 状态:启动失败(failed)${PLAIN}"
-  else
-    echo -e "${BLUE}$service_name 状态:未知或未安装${PLAIN}"
-  fi
-  echo -e "${BLUE}---------------------${PLAIN}"
-  pause_and_clear
-}
-
 delete_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
@@ -577,6 +539,7 @@ modify_config() {
   local current_tfo=$(grep "^tfo = " "$config_file" | cut -d' ' -f3)
   local current_dns=$(grep "^dns = " "$config_file" | cut -d' ' -f3-)
 
+  clear
   echo -e "${BLUE}当前配置内容:${PLAIN}"
   echo -e "端口: ${GREEN}${current_port}${PLAIN}"
   echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
@@ -584,6 +547,23 @@ modify_config() {
   [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
   echo -e "TFO: ${GREEN}${current_tfo:-true}${PLAIN}"
   echo -e "DNS: ${GREEN}${current_dns:-8.8.8.8, 1.1.1.1}${PLAIN}"
+
+  local status
+  status=$(systemctl is-active "$service_name" 2>/dev/null)
+  if [[ "$status" == "active" ]]; then
+    echo -e "服务状态: ${GREEN}已启动(active)${PLAIN}"
+  elif [[ "$status" == "inactive" ]]; then
+    echo -e "服务状态: ${YELLOW}已停止(inactive)${PLAIN}"
+  elif [[ "$status" == "failed" ]]; then
+    echo -e "服务状态: ${RED}启动失败(failed)${PLAIN}"
+  else
+    echo -e "服务状态: ${BLUE}未知或未安装${PLAIN}"
+  fi
+
+  read -p "$(echo -e "${YELLOW}是否修改此配置? (Y/N): ${PLAIN}")" confirm_modify
+  if [[ "$confirm_modify" =~ ^[nN]$ ]]; then
+    return
+  fi
 
   echo -e "${YELLOW}开始修改配置(回车不变)...${PLAIN}"
   read -p "$(echo -e "${BLUE}请输入新端口 ${YELLOW}(当前${current_port})${BLUE}: ${PLAIN}")" port
@@ -637,6 +617,7 @@ ipv6 = false
 tfo = ${tfo}
 dns = ${dns}
 EOF
+
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
   systemctl restart "$service_name"
   echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
@@ -681,9 +662,8 @@ config_snell_menu() {
       1) generate_config ;;
       2) start_and_enable_config ;;
       3) stop_snell ;;
-      4) view_config ;;
-      5) modify_config ;;
-      6) delete_config ;;
+      4) modify_config ;;
+      5) delete_config ;;
       0) break ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
@@ -697,8 +677,7 @@ show_sub_menu() {
   echo -e "${GREEN}  2.${PLAIN}启动配置"
   echo -e "${GREEN}  3.${PLAIN}停止服务"
   echo -e "${GREEN}  4.${PLAIN}查看配置"
-  echo -e "${GREEN}  5.${PLAIN}修改配置"
-  echo -e "${GREEN}  6.${PLAIN}删除配置"
+  echo -e "${GREEN}  5.${PLAIN}删除配置"
   echo -e "${GREEN}  0.${PLAIN}返回上级"
 }
 
