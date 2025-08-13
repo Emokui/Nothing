@@ -342,7 +342,7 @@ delete_all_snell() {
   fi
 
   echo -e "${RED}警告!此操作将彻底删除 /root/snell 目录及相关 systemd 服务${PLAIN}"
-  read -p "确定继续? [y/N]: " confirm
+  read -p "$(echo -e "${YELLOW}确定继续? [y/N]: ${PLAIN}")" confirm
   [[ ! "$confirm" =~ ^[yY]$ ]] && echo -e "${YELLOW}操作已取消${PLAIN}" && pause_and_clear && return
 
   for svc in /etc/systemd/system/snell@*.service; do
@@ -362,7 +362,7 @@ delete_all_snell() {
   pause_and_clear
 }
 
-generate_config() {
+generate_and_enable_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
   mkdir -p "$config_dir"
@@ -414,31 +414,11 @@ ipv6 = false
 tfo = ${tfo}
 dns = ${dns}
 EOF
-  echo -e "${GREEN}配置文件已生成: $config_file${PLAIN}"
-  pause_and_clear
-}
 
-start_and_enable_config() {
-  clear
-  local config_dir="$SNELL_CONFIGS"
-  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
-    pause_and_clear
-    return
-  fi
+  echo -e "${GREEN}配置文件已生成: $config_file${PLAIN}"
+
   local config_bin="$SNELL_BIN"
-  echo -e "${BLUE}当前可用配置:${PLAIN}"
-  list_configs
-  echo -e "${BLUE}请选择要启动的配置名称:${PLAIN}"
-  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
-  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
-  local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
-  if [[ ! -f "$config_file" ]]; then
-    echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
-    pause_and_clear
-    return
-  fi
   cat > "/etc/systemd/system/$service_name" << EOF
 [Unit]
 Description=Snell Instance (${config_name})
@@ -468,7 +448,7 @@ delete_config() {
   fi
   echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
-  echo -e "${YELLOW}请输入要删除的配置名称${PLAIN}${BLUE}(如: config1)${PLAIN}${YELLOW},输入99删除全部配置:${PLAIN}"
+  echo -e "${BLUE}请输入要删除的配置名称,输入99删除全部配置:${PLAIN}"
   read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
   if [[ "$config_name" == "99" ]]; then
     delete_all_configs
@@ -523,7 +503,7 @@ modify_config() {
   echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
   echo -e "${BLUE}请选择要修改的配置名称:${PLAIN}"
-  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
+  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
   [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空!${PLAIN}" && pause_and_clear && return
   local config_file="${config_dir}/${config_name}.conf"
   local service_name="snell@${config_name}.service"
@@ -626,22 +606,40 @@ EOF
   pause_and_clear
 }
 
-stop_snell() {
+stop_or_restart_snell() {
   clear
-  echo -e "${BLUE}正在停止所有 Snell systemd 服务...${PLAIN}"
-  local stopped_any=0
-  for svc in $(systemctl list-units --type=service --all | grep -oE 'snell@[^ ]+'); do
-    systemctl stop "$svc"
-    stopped_any=1
-    echo -e "${YELLOW}已停止服务: $svc${PLAIN}"
-  done
-  pkill -f "$SNELL_BIN" && echo -e "${YELLOW}已尝试终止所有 snell-server 进程${PLAIN}"
-  systemctl daemon-reload
-  if [[ $stopped_any -eq 1 ]]; then
-    echo -e "${GREEN}所有 Snell systemd 服务及进程已停止${PLAIN}"
-  else
-    echo -e "${YELLOW}未检测到正在运行的 Snell systemd 服务${PLAIN}"
+  local config_dir="$SNELL_CONFIGS"
+  if [[ ! -d "$config_dir" || -z "$(ls -A "$config_dir" 2>/dev/null)" ]]; then
+    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
+    pause_and_clear
+    return
   fi
+  echo -e "${BLUE}当前可用配置:${PLAIN}"
+  list_configs
+  echo -e "${BLUE}请输入要停止的配置名称,输入0重启全部配置:${PLAIN}"
+  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  if [[ "$config_name" == "0" ]]; then
+    for config_file in "$config_dir"/*.conf; do
+      [[ ! -f "$config_file" ]] && continue
+      local cn=$(basename "$config_file" .conf)
+      local service_name="snell@${cn}.service"
+      systemctl restart "$service_name"
+      echo -e "${GREEN}已重启服务: $service_name${PLAIN}"
+    done
+    echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+    pause_and_clear
+    return
+  fi
+  [[ -z "$config_name" ]] && echo -e "${RED}配置名称不能为空${PLAIN}" && pause_and_clear && return
+  local config_file="${config_dir}/${config_name}.conf"
+  local service_name="snell@${config_name}.service"
+  if [[ ! -f "$config_file" ]]; then
+    echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
+    pause_and_clear
+    return
+  fi
+  systemctl stop "$service_name"
+  echo -e "${YELLOW}已停止服务: $service_name${PLAIN}"
   pause_and_clear
 }
 
@@ -651,7 +649,11 @@ list_configs() {
     echo -e "${YELLOW}没有找到任何配置文件${PLAIN}"
     return
   fi
-  ls "$config_dir" | sed 's/\.conf$//'
+  for f in "$config_dir"/*.conf; do
+    [[ ! -f "$f" ]] && continue
+    local name=$(basename "$f" .conf)
+    echo -e "  ${YELLOW}${name}${PLAIN}"
+  done
 }
 
 config_snell_menu() {
@@ -659,11 +661,10 @@ config_snell_menu() {
     show_sub_menu
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
     case $sub_choice in
-      1) generate_config ;;
-      2) start_and_enable_config ;;
-      3) stop_snell ;;
-      4) modify_config ;;
-      5) delete_config ;;
+      1) generate_and_enable_config ;;
+      2) stop_or_restart_snell ;;
+      3) modify_config ;;
+      4) delete_config ;;
       0) break ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
@@ -674,10 +675,9 @@ show_sub_menu() {
   clear
   echo -e "${BLUE}✦ Confing_Menu ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}生成配置"
-  echo -e "${GREEN}  2.${PLAIN}启动配置"
-  echo -e "${GREEN}  3.${PLAIN}停止服务"
-  echo -e "${GREEN}  4.${PLAIN}查看配置"
-  echo -e "${GREEN}  5.${PLAIN}删除配置"
+  echo -e "${GREEN}  2.${PLAIN}停止服务"
+  echo -e "${GREEN}  3.${PLAIN}查看配置"
+  echo -e "${GREEN}  4.${PLAIN}删除配置"
   echo -e "${GREEN}  0.${PLAIN}返回上级"
 }
 
