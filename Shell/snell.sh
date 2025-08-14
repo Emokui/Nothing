@@ -589,11 +589,11 @@ modify_config() {
 
   cat > "$config_file" << EOF
 [snell-server]
-listen = 0.0.0.0:${port}
+listen = ::0:${port}
 psk = ${psk}
 obfs = ${obfs}
 $(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
-ipv6 = false
+ipv6 = true
 tfo = ${tfo}
 dns = ${dns}
 EOF
