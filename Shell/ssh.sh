@@ -777,6 +777,11 @@ show_current_dns() {
     esac
 }
 
+show_error() {
+    echo -e "${RED}错误: $1${PLAIN}"
+    return 1
+}
+
 persistent_set_dns() {
     local primary_dns=$1
     local secondary_dns=$2
@@ -784,10 +789,8 @@ persistent_set_dns() {
     case $network_manager in
         "NetworkManager")
             CONNECTION=$(nmcli -t -f NAME c show --active | head -n1)
-            if [ -z "$CONNECTION" ]; then
-                echo -e "${RED}错误: 未找到活动的网络连接${PLAIN}"
-                return 1
-            fi
+            [ -z "$CONNECTION" ] && show_error "未找到活动的网络连接" && return 1
+            
             if [ -z "$secondary_dns" ]; then
                 nmcli con mod "$CONNECTION" ipv4.dns "$primary_dns"
             else
@@ -798,10 +801,8 @@ persistent_set_dns() {
             ;;
         "systemd-resolved")
             INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-            if [ -z "$INTERFACE" ]; then
-                echo -e "${RED}错误: 未找到默认网络接口${PLAIN}"
-                return 1
-            fi
+            [ -z "$INTERFACE" ] && show_error "未找到默认网络接口" && return 1
+            
             if [ -z "$secondary_dns" ]; then
                 resolvectl dns "$INTERFACE" "$primary_dns"
             else
@@ -810,14 +811,13 @@ persistent_set_dns() {
             ;;
         "netplan")
             NETPLAN_FILE=$(find /etc/netplan -name "*.yaml" | head -n1)
-            if [ -z "$NETPLAN_FILE" ]; then
-                echo -e "${RED}错误: 未找到netplan配置文件${PLAIN}"
-                return 1
-            fi
+            [ -z "$NETPLAN_FILE" ] && show_error "未找到netplan配置文件" && return 1
+            
             cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
             addresses="['$primary_dns'"
             [ -n "$secondary_dns" ] && addresses+=", '$secondary_dns'"
             addresses+="]"
+            
             if grep -q "nameservers:" "$NETPLAN_FILE"; then
                 sed -i "/nameservers:/,/addresses:/c\      nameservers:\n        addresses: $addresses" "$NETPLAN_FILE"
             else
@@ -838,14 +838,21 @@ set_predefined_dns() {
 }
 
 set_manual_dns() {
-    echo -e "${YELLOW}请输入主要DNS服务器:${PLAIN}"
-    read primary_dns
+    while true; do
+        clear
+        echo -e "${YELLOW}请输入主要DNS服务器:${PLAIN}"
+        read primary_dns
+        primary_dns=$(echo "$primary_dns" | xargs)
+        
+        if [ -n "$primary_dns" ]; then
+            break
+        else
+            echo -e "${RED}主要DNS服务器不能为空，请重新输入${PLAIN}"
+        fi
+    done
     echo -e "${YELLOW}请输入次要DNS服务器(可选，直接按回车跳过):${PLAIN}"
     read secondary_dns
-    if [ -z "$primary_dns" ]; then
-        echo -e "${RED}错误: 主要DNS服务器不能为空${PLAIN}"
-        return
-    fi
+    secondary_dns=$(echo "$secondary_dns" | xargs)
     persistent_set_dns "$primary_dns" "$secondary_dns"
 }
 
@@ -854,10 +861,10 @@ dns_config_menu() {
         clear
         echo -e "${BLUE}======== DNS配置工具 =======${PLAIN}"
         show_current_dns
-        echo -e "${YELLOW}请选择操作:${PLAIN}"
+        echo -e "${YELLOW} 请选择操作:${PLAIN}"
         echo -e "${GREEN} 1.修改DNS为8.8.8.8和1.1.1.1${PLAIN}"
         echo -e "${GREEN} 2.手动修改DNS${PLAIN}"
-        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${GREEN} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}============================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" option
         option=$(echo "$option" | xargs)
