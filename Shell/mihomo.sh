@@ -221,7 +221,7 @@ secret: "$ext_ctrl_secret"
 $(if [ -n "$authentication_config" ]; then echo -e "$authentication_config"; fi)
 mode: $mode
 log-level: silent
-ipv6: false
+ipv6: true
 profile:
   store-selected: true
   store-fake-ip: true
@@ -229,16 +229,14 @@ sniffer:
   enable: false
 dns:
   enable: true
-  listen: any:53
-  ipv6: false
+  listen: 0.0.0.0:53
+  ipv6: true
   nameserver:
     - 8.8.8.8
     - 1.1.1.1
   fallback:
     - 8.8.4.4
     - 1.0.0.1
-  direct-nameserver:
-    - system
   enhanced-mode: redir-host
 proxies:
   - name: "warp"
