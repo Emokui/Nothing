@@ -512,12 +512,13 @@ modify_config() {
     pause_and_clear
     return
   fi
-  local current_port=$(grep "^listen = " "$config_file" | cut -d':' -f2)
-  local current_psk=$(grep "^psk = " "$config_file" | cut -d' ' -f3)
-  local current_obfs=$(grep "^obfs = " "$config_file" | cut -d' ' -f3)
-  local current_obfs_host=$(grep "^obfs-host = " "$config_file" | cut -d' ' -f3)
-  local current_tfo=$(grep "^tfo = " "$config_file" | cut -d' ' -f3)
-  local current_dns=$(grep "^dns = " "$config_file" | cut -d' ' -f3-)
+
+  local current_port=$(grep "^listen[[:space:]]*=" "$config_file" | awk -F: '{print $NF}' | tr -d ' ')
+  local current_psk=$(grep "^psk[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  local current_obfs=$(grep "^obfs[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  local current_obfs_host=$(grep "^obfs-host[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  local current_tfo=$(grep "^tfo[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  local current_dns=$(grep "^dns[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | sed 's/^ *//;s/ *$//')
 
   clear
   echo -e "${BLUE}当前配置内容:${PLAIN}"
