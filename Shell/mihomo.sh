@@ -229,7 +229,7 @@ sniffer:
   enable: false
 dns:
   enable: true
-  listen: 0.0.0.0:53
+  listen: :1053
   ipv6: true
   nameserver:
     - 8.8.8.8
@@ -246,7 +246,7 @@ proxies:
     port: $port
     ip: 172.16.0.2
     public-key: $public_key
-    allowed-ips: ['0.0.0.0/0']
+    allowed-ips: ['0.0.0.0/0', '::/0']
     udp: true
     mtu: $mtu
 rule-providers:
