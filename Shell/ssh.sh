@@ -583,8 +583,6 @@ install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emok
 install_substore()  { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/substore.sh"; }
 install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/Install.sh"; }
 install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/nginx.sh"; }
-bbr_menu()          { run_install_script "https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcp.sh"; }
-warp_menu()         { run_install_script "https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh"; }
 install_wireguard() { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
 
 # ====== VPS 重启 ======
@@ -890,18 +888,16 @@ main_menu() {
         echo -e "${GREEN}  05.${PLAIN}配置DNS"
         echo -e "${GREEN}  06.${PLAIN}配置SSH"
         echo -e "${GREEN}  07.${PLAIN}重启VPS"
-        echo -e "${GREEN}  08.${PLAIN}管理BBR"
-        echo -e "${GREEN}  09.${PLAIN}管理WARP"
-        echo -e "${GREEN}  10.${PLAIN}配置SWAP"
-        echo -e "${GREEN}  11.${PLAIN}配置ACME"
-        echo -e "${GREEN}  12.${PLAIN}配置Nginx"
-        echo -e "${GREEN}  13.${PLAIN}安装Snell"
-        echo -e "${GREEN}  14.${PLAIN}安装Mihomo"
-        echo -e "${GREEN}  15.${PLAIN}安装Trojan"
-        echo -e "${GREEN}  16.${PLAIN}安装Hysteria"
-        echo -e "${GREEN}  17.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  18.${PLAIN}安装SubStore"
-        echo -e "${GREEN}  19.${PLAIN}提取WireGuard"
+        echo -e "${GREEN}  08.${PLAIN}配置SWAP"
+        echo -e "${GREEN}  09.${PLAIN}配置ACME"
+        echo -e "${GREEN}  10.${PLAIN}配置Nginx"
+        echo -e "${GREEN}  11.${PLAIN}安装Snell"
+        echo -e "${GREEN}  12.${PLAIN}安装Mihomo"
+        echo -e "${GREEN}  13.${PLAIN}安装Trojan"
+        echo -e "${GREEN}  14.${PLAIN}安装Hysteria"
+        echo -e "${GREEN}  15.${PLAIN}配置FireWall"
+        echo -e "${GREEN}  16.${PLAIN}安装SubStore"
+        echo -e "${GREEN}  17.${PLAIN}提取WireGuard"
         echo -e "${GREEN}   0.${PLAIN}离开SteinsGate"
         read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -913,18 +909,16 @@ main_menu() {
             5)  dns_config_menu ;;
             6)  ssh_config_menu ;;
             7)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            8)  bbr_menu ;;
-            9)  warp_menu ;;
-            10) set_swap_menu ;;
-            11) install_acme ;;
-            12) install_nginx ;;
-            13) install_snell ;;
-            14) install_mihomo ;;
-            15) install_trojan ;;
-            16) install_hysteria ;;
-            17) configure_firewall ;;
-            18) install_substore ;;
-            19) install_wireguard ;;
+            8)  set_swap_menu ;;
+            9)  install_acme ;;
+            10) install_nginx ;;
+            11) install_snell ;;
+            12) install_mihomo ;;
+            13) install_trojan ;;
+            14) install_hysteria ;;
+            15) configure_firewall ;;
+            16) install_substore ;;
+            17) install_wireguard ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
