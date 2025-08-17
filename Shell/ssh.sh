@@ -266,7 +266,7 @@ ssh_config_menu() {
             3) enable_root_key_login ;;
             4) disable_ssh_login_menu ;;
             0) return ;;
-            *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 1 ;;
+            *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 0.3 ;;
         esac
     done
 }
