@@ -246,11 +246,11 @@ ssh_config_menu() {
     while true; do
         clear
         echo -e "${BLUE}====== SSH配置 ======${PLAIN}"
-        echo -e "${GREEN} 1.设置root密码${PLAIN}"
-        echo -e "${GREEN} 2.设置root密钥${PLAIN}"
+        echo -e "${GREEN} 1.设置Root密码${PLAIN}"
+        echo -e "${GREEN} 2.设置Root密钥${PLAIN}"
         echo -e "${GREEN} 3.修改登录端口${PLAIN}"
-        echo -e "${GREEN} 4.关闭登录方式${PLAIN}"
-        echo -e "${GREEN} 0.返回主菜单${PLAIN}"
+        echo -e "${RED} 4.关闭登录方式${PLAIN}"
+        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
