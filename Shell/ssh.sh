@@ -2,20 +2,20 @@
 
 set -euo pipefail
 
-# ====== 颜色变量统一管理 ======
+# ====== 颜色变量 ======
 GREEN="\033[0;32m"
 YELLOW="\033[0;33m"
 BLUE="\033[0;34m"
 RED="\033[0;31m"
 PLAIN="\033[0m"
 
-# ====== 必须以 root 权限运行 ======
+# ====== Root权限 ======
 if [[ $EUID -ne 0 ]]; then
   echo -e "${RED}请用 root 用户运行本脚本${PLAIN}"
   exit 1
 fi
 
-# ====== 通用工具函数 ======
+# ====== 通用函数 ======
 press_any_key_to_continue() {
     if [ -t 0 ]; then
         local msg="${1:-按任意键返回菜单...}"
@@ -27,7 +27,7 @@ press_any_key_to_continue() {
     fi
 }
 
-# ====== 检测并自动安装 wget ======
+# ====== 安装wget ======
 install_wget_if_missing() {
     if ! command -v wget &>/dev/null; then
         echo -e "${YELLOW}未检测到 wget，正在自动安装...${PLAIN}"
@@ -53,7 +53,7 @@ install_wget_if_missing() {
 
 install_wget_if_missing
 
-# ====== 系统管理功能 ======
+# ====== 系统管理 ======
 is_gcp_instance() {
     org=$(curl -s --max-time 3 https://ipinfo.io/org)
     if [[ -z "$org" ]]; then
@@ -97,7 +97,7 @@ linux_clean() {
     clear
     echo -e "${YELLOW}正在清理系统垃圾...${PLAIN}"
 
-    # ------ 包管理器缓存清理 ------
+    # ------ 包管理器缓存 ------
     if command -v apt &>/dev/null; then
         apt autoremove -y && apt autoclean -y && apt clean
     elif command -v dnf &>/dev/null; then
@@ -120,14 +120,14 @@ linux_clean() {
         echo -e "${RED}未知的包管理器!${PLAIN}"
     fi
 
-    # ------ 清理Docker垃圾 ------
+    # ------ Docker垃圾 ------
     if command -v docker &>/dev/null; then
         echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
         docker system prune -af
         docker volume prune -f
     fi
 
-    # ------ 清理系统日志（保留1天） ------
+    # ------ 系统日志 ------
     echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
         journalctl --vacuum-time=3d --vacuum-size=100M
@@ -136,17 +136,17 @@ linux_clean() {
     find /var/log -type f -name "*.gz" -mtime +1 -exec rm -f {} \;
     find /var/log -type f -name "*.1" -mtime +1 -exec rm -f {} \;
 
-    # ------ 清理临时目录 ------
+    # ------ 临时目录 ------
     echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
     rm -rf /tmp/* /var/tmp/*
 
-    # ------ 清理用户缓存 ------
+    # ------ 用户缓存 ------
     echo -e "${YELLOW}正在清理用户缓存...${PLAIN}"
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
     fi
     
-    #------ 清理非root用户缓存 ------
+    #------ 非root用户缓存 ------
     for uhome in /home/*; do
         [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
     done
@@ -155,7 +155,7 @@ linux_clean() {
     press_any_key_to_continue
 }
 
-# ====== 虚拟内存（Swap）管理 ======
+# ====== Swap管理 ======
 swapfile_path="/swapfile"
 
 set_swap_menu() {
@@ -247,7 +247,7 @@ set_swap() {
     press_any_key_to_continue
 }
 
-# ====== SSH 管理（子菜单） ======
+# ====== SSH管理 ======
 ssh_config_menu() {
     while true; do
         clear
@@ -273,8 +273,8 @@ ssh_config_menu() {
 
 change_ssh_port() {
     while true; do
-        echo "==== 修改 SSH 端口 ===="
-        read -rp "请输入新的 SSH 端口（输入0返回）: " new_port
+        clear
+        read -rp "$(echo -e "${BLUE}请输入新的SSH端口(输入0返回): ${PLAIN}")" new_port
         new_port=$(echo "$new_port" | xargs)
         if [[ "$new_port" == "0" ]]; then
             return
@@ -283,12 +283,12 @@ change_ssh_port() {
             sed -i '/^[#[:space:]]*Port[[:space:]]\+[0-9]\+/Id' /etc/ssh/sshd_config
             echo "Port $new_port" >> /etc/ssh/sshd_config
             if ! sshd -t 2>/dev/null; then
-                echo -e "${RED}sshd 配置有误，未重启 sshd！请检查 /etc/ssh/sshd_config${PLAIN}"
+                echo -e "${RED}sshd 配置有误,未重启sshd请检查/etc/ssh/sshd_config${PLAIN}"
                 press_any_key_to_continue
                 return
             fi
             systemctl restart sshd
-            echo "[✓] SSH 端口已修改为 $new_port"
+            echo -e "${YELLOW}[✓]SSH端口已修改为 $new_port${PLAIN}"
             press_any_key_to_continue
             return
         else
@@ -308,8 +308,8 @@ enable_or_change_root_password() {
         pass_auth=$(echo "$line" | awk '{print tolower($2)}')
     fi
 
-    echo "==== 开启/修改 root 登陆 ===="
-    read -rp "按回车继续，输入0返回: " input
+    clear
+    read -rp "$(echo -e "${BLUE}按回车继续,输入0返回:${PLAIN}")" input
     input=$(echo "$input" | xargs)
     if [[ "$input" == "0" ]]; then
         return
@@ -322,21 +322,20 @@ enable_or_change_root_password() {
         sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
         echo 'PasswordAuthentication yes' >> "$sshd_conf"
         if ! sshd -t 2>/dev/null; then
-            echo -e "${RED}sshd 配置有误,未重启 sshd 请检查 /etc/ssh/sshd_config${PLAIN}"
+            echo -e "${RED}sshd 配置有误,未重启sshd请检查/etc/ssh/sshd_config${PLAIN}"
             press_any_key_to_continue
             return
         fi
         systemctl restart sshd
-        echo "[✓] Root 登录和密码登录已启用"
+        echo -e "${GREEN}[✓]Root密码登陆已启用${PLAIN}"
     else
-        echo "[✓] Root 密码已修改"
+        echo -e "${GREEN}[✓]Root密码已修改${PLAIN}"
     fi
     press_any_key_to_continue
 }
 
 enable_root_key_login() {
     clear
-    echo "==== 配置 root 密钥登录 ===="
     ROOT_HOME="/root"
     SSH_DIR="$ROOT_HOME/.ssh"
     AUTH_KEYS="$SSH_DIR/authorized_keys"
@@ -348,19 +347,20 @@ enable_root_key_login() {
     touch "$AUTH_KEYS"
     chmod 600 "$AUTH_KEYS"
 
-    echo -e "是否需要为私钥设置密码？"
-    echo -e "1) 是"
-    echo -e "2) 否"
-    read -p "choice [1/2](输入其他返回菜单): " set_passwd
+    echo -e "${BLUE}是否需要为私钥设置密码？${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}是"
+    echo -e "${GREEN}2.${PLAIN}否"
+    read -p "$(echo -e "${BLUE}choice [1/2]: ${PLAIN}")" set_passwd
 
     if [[ "$set_passwd" != "1" && "$set_passwd" != "2" ]]; then
-        echo -e "\033[31m输入无效，已返回主菜单。\033[0m"
+        echo -e "${RED}输入无效,已返回主菜单${PLAIN}"
         sleep 0.3
         return
     fi
 
     if [ "$set_passwd" = "1" ]; then
-        echo "请输入私钥密码（不显示）："
+        clear
+        echo -e "${BLUE}请输入私钥密码(不显示):${PLAIN}"
         read -s key_passphrase
         echo
         rm -f "$TMP_KEY" "$TMP_PUB"
@@ -376,17 +376,18 @@ enable_root_key_login() {
     fi
 
     if [ -f "$TMP_KEY" ]; then
-        echo -e "\033[32m请复制以下私钥内容（显示后立即删除）：\033[0m"
+        clear
+        echo -e "${GREEN}请复制以下私钥内容(显示后立即删除):${PLAIN}"
         echo "-----------------------------------------------------"
         cat "$TMP_KEY"
         echo "-----------------------------------------------------"
         rm -f "$TMP_KEY"
         rm -f "$TMP_PUB"
     else
-        echo -e "\033[31m私钥生成失败！\033[0m"
+        echo -e "${RED}私钥生成失败！${PLAIN}"
     fi
 
-    echo -e "\033[33m私钥内容已显示并删除。请务必妥善保存！\033[0m"
+    echo -e "${YELLOW}私钥内容已显示并删除。请务必妥善保存！${PLAIN}"
 
     sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
     sed -i '/^[#[:space:]]*PubkeyAuthentication[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
@@ -394,13 +395,13 @@ enable_root_key_login() {
     echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
 
     if ! sshd -t 2>/dev/null; then
-        echo -e "\033[31msshd 配置有误,未重启 sshd 请检查 /etc/ssh/sshd_config\033[0m"
+        echo -e "${RED}sshd 配置有误,未重启 sshd 请检查 /etc/ssh/sshd_config${PLAIN}"
         read -n 1 -s -r -p "按任意键继续..."
         echo
         return
     fi
     systemctl restart sshd
-    echo -e "\033[32mroot ed25519 密钥登录已配置完成。\033[0m"
+    echo -e "${GREEN}root ed25519 密钥登录已配置完成。${PLAIN}"
     read -n 1 -s -r -p "按任意键继续..."
     echo
 }
@@ -430,15 +431,15 @@ disable_ssh_login_menu() {
     local enabled_count=$((has_password + has_pubkey))
 
     if [[ $enabled_count -le 1 ]]; then
-        echo -e "${RED}当前仅剩一种登录方式，禁止关闭全部登录方式 ${PLAIN}"
+        echo -e "${RED}当前仅剩一种登录方式,禁止关闭全部登录方式 ${PLAIN}"
         press_any_key_to_continue
         return
     fi
 
-    echo -e "${BLUE}关闭哪种登录方式？${PLAIN}"
+    echo -e "${BLUE}关闭哪种登录方式${PLAIN}"
     echo -e "${GREEN}1.${PLAIN}关闭密码登录"
     echo -e "${GREEN}2.${PLAIN}关闭密钥登录"
-    read -p "choice [1-2]: " disable_choice
+    read -p "$(echo -e "${BLUE}choice [1-2]: ${PLAIN}")" disable_choice
     disable_choice=$(echo "$disable_choice" | xargs)
     case "$disable_choice" in
         1)
@@ -446,7 +447,7 @@ disable_ssh_login_menu() {
                 sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
                 echo 'PasswordAuthentication no' >> "$sshd_conf"
                 systemctl restart sshd
-                echo -e "${GREEN}[✓] 密码登录已关闭${PLAIN}"
+                echo -e "${GREEN}[✓]密码登录已关闭${PLAIN}"
             else
                 echo -e "${YELLOW}密码登录本就已关闭,无需操作${PLAIN}"
             fi
@@ -457,7 +458,7 @@ disable_ssh_login_menu() {
                 sed -i '/^[#[:space:]]*PubkeyAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
                 echo 'PubkeyAuthentication no' >> "$sshd_conf"
                 systemctl restart sshd
-                echo -e "${GREEN}[✓] 密钥登录已关闭${PLAIN}"
+                echo -e "${GREEN}[✓]密钥登录已关闭${PLAIN}"
             else
                 echo -e "${YELLOW}密钥登录本就已关闭,无需操作${PLAIN}"
             fi
@@ -568,7 +569,7 @@ change_timezone() {
     done
 }
 
-# ====== 第三方工具/服务安装 ======
+# ====== 同仓其他脚本 ======
 run_install_script() {
     set +e
     bash <(curl -sL "$1")
@@ -585,7 +586,7 @@ install_install()   { run_install_script "https://raw.githubusercontent.com/Emok
 install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/nginx.sh"; }
 install_wireguard() { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
 
-# ====== VPS 重启 ======
+# ====== VPS重启 ======
 reboot_vps() {
     echo "即将重启系统..."
     reboot
@@ -734,25 +735,56 @@ configure_firewall() {
     done
 }
 
-# ====== 安全修改 /etc/resolv.conf 工具函数 ======
+# ===== DNS配置 =====
+get_primary_iface() {
+    ip route 2>/dev/null | awk '/^default/{print $5; exit}'
+}
+
+resolv_conf_managed_by_resolved() {
+    if [ -L /etc/resolv.conf ]; then
+        target="$(readlink -f /etc/resolv.conf 2>/dev/null)"
+        case "$target" in
+            /run/systemd/resolve/stub-resolv.conf|/run/systemd/resolve/resolv.conf) return 0 ;;
+        esac
+    fi
+    grep -qE '(^|\s)nameserver\s+127\.0\.0\.53(\s|$)' /etc/resolv.conf 2>/dev/null
+}
+
 safe_update_resolv_conf() {
     local primary_dns="$1"
     local secondary_dns="$2"
-    chattr -i /etc/resolv.conf 2>/dev/null
+
+    if resolv_conf_managed_by_resolved; then
+        return 1
+    fi
+
+    if [ -L /etc/resolv.conf ]; then
+        return 1
+    fi
+
+    if command -v chattr >/dev/null 2>&1; then
+        chattr -i /etc/resolv.conf 2>/dev/null || true
+    fi
+
     {
         echo "nameserver $primary_dns"
         [ -n "$secondary_dns" ] && echo "nameserver $secondary_dns"
     } > /etc/resolv.conf
-    chattr +i /etc/resolv.conf 2>/dev/null
+
+    if command -v chattr >/dev/null 2>&1; then
+        chattr +i /etc/resolv.conf 2>/dev/null || true
+    fi
+    return 0
 }
 
-# ====== DNS 配置 ======
 detect_network_manager() {
-    if command -v systemctl > /dev/null && systemctl is-active --quiet systemd-resolved; then
+    if command -v systemctl >/dev/null 2>&1 \
+       && systemctl is-active --quiet systemd-resolved 2>/dev/null \
+       && command -v resolvectl >/dev/null 2>&1; then
         echo "systemd-resolved"
-    elif command -v nmcli > /dev/null; then
+    elif command -v nmcli >/dev/null 2>&1; then
         echo "NetworkManager"
-    elif [ -d "/etc/netplan" ]; then
+    elif [ -d "/etc/netplan" ] && command -v netplan >/dev/null 2>&1; then
         echo "netplan"
     else
         echo "traditional"
@@ -761,16 +793,16 @@ detect_network_manager() {
 
 show_current_dns() {
     echo -e "${YELLOW} 当前DNS配置:${PLAIN}"
-    grep "nameserver" /etc/resolv.conf || echo "未找到DNS配置"
+    grep -E "^\s*nameserver" /etc/resolv.conf 2>/dev/null || echo "未找到DNS配置"
     network_manager=$(detect_network_manager)
     case $network_manager in
         "NetworkManager")
             echo -e "${YELLOW}NetworkManager配置:${PLAIN}"
-            nmcli dev show | grep DNS || echo "未找到NetworkManager DNS配置"
+            nmcli dev show 2>/dev/null | grep -E "^\s*IP4.DNS" || echo "未找到NetworkManager DNS配置"
             ;;
         "systemd-resolved")
             echo -e "${YELLOW}systemd-resolved配置:${PLAIN}"
-            resolvectl status | grep "DNS Servers" || echo "未找到systemd-resolved DNS配置"
+            resolvectl status 2>/dev/null | grep -E "DNS Servers|Current DNS Server" || echo "未找到systemd-resolved DNS配置"
             ;;
     esac
 }
@@ -781,53 +813,108 @@ show_error() {
 }
 
 persistent_set_dns() {
-    local primary_dns=$1
-    local secondary_dns=$2
+    local primary_dns="$1"
+    local secondary_dns="$2"
+    local network_manager
     network_manager=$(detect_network_manager)
-    case $network_manager in
+
+    case "$network_manager" in
         "NetworkManager")
-            CONNECTION=$(nmcli -t -f NAME c show --active | head -n1)
-            [ -z "$CONNECTION" ] && show_error "未找到活动的网络连接" && return 1
-            
-            if [ -z "$secondary_dns" ]; then
-                nmcli con mod "$CONNECTION" ipv4.dns "$primary_dns"
+            command -v nmcli >/dev/null 2>&1 || { show_error "未找到 nmcli"; return 1; }
+
+            local CONNECTION
+            CONNECTION=$(nmcli -t -f NAME c show --active 2>/dev/null | head -n1)
+            [ -z "$CONNECTION" ] && { show_error "未找到活动的网络连接"; return 1; }
+
+            if [ -n "$secondary_dns" ]; then
+                nmcli con mod "$CONNECTION" ipv4.dns "$primary_dns,$secondary_dns" || { show_error "设置 NetworkManager DNS 失败"; return 1; }
             else
-                nmcli con mod "$CONNECTION" ipv4.dns "$primary_dns,$secondary_dns"
+                nmcli con mod "$CONNECTION" ipv4.dns "$primary_dns" || { show_error "设置 NetworkManager DNS 失败"; return 1; }
             fi
-            nmcli con mod "$CONNECTION" ipv4.ignore-auto-dns yes
-            nmcli con up "$CONNECTION"
+            nmcli con mod "$CONNECTION" ipv4.ignore-auto-dns yes 2>/dev/null || true
+
+            nmcli con up "$CONNECTION" 2>/dev/null || true
+            nmcli general reload 2>/dev/null || true
+            systemctl restart NetworkManager 2>/dev/null || true
+
             ;;
+
         "systemd-resolved")
-            INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-            [ -z "$INTERFACE" ] && show_error "未找到默认网络接口" && return 1
-            
-            if [ -z "$secondary_dns" ]; then
-                resolvectl dns "$INTERFACE" "$primary_dns"
+            command -v resolvectl >/dev/null 2>&1 || { show_error "未找到 resolvectl"; return 1; }
+
+            local IFACE
+            IFACE=$(get_primary_iface)
+            [ -z "$IFACE" ] && { show_error "未找到默认网络接口"; return 1; }
+
+            if [ -n "$secondary_dns" ]; then
+                resolvectl dns "$IFACE" "$primary_dns" "$secondary_dns" || { show_error "设置 systemd-resolved DNS 失败"; return 1; }
             else
-                resolvectl dns "$INTERFACE" "$primary_dns" "$secondary_dns"
+                resolvectl dns "$IFACE" "$primary_dns" || { show_error "设置 systemd-resolved DNS 失败"; return 1; }
+            fi
+
+            resolvectl flush-caches 2>/dev/null || systemd-resolve --flush-caches 2>/dev/null || true
+
+            if [ ! -L /etc/resolv.conf ] && command -v ln >/dev/null 2>&1; then
+                :
             fi
             ;;
+
         "netplan")
-            NETPLAN_FILE=$(find /etc/netplan -name "*.yaml" | head -n1)
-            [ -z "$NETPLAN_FILE" ] && show_error "未找到netplan配置文件" && return 1
-            
-            cp "$NETPLAN_FILE" "${NETPLAN_FILE}.bak"
-            addresses="['$primary_dns'"
-            [ -n "$secondary_dns" ] && addresses+=", '$secondary_dns'"
-            addresses+="]"
-            
-            if grep -q "nameservers:" "$NETPLAN_FILE"; then
-                sed -i "/nameservers:/,/addresses:/c\      nameservers:\n        addresses: $addresses" "$NETPLAN_FILE"
-            else
-                sed -i "/dhcp4: true/a\      nameservers:\n        addresses: $addresses" "$NETPLAN_FILE"
+            command -v netplan >/dev/null 2>&1 || { show_error "未找到 netplan"; return 1; }
+
+            local NETPLAN_FILE
+            NETPLAN_FILE=$(find /etc/netplan -maxdepth 1 -type f -name "*.yaml" -o -name "*.yml" 2>/dev/null | head -n1)
+            [ -z "$NETPLAN_FILE" ] && { show_error "未找到 netplan 配置文件"; return 1; }
+
+            cp -f "$NETPLAN_FILE" "${NETPLAN_FILE}.bak" 2>/dev/null || true
+
+            local IFACE
+            IFACE=$(get_primary_iface)
+            if [ -n "$IFACE" ]; then
+                if netplan help 2>&1 | grep -q "set"; then
+                    if [ -n "$secondary_dns" ]; then
+                        netplan set "network.ethernets.${IFACE}.nameservers.addresses=[${primary_dns}, ${secondary_dns}]" 2>/dev/null \
+                        || netplan set "network.bridges.${IFACE}.nameservers.addresses=[${primary_dns}, ${secondary_dns}]" 2>/dev/null \
+                        || netplan set "network.wifis.${IFACE}.nameservers.addresses=[${primary_dns}, ${secondary_dns}]" 2>/dev/null || true
+                    else
+                        netplan set "network.ethernets.${IFACE}.nameservers.addresses=[${primary_dns}]" 2>/dev/null \
+                        || netplan set "network.bridges.${IFACE}.nameservers.addresses=[${primary_dns}]" 2>/dev/null \
+                        || netplan set "network.wifis.${IFACE}.nameservers.addresses=[${primary_dns}]" 2>/dev/null || true
+                    fi
+                fi
             fi
-            netplan apply
+
+            if ! grep -q "nameservers:" "$NETPLAN_FILE"; then
+                if [ -n "$secondary_dns" ]; then
+                    sed -i "/dhcp4:\s*true/a\ \ \ \ \ \ nameservers:\n\ \ \ \ \ \ \ \ addresses: [${primary_dns}, ${secondary_dns}]" "$NETPLAN_FILE"
+                else
+                    sed -i "/dhcp4:\s*true/a\ \ \ \ \ \ nameservers:\n\ \ \ \ \ \ \ \ addresses: [${primary_dns}]" "$NETPLAN_FILE"
+                fi
+            else
+                if [ -n "$secondary_dns" ]; then
+                    sed -i "/nameservers:/,/addresses:/c\ \ \ \ \ \ nameservers:\n\ \ \ \ \ \ \ \ addresses: [${primary_dns}, ${secondary_dns}]" "$NETPLAN_FILE"
+                else
+                    sed -i "/nameservers:/,/addresses:/c\ \ \ \ \ \ nameservers:\n\ \ \ \ \ \ \ \ addresses: [${primary_dns}]" "$NETPLAN_FILE"
+                fi
+            fi
+
+            if ! netplan try 2>/dev/null; then
+                cp -f "${NETPLAN_FILE}.bak" "$NETPLAN_FILE" 2>/dev/null || true
+                show_error "netplan 配置应用失败"
+                return 1
+            fi
             ;;
+
         *)
-            safe_update_resolv_conf "$primary_dns" "$secondary_dns"
+            if ! safe_update_resolv_conf "$primary_dns" "$secondary_dns"; then
+                show_error "/etc/resolv.conf 由其他服务管理，无法直接写入"
+                return 1
+            fi
             ;;
     esac
+
     echo -e "${GREEN}DNS设置已更新并已持久化${PLAIN}"
+    return 0
 }
 
 set_predefined_dns() {
@@ -840,17 +927,13 @@ set_manual_dns() {
         clear
         echo -e "${YELLOW}请输入主要DNS服务器:${PLAIN}"
         read primary_dns
-        primary_dns=$(echo "$primary_dns" | xargs)
-        
-        if [ -n "$primary_dns" ]; then
-            break
-        else
-            echo -e "${RED}主要DNS服务器不能为空，请重新输入${PLAIN}"
-        fi
+        primary_dns="$(echo "$primary_dns" | xargs)"
+        [ -n "$primary_dns" ] && break
+        echo -e "${RED}主要DNS服务器不能为空，请重新输入${PLAIN}"
     done
     echo -e "${YELLOW}请输入次要DNS服务器(可选，直接按回车跳过):${PLAIN}"
     read secondary_dns
-    secondary_dns=$(echo "$secondary_dns" | xargs)
+    secondary_dns="$(echo "$secondary_dns" | xargs)"
     persistent_set_dns "$primary_dns" "$secondary_dns"
 }
 
@@ -865,7 +948,7 @@ dns_config_menu() {
         echo -e "${GREEN} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}============================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" option
-        option=$(echo "$option" | xargs)
+        option="$(echo "$option" | xargs)"
         case "$option" in
             1) set_predefined_dns ;;
             2) set_manual_dns ;;
