@@ -245,19 +245,19 @@ set_swap() {
 ssh_config_menu() {
     while true; do
         clear
-        echo -e "${BLUE}====== SSH 配置 ======${PLAIN}"
-        echo -e "${GREEN} 1.${PLAIN}修改ssh 端口"
-        echo -e "${GREEN} 2.${PLAIN}开启root密码"
-        echo -e "${GREEN} 3.${PLAIN}开启root密钥"
-        echo -e "${GREEN} 4.${PLAIN}关闭登录方式"
-        echo -e "${GREEN} 0.${PLAIN}返回Kongroo"
+        echo -e "${BLUE}====== SSH配置 ======${PLAIN}"
+        echo -e "${GREEN} 1.设置root密码${PLAIN}"
+        echo -e "${GREEN} 2.设置root密钥${PLAIN}"
+        echo -e "${GREEN} 3.修改登录端口${PLAIN}"
+        echo -e "${GREEN} 4.关闭登录方式${PLAIN}"
+        echo -e "${GREEN} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
-            1) change_ssh_port ;;
-            2) enable_or_change_root_password ;;
-            3) enable_root_key_login ;;
+            1) enable_or_change_root_password ;;
+            2) enable_root_key_login ;;
+            3) change_ssh_port ;;
             4) disable_ssh_login_menu ;;
             0) return ;;
             *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 0.3 ;;
@@ -490,7 +490,7 @@ change_timezone() {
         echo -e "${YELLOW} 当前时区:$(timedatectl | grep 'Time zone' | awk '{print $3}')${PLAIN}"
         echo -e "${GREEN} 1.推荐时区${PLAIN} (${YELLOW}$current_tz${PLAIN})"
         echo -e "${GREEN} 2.按国家代码选择${PLAIN}"
-        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        echo -e "${GREEN} 0.返回主菜单${PLAIN}"
         echo -e "${BLUE}===========================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -511,16 +511,17 @@ change_timezone() {
                 continue
                 ;;
             2)
-                read -rp "请输入国家代码（如 CN、JP、US）: " input_code
+                clear
+                read -rp "$(echo -e "${BLUE}请输入国家代码:${PLAIN}")" input_code
                 input_code=$(echo "$input_code" | tr a-z A-Z | xargs)
                 if [ -z "$input_code" ]; then
                     echo -e "${RED}输入不能为空${PLAIN}"
-                    sleep 1
+                    sleep 0.3
                     continue
                 fi
 
                 if [ ! -f /usr/share/zoneinfo/zone.tab ]; then
-                    echo -e "${RED}未找到 zone.tab，无法匹配国家代码到时区${PLAIN}"
+                    echo -e "${RED}未找到zone.tab,无法匹配国家代码到时区${PLAIN}"
                     sleep 1
                     continue
                 fi
@@ -530,11 +531,13 @@ change_timezone() {
                     sleep 1
                     continue
                 fi
+                clear
                 echo -e "${BLUE}========= 可选时区 =========${PLAIN}"
                 for i in "${!lines[@]}"; do
-                    echo -e "${GREEN}$((i+1)).${PLAIN} ${BLUE}${lines[$i]}${PLAIN}"
+                    echo -e "  ${GREEN}$((i+1)).${PLAIN}${BLUE}${lines[$i]}${PLAIN}"
                 done
-                read -rp "请选择时区编号: " tz_choice
+                echo -e "${BLUE}==========================${PLAIN}"
+                read -rp "$(echo -e "${BLUE}请选择时区编号: ${PLAIN}")" tz_choice
                 tz_choice=$(echo "$tz_choice" | xargs)
                 if ! [[ "$tz_choice" =~ ^[0-9]+$ ]] || [ "$tz_choice" -lt 1 ] || [ "$tz_choice" -gt "${#lines[@]}" ]; then
                     echo -e "${RED}无效选项${PLAIN}"
@@ -786,7 +789,7 @@ detect_network_manager() {
 }
 
 show_current_dns() {
-    echo -e "${YELLOW} 当前DNS配置:${PLAIN}"
+    echo -e "${YELLOW} 当前DNS:${PLAIN}"
     grep -E "^\s*nameserver" /etc/resolv.conf 2>/dev/null || echo "未找到DNS配置"
     network_manager=$(detect_network_manager)
     case $network_manager in
