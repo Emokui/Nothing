@@ -97,7 +97,6 @@ linux_clean() {
     clear
     echo -e "${YELLOW}正在清理系统垃圾...${PLAIN}"
 
-    # ------ 包管理器缓存 ------
     if command -v apt &>/dev/null; then
         apt autoremove -y && apt autoclean -y && apt clean
     elif command -v dnf &>/dev/null; then
@@ -120,14 +119,12 @@ linux_clean() {
         echo -e "${RED}未知的包管理器!${PLAIN}"
     fi
 
-    # ------ Docker垃圾 ------
     if command -v docker &>/dev/null; then
         echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
         docker system prune -af
         docker volume prune -f
     fi
 
-    # ------ 系统日志 ------
     echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
         journalctl --vacuum-time=3d --vacuum-size=100M
@@ -136,17 +133,14 @@ linux_clean() {
     find /var/log -type f -name "*.gz" -mtime +1 -exec rm -f {} \;
     find /var/log -type f -name "*.1" -mtime +1 -exec rm -f {} \;
 
-    # ------ 临时目录 ------
     echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
     rm -rf /tmp/* /var/tmp/*
 
-    # ------ 用户缓存 ------
     echo -e "${YELLOW}正在清理用户缓存...${PLAIN}"
     if [ -d "$HOME/.cache" ]; then
         rm -rf "$HOME/.cache/"*
     fi
     
-    #------ 非root用户缓存 ------
     for uhome in /home/*; do
         [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
     done
