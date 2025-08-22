@@ -1,16 +1,22 @@
 #!/bin/bash
 
-# 脚本下载的执行文件来自此仓库,是原仓库的一个分支,升级了utls,版本为v1.2.0 
+# 脚本下载的执行文件来自此仓库,是原仓库的一个分支,升级了utls,版本为v1.2.0
 # https://github.com/gfw-report/trojan-go
 
-# ======== 1. 全局变量和设置 ========
+# ======== 全局变量 ========
 RED="\033[1;31m"
 YELLOW="\033[1;33m"
 GREEN="\033[1;32m"
 BLUE="\033[1;34m"
 PLAIN="\033[0m"
 
-# ======== 2. 通用函数 ========
+# ========  以Root运行 ========
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}请以 root 身份运行本脚本${PLAIN}"
+    exit 1
+fi
+
+# ======== 通用函数 ========
 check_dependencies() {
     local missing=()
     for bin in jq dig lsof curl wget socat openssl; do
@@ -40,12 +46,7 @@ pause_and_return() {
     clear
 }
 
-banner() {
-    echo -e "${BLUE}"
-    echo "✦ Trojan_Ver.1.6 ✦"
-}
-
-# ======== 3. Trojan-Go 功能相关 ========
+# ======== Trojan安装 ========
 install_trojan_go() {
     check_dependencies
     if [ -f "/root/trojan/trojan-go" ] && [ -f "/root/trojan/config.json" ]; then
@@ -165,12 +166,14 @@ install_trojan_go() {
     read -p "$(echo -e "${BLUE}是否启用 WebSocket(y/n) [默认:y]: ${PLAIN}")" enable_ws
     if [[ -z "$enable_ws" || "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
         ws_enabled=true
+        ws_enabled_json=true
         read -p "$(echo -e "${BLUE}请输入 ws 路径 [默认:/]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-/}
         read -p "$(echo -e "${BLUE}请输入 ws Host（默认:证书域名）: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$domain}
     else
         ws_enabled=false
+        ws_enabled_json=false
         ws_path="/"
         ws_host="$domain"
     fi
@@ -178,46 +181,54 @@ install_trojan_go() {
     read -p "$(echo -e "${BLUE}是否启用 socks5 代理转发(y/n) [默认:n]: ${PLAIN}")" enable_fp
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
+        fp_enabled_json=true
         read -p "$(echo -e "${BLUE}请输入代理地址 [默认:127.0.0.1]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-127.0.0.1}
         read -p "$(echo -e "${BLUE}请输入代理端口 [默认:18443]: ${PLAIN}")" proxy_port
         proxy_port=${proxy_port:-18443}
         read -p "$(echo -e "${BLUE}请输入代理用户名（可留空）: ${PLAIN}")" fp_username
+        fp_username=${fp_username:-""}
         read -p "$(echo -e "${BLUE}请输入代理密码（可留空）: ${PLAIN}")" fp_password
+        fp_password=${fp_password:-""}
     else
         fp_enabled=false
+        fp_enabled_json=false
         proxy_addr="127.0.0.1"
         proxy_port="18443"
         fp_username=""
         fp_password=""
     fi
 
+    local_port_json="$local_port"
+    remote_port_json="$remote_port"
+    proxy_port_json="$proxy_port"
+
     jq -n \
-        --argjson local_port "$local_port" \
+        --argjson local_port "$local_port_json" \
         --arg remote_addr "$remote_addr" \
-        --argjson remote_port "$remote_port" \
+        --argjson remote_port "$remote_port_json" \
         --arg password "$psk" \
-        --arg ws_enabled "$ws_enabled" \
+        --argjson ws_enabled "$ws_enabled_json" \
         --arg ws_path "$ws_path" \
         --arg ws_host "$ws_host" \
         --arg cert_path "$cert_path" \
         --arg key_path "$key_path" \
         --arg domain "$domain" \
-        --arg fp_enabled "$fp_enabled" \
+        --argjson fp_enabled "$fp_enabled_json" \
         --arg proxy_addr "$proxy_addr" \
-        --argjson proxy_port "$proxy_port" \
+        --argjson proxy_port "$proxy_port_json" \
         --arg fp_username "$fp_username" \
         --arg fp_password "$fp_password" \
         '
         {
             "run_type": "server",
             "local_addr": "0.0.0.0",
-            "local_port": ($local_port | tonumber),
+            "local_port": $local_port,
             "remote_addr": $remote_addr,
-            "remote_port": ($remote_port | tonumber),
+            "remote_port": $remote_port,
             "password": [ $password ],
             "websocket": {
-                "enabled": ($ws_enabled == "true"),
+                "enabled": $ws_enabled,
                 "path": $ws_path,
                 "host": $ws_host
             },
@@ -232,9 +243,9 @@ install_trojan_go() {
                 "idle_timeout": 60
             },
             "forward_proxy": {
-                "enabled": ($fp_enabled == "true"),
+                "enabled": $fp_enabled,
                 "proxy_addr": $proxy_addr,
-                "proxy_port": ($proxy_port | tonumber),
+                "proxy_port": $proxy_port,
                 "username": $fp_username,
                 "password": $fp_password
             }
@@ -276,7 +287,7 @@ EOF
         node_ip=$(hostname -I | awk '{print $1}')
     fi
     ws_path_enc=$(echo -n "$ws_path" | sed 's/\//%2F/g')
-    if [[ "$ws_enabled" == "true" ]]; then
+    if [[ "$ws_enabled" == "true" || "$ws_enabled" == "True" || "$ws_enabled" == "1" ]]; then
         node_link="trojan://$password@$node_ip:$local_port?sni=$sni&type=ws&path=$ws_path_enc&host=$ws_host#Trojan"
     else
         node_link="trojan://$password@$node_ip:$local_port?sni=$sni#Trojan"
@@ -411,19 +422,23 @@ modify_trojan_config() {
     if [[ -z "$enable_ws" ]]; then
         if [[ "$old_ws_enabled" == "true" ]]; then
             ws_enabled=true
+            ws_enabled_json=true
         else
             ws_enabled=false
+            ws_enabled_json=false
         fi
     elif [[ "$enable_ws" == "y" || "$enable_ws" == "Y" ]]; then
         ws_enabled=true
+        ws_enabled_json=true
     else
         ws_enabled=false
+        ws_enabled_json=false
     fi
 
     if [[ "$ws_enabled" == true ]]; then
         read -p "$(echo -e "${BLUE}请输入 ws 路径 [默认:$old_ws_path]: ${PLAIN}")" ws_path
         ws_path=${ws_path:-$old_ws_path}
-        # ws_host 默认是当前证书域名
+
         read -p "$(echo -e "${BLUE}请输入 ws Host（默认:证书域名） [默认: $ws_host_default]: ${PLAIN}")" ws_host
         ws_host=${ws_host:-$ws_host_default}
     else
@@ -441,6 +456,7 @@ modify_trojan_config() {
     fi
     if [[ "$enable_fp" == "y" || "$enable_fp" == "Y" ]]; then
         fp_enabled=true
+        fp_enabled_json=true
         read -p "$(echo -e "${BLUE}请输入代理地址 [默认:${old_fp_addr:-127.0.0.1}]: ${PLAIN}")" proxy_addr
         proxy_addr=${proxy_addr:-${old_fp_addr:-127.0.0.1}}
         read -p "$(echo -e "${BLUE}请输入代理端口 [默认:${old_fp_port:-18443}]: ${PLAIN}")" proxy_port
@@ -451,38 +467,43 @@ modify_trojan_config() {
         fp_password=${fp_password:-$old_fp_password}
     else
         fp_enabled=false
+        fp_enabled_json=false
         proxy_addr="127.0.0.1"
         proxy_port="18443"
         fp_username=""
         fp_password=""
     fi
 
+    local_port_json="$local_port"
+    remote_port_json="$remote_port"
+    proxy_port_json="$proxy_port"
+
     jq -n \
-        --argjson local_port "$local_port" \
+        --argjson local_port "$local_port_json" \
         --arg remote_addr "$remote_addr" \
-        --argjson remote_port "$remote_port" \
+        --argjson remote_port "$remote_port_json" \
         --arg password "$psk" \
-        --arg ws_enabled "$ws_enabled" \
+        --argjson ws_enabled "$ws_enabled_json" \
         --arg ws_path "$ws_path" \
         --arg ws_host "$ws_host" \
         --arg cert_path "$cert_path" \
         --arg key_path "$key_path" \
         --arg domain "$domain" \
-        --arg fp_enabled "$fp_enabled" \
+        --argjson fp_enabled "$fp_enabled_json" \
         --arg proxy_addr "$proxy_addr" \
-        --argjson proxy_port "$proxy_port" \
+        --argjson proxy_port "$proxy_port_json" \
         --arg fp_username "$fp_username" \
         --arg fp_password "$fp_password" \
         '
         {
             "run_type": "server",
             "local_addr": "0.0.0.0",
-            "local_port": ($local_port | tonumber),
+            "local_port": $local_port,
             "remote_addr": $remote_addr,
-            "remote_port": ($remote_port | tonumber),
+            "remote_port": $remote_port,
             "password": [ $password ],
             "websocket": {
-                "enabled": ($ws_enabled == "true"),
+                "enabled": $ws_enabled,
                 "path": $ws_path,
                 "host": $ws_host
             },
@@ -497,9 +518,9 @@ modify_trojan_config() {
                 "idle_timeout": 60
             },
             "forward_proxy": {
-                "enabled": ($fp_enabled == "true"),
+                "enabled": $fp_enabled,
                 "proxy_addr": $proxy_addr,
-                "proxy_port": ($proxy_port | tonumber),
+                "proxy_port": $proxy_port,
                 "username": $fp_username,
                 "password": $fp_password
             }
@@ -608,15 +629,15 @@ manage_trojan_go() {
         clear
         echo -e "${BLUE}✦ Trojan_Menu ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}查看配置"
-        echo -e "${GREEN}  2.${PLAIN}修改配置"        
+        echo -e "${GREEN}  2.${PLAIN}修改配置"
         echo -e "${GREEN}  3.${PLAIN}停止服务"
         echo -e "${GREEN}  4.${PLAIN}重启服务"
         echo -e "${GREEN}  5.${PLAIN}删除服务"
-        echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
+        echo -e "${GREEN}  0.${PLAIN}返回主页"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
         case "$choice" in
             1) show_trojan_config ;;
-            2) modify_trojan_config ;;        
+            2) modify_trojan_config ;;
             3) stop_trojan_go ;;
             4) restart_trojan_go ;;
             5) remove_trojan_go; ret=$?; if [[ $ret -eq 123 ]]; then break; fi ;;
@@ -626,7 +647,7 @@ manage_trojan_go() {
     done
 }
 
-# ======== 4. Acme 证书相关 ========
+# ======== Acme证书 ========
 issue_acme_cert() {
     check_dependencies
     clear
@@ -643,11 +664,13 @@ issue_acme_cert() {
 
     $ACME_SH --set-default-ca --server letsencrypt
 
-    if ! $ACME_SH --list-account 2>/dev/null | grep -q letsencrypt; then
+    read -p "$(echo -e "${BLUE}请输入用于注册 acme 的邮箱（回车使用随机邮箱）: ${PLAIN}")" acme_email
+    if [[ -z "$acme_email" ]]; then
         auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
         $ACME_SH --register-account -m "$auto_email"
     else
-        auto_email="$($ACME_SH --list-account 2>/dev/null | grep Registered | grep letsencrypt | awk '{print $4}')"
+        $ACME_SH --register-account -m "$acme_email" 2>/dev/null || true
+        auto_email="$acme_email"
     fi
 
     if [[ -z $(type -P lsof) ]]; then
@@ -671,8 +694,8 @@ issue_acme_cert() {
         if [[ -n "$ufw_status" ]]; then
             port_open=true
         else
-            sudo ufw allow 80/tcp
-            sudo ufw reload
+            ufw allow 80/tcp
+            ufw reload
             port_open=true
             echo -e "${GREEN}已通过 ufw 放行 80 端口${PLAIN}"
         fi
@@ -683,8 +706,8 @@ issue_acme_cert() {
         if [[ -n "$fw_status" ]]; then
             port_open=true
         else
-            sudo firewall-cmd --add-port=80/tcp --permanent
-            sudo firewall-cmd --reload
+            firewall-cmd --add-port=80/tcp --permanent
+            firewall-cmd --reload
             port_open=true
             echo -e "${GREEN}已通过 firewalld 放行 80 端口${PLAIN}"
         fi
@@ -695,11 +718,11 @@ issue_acme_cert() {
         if [[ -n "$iptables_status" ]]; then
             port_open=true
         else
-            sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+            iptables -I INPUT -p tcp --dport 80 -j ACCEPT
             if command -v netfilter-persistent >/dev/null 2>&1; then
-                sudo netfilter-persistent save
+                netfilter-persistent save
             elif command -v service >/dev/null 2>&1; then
-                sudo service iptables save
+                service iptables save
             fi
             port_open=true
             echo -e "${GREEN}已通过 iptables 放行 80 端口${PLAIN}"
@@ -723,7 +746,7 @@ issue_acme_cert() {
     if [[ -z $domainIP ]]; then
         domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$domain" 2>/dev/null | sed -n 1p)
     fi
-    
+
     ip_match=false
     if [[ -n "$ipv4" && "$domainIP" == "$ipv4" ]]; then
         ip_match=true
@@ -789,16 +812,34 @@ uninstall_acme() {
     pause_and_return
 }
 
-# ======== 5. 伪装静态网页相关 ========
+# ======== 证书管理 ========
+cert_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Trojan_Acme ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}申请证书"
+        echo -e "${GREEN}  2.${PLAIN}卸载证书"
+        echo -e "${GREEN}  0.${PLAIN}返回主页"
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" cchoice
+        case "$cchoice" in
+            1) issue_acme_cert ;;
+            2) uninstall_acme ;;
+            0) break ;;
+            *) echo -e "${RED}无效选择,请重新输入${PLAIN}"; pause_and_return ;;
+        esac
+    done
+}
+
+# ======== 伪装网页 ========
 web_menu() {
     while true; do
         clear
         echo -e "${BLUE}✦ Trojan_Nginx ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN} 配置Nginx"
-        echo -e "${GREEN}  2.${PLAIN} 修改Nginx"
-        echo -e "${GREEN}  3.${PLAIN} 重启Nginx"
-        echo -e "${GREEN}  4.${PLAIN} 删除Nginx"
-        echo -e "${GREEN}  0.${PLAIN} 返回Kongroo"
+        echo -e "${GREEN}  1.${PLAIN}配置Nginx"
+        echo -e "${GREEN}  2.${PLAIN}修改Nginx"
+        echo -e "${GREEN}  3.${PLAIN}重启Nginx"
+        echo -e "${GREEN}  4.${PLAIN}删除Nginx"
+        echo -e "${GREEN}  0.${PLAIN}离开Nginx"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
         case "$sub_choice" in
             1) install_fake_web ;;
@@ -821,11 +862,19 @@ install_fake_web() {
     echo -e "${GREEN}开始安装并配置伪装静态网页...${PLAIN}"
     read -p "$(echo -e "${BLUE}请输入 Nginx 监听端口 [默认:80]: ${PLAIN}")" web_port
     web_port=${web_port:-80}
-    sudo mkdir -p /var/www/trojan
-    cd /var/www/trojan
-    sudo wget -O index.html https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/index.html
 
-    sudo bash -c "cat > /etc/nginx/conf.d/trojan.conf" <<EOF
+    mkdir -p /var/www/trojan
+    if ! cd /var/www/trojan; then
+        echo -e "${RED}无法进入 /var/www/trojan 目录${PLAIN}"
+        pause_and_return
+        return
+    fi
+
+    if ! wget -q -O index.html https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/index.html; then
+        echo -e "${YELLOW}下载 index.html 失败，请检查网络或 URL${PLAIN}"
+    fi
+
+    cat > /etc/nginx/conf.d/trojan.conf <<'EOF'
 server {
     listen 127.0.0.1:8080 default_server;
     root /var/www/trojan;
@@ -848,7 +897,7 @@ EOF
     fi
     systemctl enable nginx
     systemctl restart nginx
-    echo -e "${GREEN}伪装网页已部署,Nginx 配置完成并已启动${PLAIN}"
+    echo -e "${GREEN}伪装网页已部署, Nginx 配置完成并已启动${PLAIN}"
     pause_and_return
 }
 
@@ -898,25 +947,23 @@ remove_nginx() {
     pause_and_return
 }
 
-# ======== 6. 主菜单 ========
+# ======== 主菜单 ========
 main_menu() {
     while true; do
         clear
-        banner
-        echo -e "${GREEN}  1.${PLAIN}配置证书"
+        echo -e "${BLUE}✦ Trojan_Ver.1.6 ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}证书管理"
         echo -e "${GREEN}  2.${PLAIN}安装服务"
         echo -e "${GREEN}  3.${PLAIN}管理服务"
-        echo -e "${GREEN}  4.${PLAIN}卸载证书"
-        echo -e "${GREEN}  5.${PLAIN}伪装网页"
-        echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
+        echo -e "${GREEN}  4.${PLAIN}伪装网页"
+        echo -e "${GREEN}  0.${PLAIN}退出脚本"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" choice
 
         case "$choice" in
-            1) issue_acme_cert ;;
+            1) cert_menu ;;
             2) install_trojan_go ;;
             3) manage_trojan_go ;;
-            4) uninstall_acme ;;
-            5) web_menu ;;
+            4) web_menu ;;
             0) exit 0 ;;
             *) echo -e "${RED}错误的命运抉择,请重新寻觅世界线。${PLAIN}"; pause_and_return ;;
         esac
