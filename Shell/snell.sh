@@ -677,7 +677,7 @@ show_sub_menu() {
   echo -e "${GREEN}  2.${PLAIN}停止服务"
   echo -e "${GREEN}  3.${PLAIN}查看配置"
   echo -e "${GREEN}  4.${PLAIN}删除配置"
-  echo -e "${GREEN}  0.${PLAIN}返回上级"
+  echo -e "${GREEN}  0.${PLAIN}返回主页"
 }
 
 show_main_menu() {
@@ -687,7 +687,7 @@ show_main_menu() {
   echo -e "${GREEN}  2.${PLAIN}配置Snell"
   echo -e "${GREEN}  3.${PLAIN}删除Snell"
   echo -e "${GREEN}  4.${PLAIN}更新Snell"
-  echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
+  echo -e "${GREEN}  0.${PLAIN}离开Snell"
 }
 
 main() {
