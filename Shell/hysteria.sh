@@ -176,7 +176,7 @@ cert_menu() {
         echo -e " ${BLUE}✦ Hysteria_Cert ✦${PLAIN}"
         echo -e " ${GREEN}  1.${PLAIN}自签证书"
         echo -e " ${GREEN}  2.${PLAIN}域名证书"
-        echo -e " ${GREEN}  0.${PLAIN}返回Kongroo"
+        echo -e " ${GREEN}  0.${PLAIN}返回主页"
 
         read -p "$(echo -e "${BLUE} ✦ Steins Gate ✦ : ${PLAIN}")" choice
 
@@ -432,7 +432,7 @@ port_jump_menu() {
         echo -e "${GREEN}  2.${PLAIN}修改端口跳跃"
         echo -e "${GREEN}  3.${PLAIN}查看端口跳跃"
         echo -e "${GREEN}  4.${PLAIN}删除端口跳跃"
-        echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
+        echo -e "${GREEN}  0.${PLAIN}返回到主菜单"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
         case "$pjopt" in
             1) port_jump_set ;;
@@ -453,7 +453,7 @@ while true; do
     echo -e "${GREEN}  2.${PLAIN}安装服务"
     echo -e "${GREEN}  3.${PLAIN}管理服务"
     echo -e "${GREEN}  4.${PLAIN}端口跳跃"
-    echo -e "${GREEN}  0.${PLAIN}退出Kongroo"
+    echo -e "${GREEN}  0.${PLAIN}退出脚本"
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
@@ -505,7 +505,7 @@ while true; do
         error_msg=""
             while true; do
             clear
-            echo -e "${BLUE}请输入Hysteria服务配置参数（回车为默认值）:${PLAIN}"
+            echo -e "${BLUE}请输入Hysteria服务配置参数:${PLAIN}"
             if [[ -n "$error_msg" ]]; then
                 echo -e "${RED}${error_msg}${PLAIN}"
             fi
@@ -519,13 +519,13 @@ while true; do
         done
         unset error_msg
 
-            read -p "$(echo -e "${BLUE}请输入认证密码(回车随机生成): ${PLAIN}")" auth_password
+            read -p "$(echo -e "${BLUE}请输入密码(回车随机生成): ${PLAIN}")" auth_password
             if [ -z "$auth_password" ]; then
                 auth_password=$(random_pass)
-                echo -e "${GREEN}已自动生成认证密码: $auth_password${PLAIN}"
+                echo -e "${GREEN}已自动生成密码: $auth_password${PLAIN}"
             fi
 
-            read -p "$(echo -e "${BLUE}请输入伪装URL的域名(默认:www.bing.com): ${PLAIN}")" masquerade_domain
+            read -p "$(echo -e "${BLUE}请输入伪装URL域名(默认:www.bing.com): ${PLAIN}")" masquerade_domain
             masquerade_domain=${masquerade_domain:-www.bing.com}
             masquerade_url="https://${masquerade_domain}"
 
@@ -552,12 +552,12 @@ EOF
             enable_outbounds=${enable_outbounds:-n}
 
             if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                read -p "$(echo -e "${BLUE}请输入socks5地址 (默认:127.0.0.1): ${PLAIN}")" socks5_addr
+                read -p "$(echo -e "${BLUE}请输入Socks地址(默认:127.0.0.1):${PLAIN}")" socks5_addr
                 socks5_addr=${socks5_addr:-127.0.0.1}
-                read -p "$(echo -e "${BLUE}请输入socks5端口 (默认:18443): ${PLAIN}")" socks5_port
+                read -p "$(echo -e "${BLUE}请输入Socks端口(默认:18443):${PLAIN}")" socks5_port
                 socks5_port=${socks5_port:-18443}
-                read -p "$(echo -e "${BLUE}请输入socks5 用户名（可留空）: ${PLAIN}")" socks5_username
-                read -p "$(echo -e "${BLUE}请输入socks5 密码（可留空）: ${PLAIN}")" socks5_password
+                read -p "$(echo -e "${BLUE}请输入Socks5用户名(若无则留空):${PLAIN}")" socks5_username
+                read -p "$(echo -e "${BLUE}请输入Socks5密码(若无则留空):${PLAIN}")" socks5_password
                 OUTBOUNDS_CONFIG=$(cat <<EOF2
 
 outbounds:
@@ -605,7 +605,7 @@ EOF
             sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
             [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
             node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-            echo -e "\n${BLUE}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
+            echo -e "\n${BLUE}Hysteria节点链接:${PLAIN}\n${GREEN}${node_link}${PLAIN}"
 
             pause_and_return
             ;;
@@ -619,7 +619,7 @@ EOF
             PORT_JUMP_SERVICE="/etc/systemd/system/port-jump.service"
 
             if [[ ! -f "$EXEC_PATH" || ! -f "$CONFIG_PATH" ]]; then
-                echo -e "${RED}未检测到配置及执行文件，请先安装并配置!${PLAIN}"
+                echo -e "${RED}未检测到配置及执行文件,请先安装并配置!${PLAIN}"
                 pause_and_return
                 continue
             fi
@@ -633,7 +633,7 @@ EOF
                 echo -e "${GREEN}  4.${PLAIN}修改配置"
                 echo -e "${GREEN}  5.${PLAIN}更新内核"
                 echo -e "${GREEN}  6.${PLAIN}删除服务"
-                echo -e "${GREEN}  0.${PLAIN}返回Kongroo"
+                echo -e "${GREEN}  0.${PLAIN}返回主页"
                 read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" ACTION
 
                 case "$ACTION" in
@@ -666,11 +666,11 @@ EOF
                     4)
                         clear
                         if [ ! -f "$CONFIG_PATH" ]; then
-                            echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
+                            echo -e "${RED}未检测到配置文件:$CONFIG_PATH${PLAIN}"
                             pause_and_return
                             continue
                         fi
-                        echo -e "${BLUE}请输配置参数（回车为保留原值）:${PLAIN}"
+                        echo -e "${BLUE}请输配置参数:${PLAIN}"
 
                         old_listen=$(grep -E '^listen:' "$CONFIG_PATH" | head -n1 | awk '{print $2}' | sed 's/://')
                         old_cert=$(grep -E '^\s*cert:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
@@ -693,22 +693,22 @@ EOF
                     error_msg=""
                     while true; do
                         clear
-                        echo -e "${BLUE}请输配置参数（回车为保留原值）:${PLAIN}"
+                        echo -e "${BLUE}请输配置参数:${PLAIN}"
                         if [[ -n "$error_msg" ]]; then
                             echo -e "${RED}${error_msg}${PLAIN}"
                         fi
-                        read -p "$(echo -e "${BLUE}请输入监听端口 (原值: ${old_listen:-443}): ${PLAIN}")" listen_port
+                        read -p "$(echo -e "${BLUE}请输入监听端口(原值: ${old_listen:-443}): ${PLAIN}")" listen_port
                         listen_port=${listen_port:-$old_listen}
                         listen_port=${listen_port:-443}
                         if [[ "$listen_port" =~ ^[0-9]+$ ]] && ((listen_port >= 1 && listen_port <= 65535)); then
                             break
                         else
-                            error_msg="端口必须为1-65535的数字！"
+                            error_msg="端口必须为1-65535的数字!"
                         fi
                     done
                     unset error_msg
 
-                        echo -e "${BLUE}请选择新的证书及私钥，或选0直接回车保留原值:${PLAIN}"
+                        echo -e "${BLUE}请选择新的证书及私钥:${PLAIN}"
                         select_cert_for_hysteria
                         SELECT_CERT_STATUS=$?
                         if [[ $SELECT_CERT_STATUS -eq 0 ]]; then
@@ -719,13 +719,13 @@ EOF
                             key_path_new="$old_key"
                         fi
 
-                        read -p "$(echo -e "${BLUE}请输入认证密码 (原值: ${old_password}): ${PLAIN}")" auth_password
+                        read -p "$(echo -e "${BLUE}请输入认证密码(原值: ${old_password}): ${PLAIN}")" auth_password
                         if [ -z "$auth_password" ]; then
                             if [ -n "$old_password" ]; then
                                 auth_password="$old_password"
                             else
                                 auth_password=$(random_pass)
-                                echo -e "${GREEN}已自动生成认证密码: $auth_password${PLAIN}"
+                                echo -e "${GREEN}已自动生成认证密码:$auth_password${PLAIN}"
                             fi
                         fi
 
@@ -753,17 +753,17 @@ masquerade:
 EOF
 
                         echo -e "${BLUE}是否添加 SOCKS5 出站配置${PLAIN}"
-                        read -p "$(echo -e "${BLUE}添加y，不添加 n [y/n] (原值:${default_outbounds}): ${PLAIN}")" enable_outbounds
+                        read -p "$(echo -e "${BLUE}添加y,不添加 n [y/n](原值:${default_outbounds}): ${PLAIN}")" enable_outbounds
                         enable_outbounds=${enable_outbounds:-$default_outbounds}
 
                         if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                            read -p "$(echo -e "${BLUE}请输入socks5地址 (原值:${old_socks5_addr:-127.0.0.1}): ${PLAIN}")" socks5_addr
+                            read -p "$(echo -e "${BLUE}请输入Socks地址(原值:${old_socks5_addr:-127.0.0.1}): ${PLAIN}")" socks5_addr
                             socks5_addr=${socks5_addr:-${old_socks5_addr:-127.0.0.1}}
-                            read -p "$(echo -e "${BLUE}请输入socks5端口 (原值:${old_socks5_port:-18443}): ${PLAIN}")" socks5_port
+                            read -p "$(echo -e "${BLUE}请输入Socks端口(原值:${old_socks5_port:-18443}): ${PLAIN}")" socks5_port
                             socks5_port=${socks5_port:-${old_socks5_port:-18443}}
-                            read -p "$(echo -e "${BLUE}请输入socks5 用户名（可留空，原值:${old_socks5_username}）: ${PLAIN}")" socks5_username
+                            read -p "$(echo -e "${BLUE}请输入Socks用户名(原值:${old_socks5_username}): ${PLAIN}")" socks5_username
                             socks5_username=${socks5_username:-$old_socks5_username}
-                            read -p "$(echo -e "${BLUE}请输入socks5 密码（可留空，原值:${old_socks5_password}）: ${PLAIN}")" socks5_password
+                            read -p "$(echo -e "${BLUE}请输入Socks密码(原值:${old_socks5_password}): ${PLAIN}")" socks5_password
                             socks5_password=${socks5_password:-$old_socks5_password}
                             OUTBOUNDS_CONFIG=$(cat <<EOF2
 
