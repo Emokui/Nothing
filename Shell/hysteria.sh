@@ -189,25 +189,155 @@ cert_menu() {
     done
 }
 
-select_cert_for_hysteria() {
-    local allow_exit=$1
-    while true; do
-        echo -e "${BLUE}✦ 请选择证书 ✦ : ${PLAIN}"
-        echo -e "${GREEN}  1.自签证书${PLAIN}"
-        echo -e "${BLUE}  2.域名证书${PLAIN}"
-        echo -e "${YELLOW}  3.输入路径${PLAIN}"
-        echo -e "${RED}  0.退出/默认${PLAIN}"
+# ======== 证书选择相关 ========
 
+list_root_certs() {
+    cert_files=()
+    if compgen -G "/root/cert/*.crt" > /dev/null; then
+        mapfile -t cert_files < <(ls /root/cert/*.crt 2>/dev/null | sort)
+    fi
+}
+
+prompt_choose_cert_from_list() {
+    while true; do
+        list_root_certs
+        clear
+        local cert_count=${#cert_files[@]}
+        if (( cert_count == 0 )); then
+            echo -e "${BLUE}未检测到 /root/cert 下任何证书${PLAIN}"
+            sleep 0.4
+            return 1
+        fi
+
+        echo -e "${BLUE}检测到以下证书: ${PLAIN}"
+        for ((i=0; i<cert_count; i++)); do
+            idx=$((i+1))
+            echo -e "${GREEN}${idx}.${PLAIN} ${GREEN}${cert_files[$i]}${PLAIN}"
+        done
+        read -p "$(echo -e "${BLUE}请输入编号(1-${cert_count} 输入0返回): ${PLAIN}")" crt_idx
+
+        if [[ "$crt_idx" == "0" ]]; then
+            return 2
+        fi
+
+        if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
+            crtfile="${cert_files[$((crt_idx-1))]}"
+            domain_base=$(basename "$crtfile" .crt)
+            keyfile="/root/cert/${domain_base}.key"
+            if [[ -f "$keyfile" ]]; then
+                cert_path="$crtfile"
+                key_path="$keyfile"
+                return 0
+            else
+                echo -e "${RED}未找到对应私钥:$keyfile,请重新选择或输入0返回${PLAIN}"
+                sleep 0.4
+                continue
+            fi
+        else
+            echo -e "${RED}请输入有效编号${PLAIN}"
+            sleep 0.4
+            continue
+        fi
+    done
+}
+
+prompt_custom_paths() {
+    while true; do
+        clear
+        read -p "$(echo -e "${BLUE}请输入证书路径(输入0返回): ${PLAIN}")" cert_path_input
+        if [[ "$cert_path_input" == "0" ]]; then
+            return 2
+        fi
+        read -p "$(echo -e "${BLUE}请输入私钥路径: ${PLAIN}")" key_path_input
+        if [[ "$key_path_input" == "0" ]]; then
+            return 2
+        fi
+
+        cert_path="$cert_path_input"
+        key_path="$key_path_input"
+
+        if [[ -f "$cert_path" && -f "$key_path" ]]; then
+            return 0
+        else
+            echo -e "${RED}自定义证书或私钥路径无效!请重新输入或输入0返回${PLAIN}"
+            sleep 0.4
+            continue
+        fi
+    done
+}
+
+select_cert_for_hysteria_install() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Choice_Cert ✦ : ${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}自签证书"
+        echo -e "${GREEN}  2.${PLAIN}域名证书"
+        echo -e "${GREEN}  3.${PLAIN}输入路径"
+        echo -e "${GREEN}  0.${PLAIN}退出返回"
+        read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
+
+        case "$cert_option" in
+            1)
+                if [[ -f /etc/cert/server.crt && -f /etc/cert/server.key ]]; then
+                    cert_path="/etc/cert/server.crt"
+                    key_path="/etc/cert/server.key"
+                    return 0
+                else
+                    echo -e "${RED}未检测到 /etc/cert 下任何证书${PLAIN}"
+                    sleep 0.4
+                    continue
+                fi
+                ;;
+            2)
+                prompt_choose_cert_from_list
+                rc=$?
+                if [[ $rc -eq 0 ]]; then
+                    return 0
+                elif [[ $rc -eq 2 ]]; then
+                    continue
+                else
+                    continue
+                fi
+                ;;
+            3)
+                prompt_custom_paths
+                rc=$?
+                if [[ $rc -eq 0 ]]; then
+                    return 0
+                elif [[ $rc -eq 2 ]]; then
+                    continue
+                else
+                    continue
+                fi
+                ;;
+            0)
+                return 1
+                ;;
+            *)
+                echo -e "${RED}无效输入${PLAIN}"
+                sleep 0.4
+                continue
+                ;;
+        esac
+    done
+}
+
+select_cert_for_hysteria_modify() {
+    local old_cert="$1"
+    local old_key="$2"
+
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Choice_Cert ✦ : ${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}自签证书"
+        echo -e "${GREEN}  2.${PLAIN}域名证书"
+        echo -e "${GREEN}  3.${PLAIN}输入路径"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
         if [[ -z "$cert_option" ]]; then
-            if [[ "$allow_exit" == "0" ]]; then
-                echo -e "${RED}无效输入,请重新选择!${PLAIN}"
-                read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
-                continue
-            else
-                return 1
-            fi
+            cert_path="$old_cert"
+            key_path="$old_key"
+            return 0
         fi
 
         case "$cert_option" in
@@ -217,69 +347,41 @@ select_cert_for_hysteria() {
                     key_path="/etc/cert/server.key"
                     return 0
                 else
-                    echo -e "${RED}未检测到 /etc/cert 下任何自签证书${PLAIN}"
-                    read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
+                    echo -e "${RED}未检测到 /etc/cert 下任何证书${PLAIN}"
+                    sleep 0.4
                     continue
                 fi
                 ;;
             2)
-                if ! compgen -G "/root/cert/*.crt" > /dev/null; then
-                    echo -e "${BLUE}未检测到 /root/cert 下任何域名证书${PLAIN}"
-                    pause_and_return
-                    return 1
+                prompt_choose_cert_from_list
+                rc=$?
+                if [[ $rc -eq 0 ]]; then
+                    return 0
+                else
+                    continue
                 fi
-                echo -e "${BLUE}检测到以下域名证书: ${PLAIN}"
-
-                cert_files=($(ls /root/cert/*.crt 2>/dev/null | sort))
-                cert_count=${#cert_files[@]}
-
-                for ((i=0; i<cert_count; i++)); do
-                    idx=$((i+1))
-                    echo -e "${GREEN}${idx}.${PLAIN} ${GREEN}${cert_files[$i]}${PLAIN}"
-                done
-
-                while true; do
-                    read -p "$(echo -e "${BLUE}请输入证书编号(1-${cert_count}): ${PLAIN}")" crt_idx
-                    if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
-                        crtfile="${cert_files[$((crt_idx-1))]}"
-                        domain_base=$(basename "$crtfile" .crt)
-                        keyfile="/root/cert/${domain_base}.key"
-                        if [[ -f "$keyfile" ]]; then
-                            cert_path="$crtfile"
-                            key_path="$keyfile"
-                            return 0
-                        else
-                            echo -e "${RED}未找到对应私钥: $keyfile,请重新选择${PLAIN}"
-                            read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
-                        fi
-                    else
-                        echo -e "${RED}请输入有效编号${PLAIN}"
-                        read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
-                    fi
-                done
                 ;;
             3)
-                read -p "$(echo -e "${BLUE}请输入证书路径: ${PLAIN}")" cert_path
-                read -p "$(echo -e "${BLUE}请输入私钥路径: ${PLAIN}")" key_path
-                if [[ ! -f "$cert_path" || ! -f "$key_path" ]]; then
-                    echo -e "${RED}自定义证书或私钥路径无效!${PLAIN}"
-                    pause_and_return
-                    return 1
+                prompt_custom_paths
+                rc=$?
+                if [[ $rc -eq 0 ]]; then
+                    return 0
+                elif [[ $rc -eq 2 ]]; then
+                    continue
+                else
+                    continue
                 fi
-                return 0
-                ;;
-            0)
-                return 1
                 ;;
             *)
-                echo -e "${RED}无效输入,请重新选择!${PLAIN}"
-                read -p "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
+                echo -e "${RED}无效输入${PLAIN}"
+                sleep 0.4
+                continue
                 ;;
         esac
     done
 }
 
-# ======== 4. Hysteria 相关函数 ========
+# ======== 4. Hysteria Confing ========
 show_hysteria_config() {
     clear
     HY2_DIR="/root/hysteria"
@@ -298,9 +400,9 @@ show_hysteria_config() {
         local_ip=$(get_local_ip)
         listen_port=${listen_port:-443}
         node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
-        echo -e "\n${BLUE}Hysteria 节点链接：${PLAIN}\n${GREEN}${node_link}${PLAIN}"
+        echo -e "${BLUE}Hysteria 节点链接:${PLAIN}\n${GREEN}${node_link}${PLAIN}"
     else
-        echo -e "${RED}未检测到配置文件: $CONFIG_PATH${PLAIN}"
+        echo -e "${RED}未检测到配置文件:$CONFIG_PATH${PLAIN}"
     fi
     pause_and_return
 }
@@ -427,12 +529,12 @@ port_jump_delete() {
 port_jump_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Port jump ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}设置端口跳跃"
-        echo -e "${GREEN}  2.${PLAIN}修改端口跳跃"
-        echo -e "${GREEN}  3.${PLAIN}查看端口跳跃"
-        echo -e "${GREEN}  4.${PLAIN}删除端口跳跃"
-        echo -e "${GREEN}  0.${PLAIN}返回到主菜单"
+        echo -e "${BLUE}✦ Port_Jump ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}设置跳跃"
+        echo -e "${GREEN}  2.${PLAIN}修改跳跃"
+        echo -e "${GREEN}  3.${PLAIN}查看跳跃"
+        echo -e "${GREEN}  4.${PLAIN}删除跳跃"
+        echo -e "${GREEN}  0.${PLAIN}返回主页"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
         case "$pjopt" in
             1) port_jump_set ;;
@@ -448,8 +550,8 @@ port_jump_menu() {
 # ======== 6. 主菜单循环 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Hysteria_v1.5 ✦${PLAIN}"
-    echo -e "${GREEN}  1.${PLAIN}配置证书"
+    echo -e "${BLUE}✦ Hysteria_Ver.1.6 ✦${PLAIN}"
+    echo -e "${GREEN}  1.${PLAIN}证书配置"
     echo -e "${GREEN}  2.${PLAIN}安装服务"
     echo -e "${GREEN}  3.${PLAIN}管理服务"
     echo -e "${GREEN}  4.${PLAIN}端口跳跃"
@@ -469,8 +571,7 @@ while true; do
             CONFIG_PATH="${HY2_DIR}/config.yaml"
 
             if [[ -f "$EXEC_PATH" && -f "$CONFIG_PATH" ]]; then
-                echo -e "${YELLOW}检测到已安装且存在配置文件,无需重复安装${PLAIN}"
-                echo -e "${BLUE}如需修改配置,请选择主菜单的【3.管理 Hysteria】${PLAIN}"
+                echo -e "${YELLOW}检测到已安装且存在配置${PLAIN}"
                 pause_and_return
                 continue
             fi
@@ -496,9 +597,9 @@ while true; do
             echo -e "${GREEN}Hysteria 内核已成功下载并赋予执行权限${PLAIN}"
 
             clear
-            select_cert_for_hysteria 0
-            CERT_RTN=$?
-            if [[ $CERT_RTN -ne 0 ]]; then
+            if ! select_cert_for_hysteria_install; then
+                echo -e "${YELLOW}证书未选择,安装中止${PLAIN}"
+                pause_and_return
                 continue
             fi
 
@@ -552,12 +653,12 @@ EOF
             enable_outbounds=${enable_outbounds:-n}
 
             if [[ "$enable_outbounds" == "y" || "$enable_outbounds" == "Y" ]]; then
-                read -p "$(echo -e "${BLUE}请输入Socks地址(默认:127.0.0.1):${PLAIN}")" socks5_addr
+                read -p "$(echo -e "${BLUE}请输入Socks地址(默认:127.0.0.1): ${PLAIN}")" socks5_addr
                 socks5_addr=${socks5_addr:-127.0.0.1}
-                read -p "$(echo -e "${BLUE}请输入Socks端口(默认:18443):${PLAIN}")" socks5_port
+                read -p "$(echo -e "${BLUE}请输入Socks端口(默认:18443): ${PLAIN}")" socks5_port
                 socks5_port=${socks5_port:-18443}
-                read -p "$(echo -e "${BLUE}请输入Socks5用户名(若无则留空):${PLAIN}")" socks5_username
-                read -p "$(echo -e "${BLUE}请输入Socks5密码(若无则留空):${PLAIN}")" socks5_password
+                read -p "$(echo -e "${BLUE}请输入Socks5用户名(若无则留空): ${PLAIN}")" socks5_username
+                read -p "$(echo -e "${BLUE}请输入Socks5密码(若无则留空): ${PLAIN}")" socks5_password
                 OUTBOUNDS_CONFIG=$(cat <<EOF2
 
 outbounds:
@@ -650,7 +751,6 @@ EOF
                          echo -e "${BLUE}正在停止 Hysteria 服务...${PLAIN}"
                          sudo systemctl stop $SERVICE_NAME
                          echo -e "${GREEN}已停止${PLAIN}"
-                         echo
                          sudo systemctl status --no-pager $SERVICE_NAME
                          pause_and_return
                          ;;
@@ -659,7 +759,6 @@ EOF
                         echo -e "${BLUE}正在重启 Hysteria 服务...${PLAIN}"
                         sudo systemctl restart $SERVICE_NAME
                         echo -e "${GREEN}已重启${PLAIN}"
-                        echo
                         sudo systemctl status --no-pager $SERVICE_NAME
                         pause_and_return
                         ;;
@@ -670,7 +769,6 @@ EOF
                             pause_and_return
                             continue
                         fi
-                        echo -e "${BLUE}请输配置参数:${PLAIN}"
 
                         old_listen=$(grep -E '^listen:' "$CONFIG_PATH" | head -n1 | awk '{print $2}' | sed 's/://')
                         old_cert=$(grep -E '^\s*cert:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
@@ -693,7 +791,7 @@ EOF
                     error_msg=""
                     while true; do
                         clear
-                        echo -e "${BLUE}请输配置参数:${PLAIN}"
+                        echo -e "${BLUE}请输配置参数(回车不变):${PLAIN}"
                         if [[ -n "$error_msg" ]]; then
                             echo -e "${RED}${error_msg}${PLAIN}"
                         fi
@@ -709,9 +807,7 @@ EOF
                     unset error_msg
 
                         echo -e "${BLUE}请选择新的证书及私钥:${PLAIN}"
-                        select_cert_for_hysteria
-                        SELECT_CERT_STATUS=$?
-                        if [[ $SELECT_CERT_STATUS -eq 0 ]]; then
+                        if select_cert_for_hysteria_modify "$old_cert" "$old_key"; then
                             cert_path_new="$cert_path"
                             key_path_new="$key_path"
                         else
