@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# ======== 1. 全局变量 ========
+# ======== 1.全局变量 ========
 RED="\033[1;31m"
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
 BLUE="\033[1;34m"
 PLAIN="\033[0m"
 
-# ======== 2. 通用函数 ========
+# ======== 2.通用函数 ========
 pause_and_return() {
     read -p "$(echo -e "${BLUE}按回车返回上一层...${PLAIN}")" temp
     clear
@@ -51,7 +51,7 @@ get_latest_download_url() {
     curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4
 }
 
-# ======== 3. 证书相关函数 ========
+# ======== 3.申请证书 ========
 generate_self_signed_cert() {
     DEFAULT_DOMAIN="bing.com"
     DEFAULT_CERT_PATH="/etc/cert"
@@ -189,7 +189,7 @@ cert_menu() {
     done
 }
 
-# ======== 证书选择相关 ========
+# ======== 4.证书选择 ========
 
 list_root_certs() {
     cert_files=()
@@ -381,7 +381,7 @@ select_cert_for_hysteria_modify() {
     done
 }
 
-# ======== 4. Hysteria Confing ========
+# ======== 5.显示配置 ========
 show_hysteria_config() {
     clear
     HY2_DIR="/root/hysteria"
@@ -407,7 +407,7 @@ show_hysteria_config() {
     pause_and_return
 }
 
-# ======== 5. 端口跳跃相关函数 ========
+# ======== 6.端口跳跃 ========
 port_jump_set() {
     clear
     echo -e "${BLUE}检查 iptables 是否已安装...${PLAIN}"
@@ -547,7 +547,7 @@ port_jump_menu() {
     done
 }
 
-# ======== 6. 主菜单循环 ========
+# ======== 7.主菜单 ========
 while true; do
     clear
     echo -e "${BLUE}✦ Hysteria_Ver.1.6 ✦${PLAIN}"
