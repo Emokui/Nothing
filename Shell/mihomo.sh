@@ -234,9 +234,6 @@ dns:
   nameserver:
     - 8.8.8.8
     - 1.1.1.1
-  fallback:
-    - 8.8.4.4
-    - 1.0.0.1
   enhanced-mode: redir-host
 proxies:
   - name: "warp"
@@ -265,8 +262,8 @@ rule-providers:
     url: https://raw.githubusercontent.com/Emokui/Nothing/Zero/Rule/YouTube
     interval: 86400
 rules:
-  - RULE-SET,YouTube,warp,no-resolve
-  - RULE-SET,OpenAI,warp,no-resolve
+  - RULE-SET,YouTube,warp
+  - RULE-SET,OpenAI,warp
   - MATCH,DIRECT
 EOF
     check_status "创建配置文件"
