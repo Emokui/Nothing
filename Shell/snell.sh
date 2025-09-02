@@ -11,7 +11,6 @@ SNELL_CONFIGS="${SNELL_DIR}/configs"
 SNELL_BIN="${SNELL_DIR}/snell-server"
 SNELL_VERSION_FILE="${SNELL_DIR}/version"
 TFO_SYSCTL_CONF="/etc/sysctl.d/local.conf"
-SNELL_V6_LIST_URL="https://emokui.qzz.io/raw/snell-v6.list"
 
 pause_and_clear() {
   read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
@@ -30,10 +29,6 @@ tfo_enabled() {
   [[ "$(cat /proc/sys/net/ipv4/tcp_fastopen 2>/dev/null)" == "3" ]] && grep -q "net.ipv4.tcp_fastopen = 3" "$TFO_SYSCTL_CONF" 2>/dev/null
 }
 
-has_ipv4() {
-  ip -4 addr show scope global | grep -q inet
-}
-
 get_latest_snell_version() {
     uname_arch=$(uname -m)
     if [[ "$uname_arch" == "i686" ]] || [[ "$uname_arch" == "i386" ]]; then
@@ -46,15 +41,12 @@ get_latest_snell_version() {
         arch="amd64"
     fi
 
-    if has_ipv4; then
-        page=$(curl -s "https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell")
-        all_links=$(echo "$page" | grep -oE "https://dl.nssurge.com/snell/snell-server-v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*-linux-${arch}\.zip")
-        latest_stable=$(echo "$all_links" | grep -vE 'b[0-9]+|beta' | sort -V | tail -n 1)
-        latest_beta=$(echo "$all_links" | grep -E 'b[0-9]+|beta' | sort -V | tail -n 1)
-    else
-        latest_stable=$(curl -s "$SNELL_V6_LIST_URL" | grep "linux-${arch}\.zip" | head -n 1)
-        latest_beta=""
-    fi
+    page=$(curl -s "https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell")
+
+    all_links=$(echo "$page" | grep -oE "https://dl.nssurge.com/snell/snell-server-v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*-linux-${arch}\.zip")
+
+    latest_stable=$(echo "$all_links" | grep -vE 'b[0-9]+|beta' | sort -V | tail -n 1)
+    latest_beta=$(echo "$all_links" | grep -E 'b[0-9]+|beta' | sort -V | tail -n 1)
 
     if [[ -n "$latest_stable" ]]; then
         SNELL_VERSION=$(echo "$latest_stable" | sed -E "s/.*snell-server-(v[0-9]+\.[0-9]+\.[0-9]+)-linux-${arch}\.zip/\1/")
