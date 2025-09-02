@@ -410,24 +410,29 @@ show_hysteria_config() {
 # ======== 6.端口跳跃 ========
 port_jump_set() {
     clear
-    echo -e "${BLUE}检查 iptables 是否已安装...${PLAIN}"
-    if ! command -v iptables &> /dev/null; then
-        echo -e "${YELLOW}未检测到 iptables,正在安装中...${PLAIN}"
-        if [ -f /etc/debian_version ]; then
-            sudo apt-get update
-            sudo apt-get install -y iptables
-        elif [ -f /etc/redhat-release ]; then
-            sudo yum install -y iptables
-        else
-            echo -e "${RED}无法识别的系统,请手动安装 iptables！中止任务!${PLAIN}"
-            return 1
+    echo -e "${BLUE}检查 iptables/ip6tables 是否已安装...${PLAIN}"
+    for bin in iptables ip6tables; do
+        if ! command -v $bin &> /dev/null; then
+            echo -e "${YELLOW}未检测到 $bin, 正在安装中...${PLAIN}"
+            if [ -f /etc/debian_version ]; then
+                sudo apt-get update
+                sudo apt-get install -y $bin
+            elif [ -f /etc/redhat-release ]; then
+                sudo yum install -y $bin
+            else
+                echo -e "${RED}无法识别的系统,请手动安装 $bin！中止任务!${PLAIN}"
+                return 1
+            fi
         fi
-    fi
+    done
 
-    EXIST_RULE=$(sudo iptables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports')
-    if [[ -n "$EXIST_RULE" ]]; then
+    EXIST_RULE_V4=$(sudo iptables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports')
+    EXIST_RULE_V6=$(sudo ip6tables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports')
+
+    if [[ -n "$EXIST_RULE_V4" ]] || [[ -n "$EXIST_RULE_V6" ]]; then
         echo -e "${GREEN}已检测到存在端口跳跃配置:${PLAIN}"
-        echo -e "${YELLOW}$EXIST_RULE${PLAIN}"
+        [[ -n "$EXIST_RULE_V4" ]] && echo -e "${YELLOW}IPv4: $EXIST_RULE_V4${PLAIN}"
+        [[ -n "$EXIST_RULE_V6" ]] && echo -e "${YELLOW}IPv6: $EXIST_RULE_V6${PLAIN}"
         echo -e "${BLUE}如需修改,请选择【2.修改端口跳跃】${PLAIN}"
         pause_and_return
         return
@@ -439,7 +444,7 @@ port_jump_set() {
         return 1
     fi
     echo -e "${YELLOW}检测到的网卡名称为: ${YELLOW}$interface${PLAIN}"
-    read -p "$(echo -e "${YELLOW}如果需要更改网卡名称,请手动输入,默认为 $interface: ${PLAIN}")" user_interface
+    read -p "$(echo -e "${YELLOW}如需更改网卡名称,请手动输入,默认为 $interface: ${PLAIN}")" user_interface
     user_interface=${user_interface:-$interface}
 
     read -p "$(echo -e "${YELLOW}请输入端口范围(默认18443:28444): ${PLAIN}")" port_range
@@ -461,21 +466,26 @@ port_jump_set() {
     read -p "$(echo -e "${YELLOW}请输入HY端口(默认:${default_port}): ${PLAIN}")" target_port
     target_port=${target_port:-$default_port}
 
-    echo -e "${BLUE}正在设置端口跳跃规则...${PLAIN}"
+    echo -e "${BLUE}正在设置 IPv4 端口跳跃规则...${PLAIN}"
     sudo iptables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"
 
-    echo -e "${BLUE}以下是当前的 iptables 规则:${PLAIN}"
+    echo -e "${BLUE}正在设置 IPv6 端口跳跃规则...${PLAIN}"
+    sudo ip6tables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"
+
+    echo -e "${BLUE}当前 iptables 规则:${PLAIN}"
     sudo iptables -t nat -L -n
+    echo -e "${BLUE}当前 ip6tables 规则:${PLAIN}"
+    sudo ip6tables -t nat -L -n
 
     echo -e "${BLUE}创建 systemd 自启服务: port-jump.service${PLAIN}"
     cat > /etc/systemd/system/port-jump.service << EOF
 [Unit]
-Description=UDP Port Jumping NAT Rule
+Description=UDP Port Jumping NAT Rule (IPv4/IPv6)
 After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/sbin/iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port
+ExecStart=/bin/bash -c '/sbin/iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port; /sbin/ip6tables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port'
 RemainAfterExit=yes
 
 [Install]
@@ -486,7 +496,7 @@ EOF
     sudo systemctl enable port-jump.service
     sudo systemctl start port-jump.service
 
-    echo -e "${GREEN}端口跳跃规则已启用并设置为开机自动启动${PLAIN}"
+    echo -e "${GREEN}IPv4/IPv6 端口跳跃规则已启用并设置为开机自动启动${PLAIN}"
     pause_and_return
 }
 
@@ -497,14 +507,17 @@ port_jump_modify() {
     sudo systemctl disable port-jump.service 2>/dev/null
     sudo rm -f /etc/systemd/system/port-jump.service
     sudo iptables -t nat -F PREROUTING
+    sudo ip6tables -t nat -F PREROUTING
     sudo systemctl daemon-reload
     port_jump_set
 }
 
 port_jump_view() {
     clear
-    echo -e "${BLUE}当前 iptables 端口跳跃规则: ${PLAIN}"
+    echo -e "${BLUE}当前 iptables (IPv4) 端口跳跃规则: ${PLAIN}"
     sudo iptables -t nat -L -n --line-numbers | grep REDIRECT
+    echo -e "${BLUE}当前 ip6tables (IPv6) 端口跳跃规则: ${PLAIN}"
+    sudo ip6tables -t nat -L -n --line-numbers | grep REDIRECT
     echo -e "${BLUE}当前 systemd port-jump.service 配置: ${PLAIN}"
     if [ -f /etc/systemd/system/port-jump.service ]; then
         cat /etc/systemd/system/port-jump.service
@@ -521,8 +534,9 @@ port_jump_delete() {
     sudo systemctl disable port-jump.service 2>/dev/null
     sudo rm -f /etc/systemd/system/port-jump.service
     sudo iptables -t nat -F PREROUTING
+    sudo ip6tables -t nat -F PREROUTING
     sudo systemctl daemon-reload
-    echo -e "${GREEN}端口跳跃规则已删除${PLAIN}"
+    echo -e "${GREEN}IPv4/IPv6 端口跳跃规则已删除${PLAIN}"
     pause_and_return
 }
 
