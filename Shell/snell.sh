@@ -29,6 +29,10 @@ tfo_enabled() {
   [[ "$(cat /proc/sys/net/ipv4/tcp_fastopen 2>/dev/null)" == "3" ]] && grep -q "net.ipv4.tcp_fastopen = 3" "$TFO_SYSCTL_CONF" 2>/dev/null
 }
 
+has_ipv4() {
+  ip -4 addr show scope global | grep -q inet
+}
+
 get_latest_snell_version() {
     uname_arch=$(uname -m)
     if [[ "$uname_arch" == "i686" ]] || [[ "$uname_arch" == "i386" ]]; then
@@ -47,6 +51,11 @@ get_latest_snell_version() {
 
     latest_stable=$(echo "$all_links" | grep -vE 'b[0-9]+|beta' | sort -V | tail -n 1)
     latest_beta=$(echo "$all_links" | grep -E 'b[0-9]+|beta' | sort -V | tail -n 1)
+
+    if ! has_ipv4; then
+      latest_stable=$(echo "$latest_stable" | sed 's|dl.nssurge.com|snell-cdn.pages.dev|')
+      latest_beta=$(echo "$latest_beta" | sed 's|dl.nssurge.com|snell-cdn.pages.dev|')
+    fi
 
     if [[ -n "$latest_stable" ]]; then
         SNELL_VERSION=$(echo "$latest_stable" | sed -E "s/.*snell-server-(v[0-9]+\.[0-9]+\.[0-9]+)-linux-${arch}\.zip/\1/")
