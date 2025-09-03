@@ -6,6 +6,19 @@ GREEN="\033[32m\033[01m"
 YELLOW="\033[33m\033[01m"
 PLAIN='\033[0m'
 
+# ====== 检测 IPv4 函数 ======
+has_ipv4() {
+  ip -4 addr show scope global | grep -q inet
+}
+
+get_acme_download_url() {
+  local url="https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"
+  if ! has_ipv4; then
+    url="${url/github.com/acme-cdn.pages.dev}"
+  fi
+  echo "$url"
+}
+
 # ====== 系统适配 ======
 REGEX=("debian" "ubuntu" "centos|red hat|kernel|oracle linux|alma|rocky" "'amazon linux'" "fedora")
 RELEASE=("Debian" "Ubuntu" "CentOS" "CentOS" "Fedora")
@@ -77,18 +90,26 @@ inst_acme() {
         echo -e "${YELLOW}已取消设置邮箱，使用自动生成的 gmail 邮箱: $email${PLAIN}"
     fi
 
-    curl https://get.acme.sh | sh -s email=$email
-    source ~/.bashrc
-    bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
-
-    switch_provider
-
-    if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
-        echo -e "${GREEN}Acme.sh 证书一键申请脚本安装成功!${PLAIN}"
+    ACME_TAR_URL=$(get_acme_download_url)
+    wget --no-check-certificate -O master.tar.gz "$ACME_TAR_URL"
+    if [[ $? -eq 0 ]]; then
+        tar zxvf master.tar.gz
+        cd acme.sh-master || exit 1
+        ./acme.sh --install --accountemail "$email"
+        cd ..
+        rm -rf acme.sh-master master.tar.gz
+        source ~/.bashrc
+        bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+        switch_provider
+        if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
+            echo -e "${GREEN}Acme.sh 证书一键申请脚本安装成功!${PLAIN}"
+        else
+            echo -e "${RED}抱歉，Acme.sh 证书一键申请脚本安装失败${PLAIN}"
+            echo -e "${GREEN}建议如下：${PLAIN}"
+            echo -e "${YELLOW}检查 VPS 的网络环境${PLAIN}"
+        fi
     else
-        echo -e "${RED}抱歉，Acme.sh 证书一键申请脚本安装失败${PLAIN}"
-        echo -e "${GREEN}建议如下：${PLAIN}"
-        echo -e "${YELLOW}检查 VPS 的网络环境${PLAIN}"
+        echo -e "${RED}Acme.sh 下载失败，请检查网络或稍后重试${PLAIN}"
     fi
     back2menu
 }
