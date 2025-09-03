@@ -1,7 +1,7 @@
 ## 𝐔𝐬𝐞  ##
 
 ```
-bash <(curl -sL https://snell.vercel.app/sh)
+bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/ssh.sh)
 ```
 ![SSH](./icon/Mine/ssh.png)
 
