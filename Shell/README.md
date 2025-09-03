@@ -1,19 +1,8 @@
-### trojan-go ###
-
-
-**脚本下载的执行文件来自此仓库,是原仓库的一个分支,升级了utls,版本为v1.2.0**
-
-
-https://github.com/gfw-report/trojan-go
-
-
-
 ### sudo and curl ###
 
 ```
 apt update && apt install sudo && sudo apt update && sudo apt install curl
 ```
-
 
 ### serv00 Clear ###
 ```
