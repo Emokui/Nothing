@@ -37,10 +37,20 @@ random_pass() {
     head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 10
 }
 
+has_ipv4() {
+  ip -4 addr show scope global | grep -q inet
+}
+
 get_latest_download_url() {
     local arch="$1"
-    local api_url="https://api.github.com/repos/apernet/hysteria/releases/latest"
-    local asset_name
+    local api_url asset_name download_url
+
+    if has_ipv4; then
+        api_url="https://api.github.com/repos/apernet/hysteria/releases/latest"
+    else
+        api_url="https://hysteria-cdn.pages.dev/repos/apernet/hysteria/releases/latest"
+    fi
+
     case "$arch" in
         amd64) asset_name="hysteria-linux-amd64" ;;
         arm64) asset_name="hysteria-linux-arm64" ;;
@@ -48,7 +58,14 @@ get_latest_download_url() {
         386)   asset_name="hysteria-linux-386" ;;
         *) asset_name="hysteria-linux-$arch" ;;
     esac
-    curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4
+
+    download_url=$(curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4)
+
+    if ! has_ipv4 && [ -n "$download_url" ]; then
+        download_url=$(echo "$download_url" | sed 's#https://github.com/#https://hysteria-cdn2.pages.dev/#')
+    fi
+
+    echo "$download_url"
 }
 
 # ======== 3.申请证书 ========
