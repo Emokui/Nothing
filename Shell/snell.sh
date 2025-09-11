@@ -22,7 +22,9 @@ snell_installed() {
 }
 
 snell_config_exists() {
-  [[ -d "$SNELL_CONFIGS" ]] && [[ $(ls -A "$SNELL_CONFIGS"/*.conf 2>/dev/null) ]]
+  shopt -s nullglob
+  local files=("$SNELL_CONFIGS"/*.conf)
+  [[ -d "$SNELL_CONFIGS" && ${#files[@]} -gt 0 ]]
 }
 
 tfo_enabled() {
@@ -180,17 +182,14 @@ install_unzip_if_missing() {
 }
 
 auto_enable_tcp_fastopen() {
-  if tfo_enabled; then
-    return
-  fi
-
-  sysctl_conf="$TFO_SYSCTL_CONF"
+  local sysctl_conf="$TFO_SYSCTL_CONF"
 
   if [ -w /proc/sys/net/ipv4/tcp_fastopen ]; then
     echo 3 > /proc/sys/net/ipv4/tcp_fastopen
   fi
 
-  [[ ! -e $sysctl_conf ]] && cat >"$sysctl_conf" <<EOF
+  if [[ ! -f "$sysctl_conf" ]]; then
+    cat >"$sysctl_conf" <<EOF
 net.core.netdev_max_backlog = 4096
 net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 4096
@@ -208,7 +207,8 @@ net.core.optmem_max = 4194304
 net.ipv4.udp_rmem_min = 8192
 net.ipv4.udp_wmem_min = 8192
 EOF
-  sysctl --system >/dev/null 2>&1
+    sysctl --system >/dev/null 2>&1
+  fi
 }
 
 install_snell() {
@@ -501,7 +501,7 @@ Description=Snell Instance (${config_name})
 After=network.target
 
 [Service]
-ExecStart=$config_bin -c $config_file
+ExecStart="$config_bin" -c "$config_file"
 Restart=always
 User=root
 
