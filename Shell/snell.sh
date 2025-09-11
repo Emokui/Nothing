@@ -90,6 +90,72 @@ get_latest_snell_beta_version() {
     SNELL_ARCH="$SNELL_BETA_ARCH"
 }
 
+rollback_snell_v4() {
+  clear
+  SNELL_VERSION_TARGET="v4.1.1"
+  if [[ -f "$SNELL_VERSION_FILE" ]]; then
+      current_ver=$(cat "$SNELL_VERSION_FILE")
+      if [[ "$current_ver" == "$SNELL_VERSION_TARGET" ]] && [[ -f "$SNELL_BIN" ]]; then
+          echo -e "${GREEN}Snell 当前已是 v4.1.1 版本 ${PLAIN}"
+          pause_and_clear
+          return 0
+      fi
+  fi
+
+  uname_arch=$(uname -m)
+  if [[ "$uname_arch" == "i686" ]] || [[ "$uname_arch" == "i386" ]]; then
+      arch="i386"
+  elif [[ "$uname_arch" == *"armv7"* ]] || [[ "$uname_arch" == "armv6l" ]]; then
+      arch="armv7l"
+  elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]]; then
+      arch="aarch64"
+  else
+      arch="amd64"
+  fi
+
+  SNELL_ZIP="snell-server-v4.1.1-linux-${arch}.zip"
+  SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-${arch}.zip"
+  if ! has_ipv4; then
+    SNELL_URL="https://snell-cdn.pages.dev/snell-server-v4.1.1-linux-${arch}.zip"
+  fi
+
+  mkdir -p "$SNELL_ETC"
+  cd /tmp
+  echo -e "${YELLOW}下载 Snell v4.1.1（${arch}）...${PLAIN}"
+  wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
+  if [[ ! -e "$SNELL_ZIP" ]]; then
+      echo -e "${RED}Snell v4.1.1 下载失败,请检查网络连接!${PLAIN}"
+      pause_and_clear
+      return 1
+  else
+      install_unzip_if_missing
+      unzip -o "$SNELL_ZIP"
+  fi
+
+  if [[ ! -e "snell-server" ]]; then
+      echo -e "${RED}Snell v4.1.1 解压失败!${PLAIN}"
+      pause_and_clear
+      return 1
+  else
+      rm -f "$SNELL_ZIP"
+      chmod +x snell-server
+      mv -f snell-server "${SNELL_BIN}"
+      echo "$SNELL_VERSION_TARGET" > "${SNELL_VERSION_FILE}"
+      echo -e "${GREEN}Snell 已回退到 v4.1.1${PLAIN}"
+      echo -e "${YELLOW}正在重启所有 Snell 服务...${PLAIN}"
+      systemctl daemon-reload
+      for svc in /etc/systemd/system/snell@*.service; do
+        [ ! -e "$svc" ] && continue
+        svc_name=$(basename "$svc")
+        systemctl restart "$svc_name"
+        echo -e "${GREEN}已重启服务: $svc_name${PLAIN}"
+      done
+      echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+      pause_and_clear
+      return 0
+  fi
+}
+
 install_unzip_if_missing() {
     if ! command -v unzip >/dev/null 2>&1; then
         echo -e "${YELLOW}未检测到 unzip，正在自动安装...${PLAIN}"
@@ -106,7 +172,7 @@ install_unzip_if_missing() {
         elif command -v zypper &>/dev/null; then
             zypper --non-interactive install unzip
         else
-            echo -e "${RED}无法识别的包管理器，unzip 安装失败，请手动安装！${PLAIN}"
+            echo -e "${RED}无法识别的包管理器,unzip 安装失败,请手动安装！${PLAIN}"
             exit 1
         fi
         echo -e "${GREEN}unzip 安装完成${PLAIN}"
@@ -157,7 +223,7 @@ install_snell() {
   get_latest_snell_version
 
   if [[ -z "$SNELL_VERSION" || -z "$SNELL_URL" ]]; then
-      echo -e "${RED}未获取到 Snell 最新正式版信息，请检查网络或稍后再试！${PLAIN}"
+      echo -e "${RED}未获取到 Snell 最新正式版信息,请检查网络或稍后再试！${PLAIN}"
       pause_and_clear
       return 1
   fi
@@ -217,7 +283,7 @@ update_snell_stable() {
   fi
 
   if [[ "$current_ver" == "$SNELL_VERSION" && -f "$SNELL_BIN" ]]; then
-    echo -e "${GREEN}Snell 已经是正式版最新版：${SNELL_VERSION}${PLAIN}"
+    echo -e "${GREEN}Snell 已经是正式版最新版:${SNELL_VERSION}${PLAIN}"
     pause_and_clear
     return 0
   fi
@@ -325,13 +391,15 @@ update_snell_beta() {
 update_snell_menu() {
   clear
   echo -e "${BLUE}✦ Snell_Update ✦${PLAIN}"
-  echo -e "${GREEN}  1.${PLAIN}更新正式版"
-  echo -e "${GREEN}  2.${PLAIN}更新测试版"
-  echo -e "${GREEN}  0.${PLAIN}返回主菜单"
+  echo -e "${GREEN}  1.${PLAIN}正式版"
+  echo -e "${GREEN}  2.${PLAIN}测试版"
+  echo -e "${GREEN}  3.${PLAIN}回退v4版"
+  echo -e "${GREEN}  0.${PLAIN}返回主页"
   read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
   case $update_choice in
     1) update_snell_stable ;;
     2) update_snell_beta ;;
+    3) rollback_snell_v4 ;;
     0) return ;;
     *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
   esac
@@ -345,7 +413,7 @@ delete_all_snell() {
     return
   fi
 
-  echo -e "${RED}警告!此操作将彻底删除 /etc/snell 目录及相关 systemd 服务${PLAIN}"
+  echo -e "${RED}警告!此操作将彻底删除snell-server及其相关内容、服务${PLAIN}"
   read -p "$(echo -e "${YELLOW}确定继续? [y/N]: ${PLAIN}")" confirm
   [[ ! "$confirm" =~ ^[yY]$ ]] && echo -e "${YELLOW}操作已取消${PLAIN}" && pause_and_clear && return
 
@@ -366,7 +434,7 @@ delete_all_snell() {
     rm -f "$SNELL_BIN"
   fi
 
-  echo -e "${GREEN}已彻底删除 /etc/snell 及 systemd 服务${PLAIN}"
+  echo -e "${GREEN}已彻底删除snell服务${PLAIN}"
   pause_and_clear
 }
 
@@ -473,7 +541,7 @@ delete_config() {
   systemctl disable --now "$service_name" &>/dev/null
   rm -f "/etc/systemd/system/$service_name"
   rm -f "$config_file"
-  echo -e "${GREEN}配置 $config_name 及其服务已删除。${PLAIN}"
+  echo -e "${GREEN}配置 $config_name 及其服务已删除${PLAIN}"
   pause_and_clear
 }
 delete_all_configs() {
