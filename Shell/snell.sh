@@ -39,7 +39,7 @@ get_latest_snell_version() {
         arch="i386"
     elif [[ "$uname_arch" == *"armv7"* ]] || [[ "$uname_arch" == "armv6l" ]]; then
         arch="armv7l"
-    elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]]; then
+    elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]] || [[ "$uname_arch" == "arm64" ]]; then
         arch="aarch64"
     else
         arch="amd64"
@@ -107,7 +107,7 @@ rollback_snell_v4() {
       arch="i386"
   elif [[ "$uname_arch" == *"armv7"* ]] || [[ "$uname_arch" == "armv6l" ]]; then
       arch="armv7l"
-  elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]]; then
+  elif [[ "$uname_arch" == *"armv8"* ]] || [[ "$uname_arch" == "aarch64" ]] || [[ "$uname_arch" == "arm64" ]]; then
       arch="aarch64"
   else
       arch="amd64"
