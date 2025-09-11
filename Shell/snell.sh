@@ -6,10 +6,10 @@ YELLOW='\033[1;33m'
 BLUE="\033[1;34m"
 PLAIN='\033[0m'
 
-SNELL_DIR="/root/snell"
-SNELL_CONFIGS="${SNELL_DIR}/configs"
-SNELL_BIN="${SNELL_DIR}/snell-server"
-SNELL_VERSION_FILE="${SNELL_DIR}/version"
+SNELL_BIN="/usr/local/bin/snell-server"
+SNELL_ETC="/etc/snell"
+SNELL_CONFIGS="${SNELL_ETC}/configs"
+SNELL_VERSION_FILE="${SNELL_ETC}/version"
 TFO_SYSCTL_CONF="/etc/sysctl.d/local.conf"
 
 pause_and_clear() {
@@ -162,8 +162,9 @@ install_snell() {
       return 1
   fi
 
-  mkdir -p "$SNELL_DIR"
-  cd "$SNELL_DIR"
+  mkdir -p "$SNELL_ETC"
+  mkdir -p "$SNELL_CONFIGS"
+  cd /tmp
 
   echo -e "${YELLOW}下载 Snell（${SNELL_ARCH}，${SNELL_VERSION}）...${PLAIN}"
   wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
@@ -184,7 +185,7 @@ install_snell() {
       rm -f "$SNELL_ZIP"
       chmod +x snell-server
       mv -f snell-server "${SNELL_BIN}"
-      echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+      echo "$SNELL_VERSION" > "${SNELL_VERSION_FILE}"
       echo -e "${GREEN}Snell (${SNELL_ARCH}) 已下载安装完成${PLAIN}"
       echo -e "${BLUE}请选择【2.配置 Snell】生成并管理配置文件${PLAIN}"
       pause_and_clear
@@ -221,9 +222,7 @@ update_snell_stable() {
     return 0
   fi
 
-  mkdir -p "$SNELL_DIR"
-  cd "$SNELL_DIR"
-
+  cd /tmp
   echo -e "${YELLOW}下载 Snell 正式版（${SNELL_ARCH}, ${SNELL_VERSION}）...${PLAIN}"
   wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
   if [[ ! -e "$SNELL_ZIP" ]]; then
@@ -239,11 +238,11 @@ update_snell_stable() {
       echo -e "${RED}Snell 正式版解压失败!${PLAIN}"
       pause_and_clear
       return 1
-else
+  else
     rm -f "$SNELL_ZIP"
     chmod +x snell-server
     mv -f snell-server "${SNELL_BIN}"
-    echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+    echo "$SNELL_VERSION" > "${SNELL_VERSION_FILE}"
     echo -e "${GREEN}Snell 已更新到正式版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
     echo -e "${YELLOW}正在重启所有 Snell systemd 服务...${PLAIN}"
     systemctl daemon-reload
@@ -287,9 +286,7 @@ update_snell_beta() {
     return 0
   fi
 
-  mkdir -p "$SNELL_DIR"
-  cd "$SNELL_DIR"
-
+  cd /tmp
   echo -e "${YELLOW}下载 Snell 测试版（${SNELL_ARCH}, ${SNELL_VERSION}）...${PLAIN}"
   wget --no-check-certificate -N "$SNELL_URL" -O "$SNELL_ZIP"
   if [[ ! -e "$SNELL_ZIP" ]]; then
@@ -305,11 +302,11 @@ update_snell_beta() {
       echo -e "${RED}Snell 测试版解压失败!${PLAIN}"
       pause_and_clear
       return 1
-else
+  else
     rm -f "$SNELL_ZIP"
     chmod +x snell-server
     mv -f snell-server "${SNELL_BIN}"
-    echo "$SNELL_VERSION" > ${SNELL_VERSION_FILE}
+    echo "$SNELL_VERSION" > "${SNELL_VERSION_FILE}"
     echo -e "${GREEN}Snell 已更新到测试版:${SNELL_VERSION} (${SNELL_ARCH})${PLAIN}"
     echo -e "${YELLOW}正在重启所有 Snell systemd 服务...${PLAIN}"
     systemctl daemon-reload
@@ -348,7 +345,7 @@ delete_all_snell() {
     return
   fi
 
-  echo -e "${RED}警告!此操作将彻底删除 /root/snell 目录及相关 systemd 服务${PLAIN}"
+  echo -e "${RED}警告!此操作将彻底删除 /etc/snell 目录及相关 systemd 服务${PLAIN}"
   read -p "$(echo -e "${YELLOW}确定继续? [y/N]: ${PLAIN}")" confirm
   [[ ! "$confirm" =~ ^[yY]$ ]] && echo -e "${YELLOW}操作已取消${PLAIN}" && pause_and_clear && return
 
@@ -361,11 +358,15 @@ delete_all_snell() {
 
   systemctl daemon-reload
 
-  if [ -d "/root/snell" ]; then
-    rm -rf /root/snell
+  if [ -d "$SNELL_ETC" ]; then
+    rm -rf "$SNELL_ETC"
   fi
 
-  echo -e "${GREEN}已彻底删除 /root/snell 及 systemd 服务${PLAIN}"
+  if [ -f "$SNELL_BIN" ]; then
+    rm -f "$SNELL_BIN"
+  fi
+
+  echo -e "${GREEN}已彻底删除 /etc/snell 及 systemd 服务${PLAIN}"
   pause_and_clear
 }
 
