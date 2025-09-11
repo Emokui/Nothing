@@ -28,7 +28,8 @@ snell_config_exists() {
 }
 
 tfo_enabled() {
-  [[ "$(cat /proc/sys/net/ipv4/tcp_fastopen 2>/dev/null)" == "3" ]] && grep -q "net.ipv4.tcp_fastopen = 3" "$TFO_SYSCTL_CONF" 2>/dev/null
+  [[ "$(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null)" == "3" ]] \
+    && grep -Eq '^\s*net\.ipv4\.tcp_fastopen\s*=\s*3\s*$' "$TFO_SYSCTL_CONF" 2>/dev/null
 }
 
 has_ipv4() {
@@ -183,13 +184,9 @@ install_unzip_if_missing() {
 
 auto_enable_tcp_fastopen() {
   local sysctl_conf="$TFO_SYSCTL_CONF"
+  mkdir -p "$(dirname "$sysctl_conf")"
 
-  if [ -w /proc/sys/net/ipv4/tcp_fastopen ]; then
-    echo 3 > /proc/sys/net/ipv4/tcp_fastopen
-  fi
-
-  if [[ ! -f "$sysctl_conf" ]]; then
-    cat >"$sysctl_conf" <<EOF
+  local sysctl_content=$(cat <<'EOF'
 net.core.netdev_max_backlog = 4096
 net.core.somaxconn = 4096
 net.ipv4.tcp_max_syn_backlog = 4096
@@ -207,8 +204,20 @@ net.core.optmem_max = 4194304
 net.ipv4.udp_rmem_min = 8192
 net.ipv4.udp_wmem_min = 8192
 EOF
+)
+
+  if [[ ! -f "$sysctl_conf" ]]; then
+    echo "$sysctl_content" >"$sysctl_conf"
     sysctl --system >/dev/null 2>&1
+  else
+    local cur="$(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null)"
+    if [[ "$cur" != "3" ]] && ! grep -Eq '^\s*net\.ipv4\.tcp_fastopen\s*=\s*3\s*$' "$sysctl_conf"; then
+      echo "$sysctl_content" >"$sysctl_conf"
+      sysctl --system >/dev/null 2>&1
+    fi
   fi
+
+  [ -w /proc/sys/net/ipv4/tcp_fastopen ] && echo 3 > /proc/sys/net/ipv4/tcp_fastopen
 }
 
 install_snell() {
