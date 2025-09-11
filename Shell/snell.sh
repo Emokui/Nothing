@@ -116,7 +116,7 @@ rollback_snell_v4() {
   SNELL_ZIP="snell-server-v4.1.1-linux-${arch}.zip"
   SNELL_URL="https://dl.nssurge.com/snell/snell-server-v4.1.1-linux-${arch}.zip"
   if ! has_ipv4; then
-    SNELL_URL="https://snell-cdn.pages.dev/snell-server-v4.1.1-linux-${arch}.zip"
+    SNELL_URL="https://snell-cdn.pages.dev/snell/snell-server-v4.1.1-linux-${arch}.zip"
   fi
 
   mkdir -p "$SNELL_ETC"
