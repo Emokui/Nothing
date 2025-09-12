@@ -473,6 +473,13 @@ generate_and_enable_config() {
     obfs_host=${obfs_host:-icloud.com}
   fi
 
+  read -p "$(echo -e "${BLUE}是否开启 IPv6 ${YELLOW}(默认不开启 Y/N)${BLUE}: ${PLAIN}")" enable_ipv6
+  if [[ "$enable_ipv6" =~ ^[yY]$ ]]; then
+    ipv6="true"
+  else
+    ipv6="false"
+  fi
+
   read -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(默认开启 Y/N)${BLUE}: ${PLAIN}")" enable_tfo
   if [[ "$enable_tfo" =~ ^[nN]$ ]]; then
     tfo="false"
@@ -495,7 +502,7 @@ listen = ::0:${port}
 psk = ${psk}
 obfs = ${obfs}
 $(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
-ipv6 = true
+ipv6 = ${ipv6}
 tfo = ${tfo}
 dns = ${dns}
 EOF
@@ -602,6 +609,7 @@ modify_config() {
   local current_psk=$(grep "^psk[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
   local current_obfs=$(grep "^obfs[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
   local current_obfs_host=$(grep "^obfs-host[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  local current_ipv6=$(grep "^ipv6[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
   local current_tfo=$(grep "^tfo[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
   local current_dns=$(grep "^dns[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | sed 's/^ *//;s/ *$//')
 
@@ -611,6 +619,7 @@ modify_config() {
   echo -e "PSK: ${GREEN}${current_psk}${PLAIN}"
   echo -e "OBFS: ${GREEN}${current_obfs}${PLAIN}"
   [[ "$current_obfs" == "http" ]] && echo -e "OBFS域名: ${GREEN}${current_obfs_host}${PLAIN}"
+  echo -e "IPv6: ${GREEN}${current_ipv6:-false}${PLAIN}"
   echo -e "TFO: ${GREEN}${current_tfo:-true}${PLAIN}"
   echo -e "DNS: ${GREEN}${current_dns:-8.8.8.8, 1.1.1.1}${PLAIN}"
 
@@ -651,6 +660,15 @@ modify_config() {
     obfs_host=""
   fi
 
+  read -p "$(echo -e "${BLUE}是否开启 IPv6 ${YELLOW}(当前${current_ipv6:-false} Y/N)${BLUE}: ${PLAIN}")" enable_ipv6
+  if [[ "$enable_ipv6" =~ ^[yY]$ ]]; then
+    ipv6="true"
+  elif [[ -z "$enable_ipv6" ]]; then
+    ipv6=${current_ipv6:-false}
+  else
+    ipv6="false"
+  fi
+
   read -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(当前${current_tfo:-true} Y/N)${BLUE}: ${PLAIN}")" enable_tfo
   if [[ "$enable_tfo" =~ ^[nN]$ ]]; then
     tfo="false"
@@ -679,7 +697,7 @@ listen = ::0:${port}
 psk = ${psk}
 obfs = ${obfs}
 $(if [[ "$obfs" == "http" ]]; then echo "obfs-host = ${obfs_host}"; fi)
-ipv6 = true
+ipv6 = ${ipv6}
 tfo = ${tfo}
 dns = ${dns}
 EOF
@@ -769,7 +787,7 @@ show_sub_menu() {
 
 show_main_menu() {
   clear
-  echo -e "${BLUE}✦ Snell_Ver.1.1 ✦${PLAIN}"
+  echo -e "${BLUE}✦ Snell_Ver.1.2 ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}安装Snell"
   echo -e "${GREEN}  2.${PLAIN}配置Snell"
   echo -e "${GREEN}  3.${PLAIN}删除Snell"
