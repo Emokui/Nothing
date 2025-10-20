@@ -1,5 +1,5 @@
 #### Spotify ####
-*https://raw.githubusercontent.com/Emokui/Nothing/refs/heads/Zero/Script/Surge/Spotify.sgmodule*
+*https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/Surge/Spotify.sgmodule*
 
 
 源自: https://github.com/app2smile/rules
