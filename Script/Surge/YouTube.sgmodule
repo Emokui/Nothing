@@ -1,13 +1,9 @@
 #!name= 𝗬𝗼𝘂𝘁𝘂𝗯𝗲 𝗘𝗻𝗵𝗮𝗻𝗰𝗲
 #!desc= 𝗥𝗲𝗺𝗼𝘃𝗲 𝗔𝗱
-#!arguments=屏蔽上传按钮:true,屏蔽选段按钮:true,屏蔽Shorts按钮:false,字幕翻译语言:off,歌词翻译语言:off,启用调试模式:false
+#!arguments= 屏蔽上传按钮:true,屏蔽选段按钮:true,屏蔽Shorts按钮:false,字幕翻译语言:off,歌词翻译语言:off
 
-[Rule]
-AND,((DOMAIN-SUFFIX,googlevideo.com), (PROTOCOL,UDP)),REJECT
-AND,((DOMAIN,youtubei.googleapis.com), (PROTOCOL,UDP)),REJECT
-
-[Script]
-𝗬𝗼𝘂𝘁𝘂𝗯𝗲 = type=http-response,pattern=^https:\/\/youtubei\.googleapis\.com\/(youtubei\/v1\/(browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch))(\?(.*))?$,requires-body=1,max-size=-1,binary-body-mode=1,script-path=https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/JS/YouTube.js,argument="{"lyricLang":"{{{歌词翻译语言}}}","captionLang":"{{{字幕翻译语言}}}","blockUpload":{{{屏蔽上传按钮}}},"blockImmersive":{{{屏蔽选段按钮}}},"blockShorts":{{{屏蔽Shorts按钮}}},"debug":{{{启用调试模式}}}}"
+[URL Rewrite]
+^https:\/\/youtubei\.googleapis\.com\/(youtubei\/v1\/(browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch))(\?(.*))?$ {{{请求处理服务}}}/$1?blockUpload={{{屏蔽上传按钮}}}&blockImmersive={{{屏蔽选段按钮}}}&blockShorts={{{屏蔽Shorts按钮}}}&captionLang={{{字幕翻译语言}}}&lyricLang={{{歌词翻译语言}}}&$4 307
 
 [Map Local]
 ^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback.+&oad data-type=text data="" status-code=200
