@@ -715,6 +715,7 @@ IP-CIDR,216.73.80.0/20,no-resolve
 IP-CIDR,173.194.0.0/16,no-resolve
 IP-CIDR,74.125.0.0/16,no-resolve
 IP-CIDR6,2620:120:e000::/40,no-resolve
+IP-CIDR6,2001:bc8:710:ef5d:dc00:ff:fec6:7715,no-resolve
 USER-AGENT,*com.google.Drive*
 USER-AGENT,Google.Drive*
 PROCESS-NAME,com.android.vending
