@@ -29,6 +29,18 @@ RESOLV_CONF="/etc/resolv.conf"
 # =========================
 # 显示当前DNS
 # =========================
+get_default_iface() {
+  local iface
+
+  iface="$(ip route show default 2>/dev/null | awk '{print $5}' | head -n1)"
+
+  if [[ -z "$iface" ]]; then
+    iface="$(ip -6 route show default 2>/dev/null | awk '{print $5}' | head -n1)"
+  fi
+
+  echo "$iface"
+}
+
 show_current_dns() {
   echo -e "${YELLOW}当前DNS配置:${NC}\n"
 
@@ -44,8 +56,9 @@ show_current_dns() {
   echo
 
   echo -e "${BLUE}systemd-resolved:${NC}"
-  if command -v resolvectl >/dev/null 2>&1 && resolvectl status >/dev/null 2>&1; then
-    IFACE="$(ip route show default 2>/dev/null | awk '{print $5}' | head -n1)"
+
+  if systemctl is-active systemd-resolved >/dev/null 2>&1; then
+    IFACE="$(get_default_iface)"
 
     if [[ -n "$IFACE" ]]; then
       echo -e "  ${CYAN}默认网卡:${NC} ${GRAY}${IFACE}${NC}"
@@ -59,7 +72,7 @@ show_current_dns() {
           echo -e "    ${GRAY}- ${dns}${NC}"
         done <<< "$DNS_LIST"
       else
-        echo -e "  ${GRAY}(未获取到 DNS Servers)${NC}"
+        echo -e "  ${GRAY}(systemd-resolved 未接管 DNS)${NC}"
       fi
     else
       echo -e "  ${GRAY}(未检测到默认网卡)${NC}"
