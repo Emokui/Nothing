@@ -44,12 +44,12 @@ show_current_dns() {
   echo
 
   echo -e "${BLUE}systemd-resolved:${NC}"
-  if command -v resolvectl >/dev/null 2>&1; then
+  if command -v resolvectl >/dev/null 2>&1 && resolvectl status >/dev/null 2>&1; then
     resolvectl status 2>/dev/null | while read -r line; do
       echo -e "  ${GRAY}${line}${NC}"
     done
   else
-    echo -e "  ${GRAY}(未安装)${NC}"
+    echo -e "  ${GRAY}(systemd-resolved未运行)${NC}"
   fi
   echo
 }
