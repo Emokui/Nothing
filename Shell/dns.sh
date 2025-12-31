@@ -45,12 +45,29 @@ show_current_dns() {
 
   echo -e "${BLUE}systemd-resolved:${NC}"
   if command -v resolvectl >/dev/null 2>&1 && resolvectl status >/dev/null 2>&1; then
-    resolvectl status 2>/dev/null | while read -r line; do
-      echo -e "  ${GRAY}${line}${NC}"
-    done
+    IFACE="$(ip route show default 2>/dev/null | awk '{print $5}' | head -n1)"
+
+    if [[ -n "$IFACE" ]]; then
+      echo -e "  ${CYAN}默认网卡:${NC} ${GRAY}${IFACE}${NC}"
+
+      DNS_LIST="$(resolvectl status "$IFACE" 2>/dev/null \
+        | awk '/DNS Servers:/ {for (i=3; i<=NF; i++) print $i}')"
+
+      if [[ -n "$DNS_LIST" ]]; then
+        echo -e "  ${CYAN}DNS Servers:${NC}"
+        while read -r dns; do
+          echo -e "    ${GRAY}- ${dns}${NC}"
+        done <<< "$DNS_LIST"
+      else
+        echo -e "  ${GRAY}(未获取到 DNS Servers)${NC}"
+      fi
+    else
+      echo -e "  ${GRAY}(未检测到默认网卡)${NC}"
+    fi
   else
-    echo -e "  ${GRAY}(systemd-resolved未运行)${NC}"
+    echo -e "  ${GRAY}(systemd-resolved 未运行)${NC}"
   fi
+
   echo
 }
 
