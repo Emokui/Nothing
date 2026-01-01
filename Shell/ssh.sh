@@ -688,6 +688,36 @@ configure_firewall() {
              service ip6tables save 2>/dev/null
         fi
     }
+    flush_conntrack() {
+        echo -e "${YELLOW}[*] 正在刷新连接跟踪表...${PLAIN}"
+        
+        if command -v conntrack &>/dev/null; then
+            conntrack -F &>/dev/null
+            return
+        fi
+        
+        if [ -f /proc/net/nf_conntrack ]; then
+            echo f > /proc/net/nf_conntrack 2>/dev/null || true
+        elif [ -f /proc/net/ip_conntrack ]; then
+            echo f > /proc/net/ip_conntrack 2>/dev/null || true
+        else
+            echo -e "${YELLOW}[!] 未检测到 conntrack 工具,尝试安装...${PLAIN}"
+            if command -v apt &>/dev/null; then
+                apt update && apt install -y conntrack
+            elif command -v dnf &>/dev/null; then
+                dnf install -y conntrack-tools
+            elif command -v yum &>/dev/null; then
+                yum install -y conntrack-tools
+            fi
+            
+            if command -v conntrack &>/dev/null; then
+                 conntrack -F &>/dev/null
+                 echo -e "${GREEN}[✓] 连接表已刷新${PLAIN}"
+            else
+                 echo -e "${RED}[!] 无法刷新连接表,旧连接可能会持续一段时间${PLAIN}"
+            fi
+        fi
+    }
     local current_ssh_port
     current_ssh_port=$(get_ssh_port)
     echo -e "${BLUE}[*] 检查 iptables/ip6tables 工具...${PLAIN}"
@@ -715,7 +745,7 @@ configure_firewall() {
         command -v ip6tables &>/dev/null && has_ip6tables=true
         
         if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
-             echo -e "${RED}[!] 无法安装或找到有效的防火墙工具，脚本退出${PLAIN}"
+             echo -e "${RED}[!] 无法安装或找到有效的防火墙工具，脚本退出。${PLAIN}"
              return 1
         fi
     fi
@@ -808,6 +838,9 @@ configure_firewall() {
                    ip6tables -A INPUT -p ipv6-icmp -j ACCEPT 2>/dev/null || true
                 fi
                 save_rules
+                
+                flush_conntrack
+                
                 echo -e "${RED}[✓] 已阻止所有入站连接(SSH 端口 $current_ssh_port 已放行)${PLAIN}"
                 press_any_key_to_continue
                 ;;
@@ -846,7 +879,6 @@ configure_firewall() {
                     {
                         ver=$1
                         num=$2
-                        # target=$5, prot=$6, in_iface=$8, extra=$12...
                         target=$5
                         raw_prot=$6
                         in_iface=$8
@@ -869,7 +901,7 @@ configure_firewall() {
                         if (extra ~ "^" prot " ") {
                             sub("^" prot " ", "", extra)
                         }
-          
+                        
                         real_in=""
                         if ($7 == "--") real_in=$8
                         else real_in=$7
