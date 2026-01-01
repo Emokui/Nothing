@@ -592,147 +592,253 @@ reboot_vps() {
 
 # ====== 防火墙配置 ======
 configure_firewall() {
-    echo -e "${BLUE}[*] 检查 iptables 是否安装...${PLAIN}"
+    get_ssh_port() {
+        local port
+        if [ -f /etc/ssh/sshd_config ]; then
+            port=$(grep "^Port" /etc/ssh/sshd_config | head -n 1 | awk '{print $2}')
+        fi
+        
+        if [[ -z "$port" ]]; then
+            port=22
+        fi
+        echo "$port"
+    }
+    apply_firewall_cmd() {
+        iptables "$@" 2>/dev/null || true
+        
+        if command -v ip6tables &>/dev/null; then
+            ip6tables "$@" 2>/dev/null || true
+        fi
+    }
+    save_rules() {
+        if command -v netfilter-persistent &>/dev/null; then
+            netfilter-persistent save
+        elif command -v service &>/dev/null; then
+             service iptables save 2>/dev/null
+             service ip6tables save 2>/dev/null
+        fi
+    }
+    local current_ssh_port
+    current_ssh_port=$(get_ssh_port)
+    echo -e "${BLUE}[*] 检查 iptables 工具...${PLAIN}"
+    
     if ! command -v iptables &>/dev/null; then
-        echo -e "${YELLOW}[!] 未检测到 iptables，开始安装...${PLAIN}"
+        echo -e "${YELLOW}[!] 未检测到 iptables,尝试安装...${PLAIN}"
         if command -v apt &>/dev/null; then
             apt update && apt install -y iptables iptables-persistent
         elif command -v dnf &>/dev/null; then
             dnf install -y iptables-services
-            systemctl enable iptables
-            systemctl start iptables
         elif command -v yum &>/dev/null; then
             yum install -y iptables-services
-            systemctl enable iptables
-            systemctl start iptables
-        elif command -v zypper &>/dev/null; then
-            zypper --non-interactive install iptables
-        elif command -v pacman &>/dev/null; then
-            pacman -Sy --noconfirm iptables
-        elif command -v apk &>/dev/null; then
-            apk add iptables
         else
-            echo -e "${RED}[!] 无法安装 iptables，请手动安装。${PLAIN}"
-            press_any_key_to_continue
+            echo -e "${RED}[!] 请手动安装 iptables!${PLAIN}"
             return 1
         fi
-        echo -e "${GREEN}[✓] iptables 已安装${PLAIN}"
-    else
-        echo -e "${GREEN}[✓] iptables 已存在${PLAIN}"
     fi
-
     while true; do
         clear
         echo -e "${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
-        echo -e "${GREEN}1. 开启端口${PLAIN}"
-        echo -e "${RED}2. 关闭端口${PLAIN}"
-        echo -e "${GREEN}3. 开启全部端口${PLAIN}"
-        echo -e "${RED}4. 关闭全部端口(保留SSH)${PLAIN}"
-        echo -e "${BLUE}5. 显示已开启的端口${PLAIN}"
-        echo -e "${YELLOW}0. 返回主菜单${PLAIN}"
-        echo -e "${BLUE}======================================${PLAIN}"
+        echo -e "${BLUE}SSH端口:  ${YELLOW}${current_ssh_port}${PLAIN}"
+        echo -e "${BLUE}IPv6支持: $(command -v ip6tables &>/dev/null && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未关闭${PLAIN}")${PLAIN}"
+        echo -e "${BLUE}=======================================${PLAIN}"
+        echo -e "${GREEN}1.开启端口${PLAIN}"
+        echo -e "${RED}2.关闭端口${PLAIN}"
+        echo -e "${GREEN}3.开启全部端口${PLAIN}"
+        echo -e "${RED}4.关闭全部端口(保留SSH)${PLAIN}"
+        echo -e "${BLUE}5.显示当前规则${PLAIN}"
+        echo -e "${YELLOW}0.返回主菜单${PLAIN}"
+        echo -e "${BLUE}=======================================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-5]: ${PLAIN}")" action_choice
         action_choice=$(echo "$action_choice" | xargs)
+        
         [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
             1|2)
-                read -rp "请输入端口（如 443 或 1000-2000）: " ports
-                for port in $ports; do
-                    if [[ "$port" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                read -rp "请输入端口（如 443 或 1000-2000）: " input_ports
+                for port_range in $input_ports; do
+                    local start_port end_port
+                    if [[ "$port_range" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                         start_port=${BASH_REMATCH[1]}
                         end_port=${BASH_REMATCH[2]}
-                        iptables -D INPUT -p tcp --dport $start_port:$end_port -j ACCEPT 2>/dev/null || true
-                        iptables -D INPUT -p tcp --dport $start_port:$end_port -j DROP 2>/dev/null || true
-                        iptables -D INPUT -p udp --dport $start_port:$end_port -j ACCEPT 2>/dev/null || true
-                        iptables -D INPUT -p udp --dport $start_port:$end_port -j DROP 2>/dev/null || true
-                        if [[ "$action_choice" == "1" ]]; then
-                            iptables -A INPUT -p tcp --dport $start_port:$end_port -j ACCEPT
-                            iptables -A INPUT -p udp --dport $start_port:$end_port -j ACCEPT
-                            echo -e "${GREEN}[✓] 端口范围 $port 已开启${PLAIN}"
-                        else
-                            [[ "$start_port" -le 22 && "$end_port" -ge 22 ]] && { echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${PLAIN}"; continue; }
-                            iptables -A INPUT -p tcp --dport $start_port:$end_port -j DROP
-                            iptables -A INPUT -p udp --dport $start_port:$end_port -j DROP
-                            echo -e "${RED}[✓] 端口范围 $port 已关闭${PLAIN}"
-                        fi
+                    elif [[ "$port_range" =~ ^([0-9]+)$ ]]; then
+                        start_port=$port_range
+                        end_port=$port_range
                     else
-                        if [[ ! "$port" =~ ^[0-9]+$ ]]; then
-                            echo -e "${RED}[!] 无效端口: $port${PLAIN}"
-                            continue
-                        fi
-                        if [[ "$port" == "22" && "$action_choice" == "2" ]]; then
-                            echo -e "${YELLOW}[!] 警告: 不允许关闭 SSH 端口 (22)${PLAIN}"
-                            continue
-                        fi
-                        iptables -D INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null || true
-                        iptables -D INPUT -p tcp --dport $port -j DROP 2>/dev/null || true
-                        iptables -D INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
-                        iptables -D INPUT -p udp --dport $port -j DROP 2>/dev/null || true
-                        if [[ "$action_choice" == "1" ]]; then
-                            iptables -A INPUT -p tcp --dport $port -j ACCEPT
-                            iptables -A INPUT -p udp --dport $port -j ACCEPT
-                            echo -e "${GREEN}[✓] 端口 $port 已开启${PLAIN}"
+                        echo -e "${RED}[!] 无效端口格式: $port_range${PLAIN}"
+                        continue
+                    fi
+                    if [[ "$action_choice" == "1" ]]; then
+                        apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j DROP
+                        apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j DROP
+                        apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
+                        apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
+                        
+                        apply_firewall_cmd -I INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
+                        apply_firewall_cmd -I INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
+                        echo -e "${GREEN}[✓] 端口 $port_range 已开启${PLAIN}"
+                    else
+                        if [[ "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
+                            echo -e "${YELLOW}[!] 警告: 即使选择关闭,SSH 端口 ($current_ssh_port) 也不会被阻断。${PLAIN}"
                         else
-                            iptables -A INPUT -p tcp --dport $port -j DROP
-                            iptables -A INPUT -p udp --dport $port -j DROP
-                            echo -e "${RED}[✓] 端口 $port 已关闭${PLAIN}"
+                            apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
+                            apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
+                            apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j DROP
+                            apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j DROP
+                            apply_firewall_cmd -I INPUT -p tcp --dport "$start_port:$end_port" -j DROP
+                            apply_firewall_cmd -I INPUT -p udp --dport "$start_port:$end_port" -j DROP
+                            echo -e "${RED}[✓] 端口 $port_range 已关闭${PLAIN}"
                         fi
                     fi
                 done
-                if command -v netfilter-persistent &>/dev/null; then
-                    netfilter-persistent save
-                elif command -v service &>/dev/null && service iptables save &>/dev/null; then
-                    service iptables save
-                fi
-                if [[ "$action_choice" == "1" ]]; then
-                    echo -e "${GREEN}[✓] 所有指定端口已开启完成${PLAIN}"
-                else
-                    echo -e "${RED}[✓] 所有指定端口已关闭完成${PLAIN}"
-                fi
+                save_rules
                 press_any_key_to_continue
                 ;;
-            3)
-                iptables -F
-                iptables -P INPUT ACCEPT
-                iptables -P FORWARD ACCEPT
-                iptables -P OUTPUT ACCEPT
-                if command -v netfilter-persistent &>/dev/null; then
-                    netfilter-persistent save
-                elif command -v service &>/dev/null && service iptables save &>/dev/null; then
-                    service iptables save
-                fi
-                echo -e "${GREEN}[✓] 所有端口已开启${PLAIN}"
+            3)  
+                apply_firewall_cmd -F
+                apply_firewall_cmd -P INPUT ACCEPT
+                apply_firewall_cmd -P FORWARD ACCEPT
+                apply_firewall_cmd -P OUTPUT ACCEPT
+                save_rules
+                echo -e "${GREEN}[✓] 防火墙规则已清空,所有端口开放${PLAIN}"
                 press_any_key_to_continue
                 ;;
-            4)
-                iptables -F
-                iptables -P INPUT DROP
-                iptables -P FORWARD DROP
-                iptables -P OUTPUT ACCEPT
-                iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-                iptables -A INPUT -i lo -j ACCEPT
-                iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-                if command -v netfilter-persistent &>/dev/null; then
-                    netfilter-persistent save
-                elif command -v service &>/dev/null && service iptables save &>/dev/null; then
-                    service iptables save
+            4)  
+                echo -e "${YELLOW}[*] 正在配置全关闭策略(保留SSH: $current_ssh_port）...${PLAIN}"
+                
+                apply_firewall_cmd -F
+                
+                apply_firewall_cmd -P INPUT DROP
+                apply_firewall_cmd -P FORWARD DROP
+                apply_firewall_cmd -P OUTPUT ACCEPT
+                apply_firewall_cmd -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+                 
+                apply_firewall_cmd -A INPUT -i lo -j ACCEPT
+                
+                apply_firewall_cmd -A INPUT -p tcp --dport "$current_ssh_port" -j ACCEPT
+                if command -v ip6tables &>/dev/null; then
+                   ip6tables -A INPUT -p ipv6-icmp -j ACCEPT 2>/dev/null || true
                 fi
-                echo -e "${RED}[✓] 所有端口已关闭 (22端口除外)${PLAIN}"
+                save_rules
+                echo -e "${RED}[✓] 已阻止所有入站连接(SSH 端口 $current_ssh_port 已放行)${PLAIN}"
                 press_any_key_to_continue
                 ;;
             5)
-                iptables_output=$(iptables -L INPUT -n -v)
-                echo -e "${BLUE}$iptables_output${PLAIN}"
+                list_rules() {
+                    clear
+                    echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
+                    
+                    local policy
+                    policy=$(iptables -L INPUT -n | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
+                    echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
+                    
+                    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+                    # Header: ID(14v), Action(14v=16b), Prot(14v=16b), Port
+                    printf "%-14s %-16s %-16s %-s\n" "ID" "行为" "协议" "端口"
+                    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+                    parse_table() {
+                        local ver=$1
+                        local cmd=$2
+                        if ! command -v $cmd &>/dev/null; then return; fi
+                        
+                        $cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target" | while read -r line; do
+                             echo "$ver $line"
+                        done
+                    }
+                    {
+                        parse_table "v4" "iptables"
+                        parse_table "v6" "ip6tables"
+                    } | awk '
+                    BEGIN {
+                        GREEN="\033[0;32m"
+                        RED="\033[0;31m"
+                        YELLOW="\033[0;33m"
+                        PLAIN="\033[0m"
+                    }
+                    {
+                        ver=$1
+                        num=$2
+                        # target=$5, prot=$6, in_iface=$8, extra=$12...
+                        target=$5
+                        raw_prot=$6
+                        in_iface=$8
+                        
+                        extra=""
+                        for(i=12; i<=NF; i++) extra = extra $i " "
+                        
+                        
+                        if (raw_prot == "6") prot="tcp"
+                        else if (raw_prot == "17") prot="udp"
+                        else if (raw_prot == "1") prot="icmp"
+                        else if (raw_prot == "58") prot="icmpv6"
+                        else if (raw_prot == "0" || raw_prot == "all") prot="all"
+                        else prot=raw_prot
+                        if (prot == "icmpv6") next
+                        
+                        gsub(/0.0.0.0\/0/, "", extra)
+                        gsub(/::\/0/, "", extra)
+                        gsub(/^[ \t]+|[ \t]+$/, "", extra) # trim
+                        if (extra ~ "^" prot " ") {
+                            sub("^" prot " ", "", extra)
+                        }
+                        
+                        if (in_iface != "*") {
+                            extra = "[网卡:" in_iface "] " extra
+                        }
+                        
+                        if (extra ~ /\[网卡:lo\]/) next
+                        if (extra ~ /state RELATED,ESTABLISHED/) next
+                        signature = target "|" prot "|" extra
+                        
+                        if (!seen[signature]++) {
+                            order[count++] = signature
+                        }
+                        
+                        if (ver == "v4") id_v4[signature] = num
+                        else id_v6[signature] = num
+                        
+                        meta_target[signature] = target
+                        meta_prot[signature] = prot
+                        meta_extra[signature] = extra
+                    }
+                    END {
+                        for(i=0; i<count; i++) {
+                            sig = order[i]
+                            
+                            v4 = id_v4[sig]
+                            v6 = id_v6[sig]
+                            if (v4 && v6 && v4 == v6) disp_id = v4;
+                            else if (v4 && v6) disp_id = v4 "(v4)/" v6 "(v6)";
+                            else if (v4) disp_id = v4 "(v4)";
+                            else disp_id = v6 "(v6)";
+                            
+                            t = meta_target[sig]
+                            if (t == "ACCEPT") color = GREEN
+                            else if (t == "DROP") color = RED
+                            else color = YELLOW
+                            
+                            len_t = length(t)
+                            pad_len = 14 - len_t
+                            if (pad_len < 0) pad_len = 0
+                            pad = sprintf("%" pad_len "s", "")
+                            
+                            final_target = color t pad PLAIN
+                            
+                            printf "%-14s %s %-14s %s\n", disp_id, final_target, meta_prot[sig], meta_extra[sig]
+                        }
+                    }
+                    '
+                    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+                }
+                list_rules
                 press_any_key_to_continue
                 ;;
             *)
-                echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"
+                echo -e "${RED}[!] 无效选项${PLAIN}"
                 sleep 1
                 ;;
         esac
     done
 }
-
 # ====== 主菜单 ======
 main_menu() {
     while true; do
