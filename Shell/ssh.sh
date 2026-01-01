@@ -699,7 +699,7 @@ configure_firewall() {
     command -v ip6tables &>/dev/null && has_ip6tables=true
     
     if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
-        echo -e "${YELLOW}[!] 未检测到防火墙工具,尝试安装...${PLAIN}"
+        echo -e "${YELLOW}[!] 未检测到防火墙工具，尝试安装...${PLAIN}"
         if command -v apt &>/dev/null; then
             apt update && apt install -y iptables iptables-persistent
         elif command -v dnf &>/dev/null; then
@@ -715,7 +715,7 @@ configure_firewall() {
         command -v ip6tables &>/dev/null && has_ip6tables=true
         
         if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
-             echo -e "${RED}[!] 无法安装或找到有效的防火墙工具,脚本退出${PLAIN}"
+             echo -e "${RED}[!] 无法安装或找到有效的防火墙工具，脚本退出${PLAIN}"
              return 1
         fi
     fi
@@ -869,13 +869,19 @@ configure_firewall() {
                         if (extra ~ "^" prot " ") {
                             sub("^" prot " ", "", extra)
                         }
+          
+                        real_in=""
+                        if ($7 == "--") real_in=$8
+                        else real_in=$7
                         
-                        if (in_iface != "*") {
-                            extra = "[网卡:" in_iface "] " extra
+                        if (real_in != "*") {
+                            extra = "[网卡:" real_in "] " extra
                         }
                         
-                        if (extra ~ /\[网卡:lo\]/) next
-                        if (extra ~ /state RELATED,ESTABLISHED/) next
+                        if (real_in == "lo") next
+                        if (extra ~ /\[网卡:lo\]/) next 
+                        
+                        if (extra ~ /RELATED,ESTABLISHED/) next
                         signature = target "|" prot "|" extra
                         
                         if (!seen[signature]++) {
