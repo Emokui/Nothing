@@ -175,17 +175,17 @@ set_swap_menu() {
         local current_swappiness
         current_swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null || echo "未知")
 
-        echo -e "${BLUE}===== 虚拟内存(Swap) =====${PLAIN}"
+        echo -e "${BLUE}==== 虚拟内存(Swap) ====${PLAIN}"
         echo -e "${YELLOW}物理内存: ${total_ram} MB${PLAIN}"
-        echo -e "${YELLOW}当前Swap: ${current_swap} MB${PLAIN} (推荐: ${recommend_swap} MB)"
-        echo -e "${YELLOW}当前Swappiness: ${current_swappiness}${PLAIN} (数值越小越不倾向使用Swap,VPS建议 10-60)"
-        echo -e "${BLUE}====================================${PLAIN}"
-        echo -e "${GREEN}1. 设置 Swap (智能推荐: ${recommend_swap} MB)${PLAIN}"
-        echo -e "${GREEN}2. 自定义 Swap 大小${PLAIN}"
-        echo -e "${GREEN}3. 调整 Swappiness 策略${PLAIN}"
-        echo -e "${RED}4. 删除/关闭 Swap${PLAIN}"
-        echo -e "${YELLOW}0. 返回主菜单${PLAIN}"
-        echo -e "${BLUE}====================================${PLAIN}"
+        echo -e "${YELLOW}当前Swap: ${current_swap} MB${PLAIN}"
+        echo -e "${YELLOW}当前Swappiness: ${current_swappiness}${PLAIN}"
+        echo -e "${BLUE}========================${PLAIN}"
+        echo -e "${GREEN}1.设置Swap(推荐:${recommend_swap}MB)${PLAIN}"
+        echo -e "${GREEN}2.设置Swap(自定义)${PLAIN}"
+        echo -e "${GREEN}3.调整Swappiness策略${PLAIN}"
+        echo -e "${RED}4.关闭Swap${PLAIN}"
+        echo -e "${YELLOW}0.返回主菜单${PLAIN}"
+        echo -e "${BLUE}========================${PLAIN}"
         
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" opt
         case "$opt" in
@@ -227,13 +227,13 @@ set_swap() {
     avail_mb=$((avail_kb / 1024))
     
     if (( avail_mb < size_mb + 500 )); then
-        echo -e "${RED}磁盘空间不足！当前可用: ${avail_mb}MB, 需要: ${size_mb}MB (+预留500MB)${PLAIN}"
+        echo -e "${RED}磁盘空间不足!当前可用: ${avail_mb}MB, 需要: ${size_mb}MB (+预留500MB)${PLAIN}"
         press_any_key_to_continue
         return 1
     fi
 
     if grep -q "$swapfile_path" /proc/swaps; then
-        echo -e "${YELLOW}发现已存在的 Swap，正在卸载...${PLAIN}"
+        echo -e "${YELLOW}发现已存在的 Swap,正在卸载...${PLAIN}"
         sudo swapoff "$swapfile_path" 2>/dev/null || true
     fi
     sudo rm -f "$swapfile_path"
@@ -276,9 +276,8 @@ set_swappiness() {
     local current_val
     current_val=$(cat /proc/sys/vm/swappiness 2>/dev/null)
     echo -e "当前 Swappiness: ${GREEN}${current_val}${PLAIN}"
-    echo -e "数值范围 0-100.数值越低,系统越倾向于使用物理内存(高性能);数值越高,越倾向于使用 Swap。"
-    echo -e "建议值:VPS/服务器: ${GREEN}10${PLAIN}, 桌面: ${GREEN}60${PLAIN}"
-    
+    echo -e "数值范围 0-100.数值越低,越倾向于使用物理内存;数值越高,越倾向于使用 Swap。"
+  
     read -rp "请输入新的 Swappiness 值 (0-100): " new_val
     if [[ "$new_val" =~ ^[0-9]+$ ]] && (( new_val >= 0 && new_val <= 100 )); then
         sudo sysctl vm.swappiness="$new_val"
