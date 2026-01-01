@@ -672,7 +672,9 @@ configure_firewall() {
         echo "$port"
     }
     apply_firewall_cmd() {
-        iptables "$@" 2>/dev/null || true
+        if command -v iptables &>/dev/null; then
+            iptables "$@" 2>/dev/null || true
+        fi
         
         if command -v ip6tables &>/dev/null; then
             ip6tables "$@" 2>/dev/null || true
@@ -688,10 +690,16 @@ configure_firewall() {
     }
     local current_ssh_port
     current_ssh_port=$(get_ssh_port)
-    echo -e "${BLUE}[*] 检查 iptables 工具...${PLAIN}"
+    echo -e "${BLUE}[*] 检查 iptables/ip6tables 工具...${PLAIN}"
     
-    if ! command -v iptables &>/dev/null; then
-        echo -e "${YELLOW}[!] 未检测到 iptables,尝试安装...${PLAIN}"
+    local has_iptables=false
+    local has_ip6tables=false
+    
+    command -v iptables &>/dev/null && has_iptables=true
+    command -v ip6tables &>/dev/null && has_ip6tables=true
+    
+    if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
+        echo -e "${YELLOW}[!] 未检测到防火墙工具,尝试安装...${PLAIN}"
         if command -v apt &>/dev/null; then
             apt update && apt install -y iptables iptables-persistent
         elif command -v dnf &>/dev/null; then
@@ -702,12 +710,25 @@ configure_firewall() {
             echo -e "${RED}[!] 请手动安装 iptables!${PLAIN}"
             return 1
         fi
+        
+        command -v iptables &>/dev/null && has_iptables=true
+        command -v ip6tables &>/dev/null && has_ip6tables=true
+        
+        if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
+             echo -e "${RED}[!] 无法安装或找到有效的防火墙工具,脚本退出${PLAIN}"
+             return 1
+        fi
+    fi
+    local check_cmd="iptables"
+    if [[ "$has_iptables" == "false" ]]; then
+        check_cmd="ip6tables"
     fi
     while true; do
         clear
         echo -e "${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
         echo -e "${BLUE}SSH端口:  ${YELLOW}${current_ssh_port}${PLAIN}"
-        echo -e "${BLUE}IPv6支持: $(command -v ip6tables &>/dev/null && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未关闭${PLAIN}")${PLAIN}"
+        echo -e "${BLUE}IPv4支持: $([[ "$has_iptables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未关闭${PLAIN}")${PLAIN}"
+        echo -e "${BLUE}IPv6支持: $([[ "$has_ip6tables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未关闭${PLAIN}")${PLAIN}"
         echo -e "${BLUE}=======================================${PLAIN}"
         echo -e "${GREEN}1.开启端口${PLAIN}"
         echo -e "${RED}2.关闭端口${PLAIN}"
@@ -746,7 +767,7 @@ configure_firewall() {
                         echo -e "${GREEN}[✓] 端口 $port_range 已开启${PLAIN}"
                     else
                         if [[ "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
-                            echo -e "${YELLOW}[!] 警告: 即使选择关闭,SSH 端口 ($current_ssh_port) 也不会被阻断。${PLAIN}"
+                            echo -e "${YELLOW}[!] 警告: 即使选择关闭,SSH 端口 ($current_ssh_port) 也不会被阻断${PLAIN}"
                         else
                             apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
                             apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
@@ -796,7 +817,7 @@ configure_firewall() {
                     echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
                     
                     local policy
-                    policy=$(iptables -L INPUT -n | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
+                    policy=$($check_cmd -L INPUT -n | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
                     echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
                     
                     echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
