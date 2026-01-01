@@ -152,45 +152,67 @@ linux_clean() {
 # ====== Swap管理 ======
 swapfile_path="/swapfile"
 
+get_recommended_swap() {
+    local total_ram
+    total_ram=$(free -m | awk '/Mem:/ {print $2}')
+    if (( total_ram <= 2048 )); then
+        echo $((total_ram * 2))
+    elif (( total_ram <= 8192 )); then
+        echo $((total_ram))
+    else
+        echo 4096
+    fi
+}
+
 set_swap_menu() {
     while true; do
         clear
+        local current_swap total_ram recommend_swap
         current_swap=$(free -m | awk '/Swap:/ {print $2}')
-        swap_info="无"
-        if (( current_swap > 0 )); then
-            swap_info="${current_swap} MB"
-        fi
-        echo -e "${BLUE}===== 虚拟内存(Swap)管理 ====${PLAIN}"
-        echo -e "${YELLOW} 当前 Swap 大小：$swap_info${PLAIN}"
-        echo -e "${GREEN} 1.设置为 1024 MB ${PLAIN} "
-        echo -e "${GREEN} 2.设置为 2048 MB ${PLAIN} "
-        echo -e "${GREEN} 3.输入设置 Swap 大小${PLAIN} "
-        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
-        echo -e "${BLUE}=============================${PLAIN}"
-        read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" opt
-        opt=$(echo "$opt" | xargs)
+        total_ram=$(free -m | awk '/Mem:/ {print $2}')
+        recommend_swap=$(get_recommended_swap)
+        
+        local current_swappiness
+        current_swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null || echo "未知")
+
+        echo -e "${BLUE}===== 虚拟内存(Swap) =====${PLAIN}"
+        echo -e "${YELLOW}物理内存: ${total_ram} MB${PLAIN}"
+        echo -e "${YELLOW}当前Swap: ${current_swap} MB${PLAIN} (推荐: ${recommend_swap} MB)"
+        echo -e "${YELLOW}当前Swappiness: ${current_swappiness}${PLAIN} (数值越小越不倾向使用Swap,VPS建议 10-60)"
+        echo -e "${BLUE}====================================${PLAIN}"
+        echo -e "${GREEN}1. 设置 Swap (智能推荐: ${recommend_swap} MB)${PLAIN}"
+        echo -e "${GREEN}2. 自定义 Swap 大小${PLAIN}"
+        echo -e "${GREEN}3. 调整 Swappiness 策略${PLAIN}"
+        echo -e "${RED}4. 删除/关闭 Swap${PLAIN}"
+        echo -e "${YELLOW}0. 返回主菜单${PLAIN}"
+        echo -e "${BLUE}====================================${PLAIN}"
+        
+        read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" opt
         case "$opt" in
             1)
-                set_swap 1024
+                set_swap "$recommend_swap"
                 ;;
             2)
-                set_swap 2048
-                ;;
-            3)
-                read -rp "请输入你想要的 Swap 大小 (单位 MB): " custom
+                read -rp "请输入 Swap 大小 (单位 MB,,建议 >=128): " custom
                 if [[ "$custom" =~ ^[0-9]+$ ]] && (( custom >= 128 )); then
                     set_swap "$custom"
                 else
-                    echo -e "${RED}输入无效，请输入大于等于128的数字。${PLAIN}"
-                    press_any_key_to_continue
+                    echo -e "${RED}输入无效！${PLAIN}"
+                    sleep 2
                 fi
+                ;;
+            3)
+                set_swappiness
+                ;;
+            4)
+                delete_swap
                 ;;
             0)
                 return
                 ;;
             *)
-                echo -e "${RED}无效选项，请重试。${PLAIN}"
-                press_any_key_to_continue
+                echo -e "${RED}无效选项${PLAIN}"
+                sleep 1
                 ;;
         esac
     done
@@ -200,28 +222,30 @@ set_swap() {
     local size_mb="$1"
     local avail_kb avail_mb
 
-    if ! [[ "$size_mb" =~ ^[0-9]+$ ]] || (( size_mb < 128 )); then
-        echo -e "${RED}无效的 Swap 大小（必须为大于等于128的整数）${PLAIN}"
-        press_any_key_to_continue
-        return 1
-    fi
-
+    echo -e "${YELLOW}正在检查环境...${PLAIN}"
     avail_kb=$(df --output=avail / | tail -1)
     avail_mb=$((avail_kb / 1024))
-    if (( avail_mb < size_mb )); then
-        echo -e "${RED}磁盘空间不足，无法创建${size_mb} MB的swap文件！${PLAIN}"
+    
+    if (( avail_mb < size_mb + 500 )); then
+        echo -e "${RED}磁盘空间不足！当前可用: ${avail_mb}MB, 需要: ${size_mb}MB (+预留500MB)${PLAIN}"
         press_any_key_to_continue
         return 1
     fi
 
-    sudo swapoff "$swapfile_path" 2>/dev/null || true
+    if grep -q "$swapfile_path" /proc/swaps; then
+        echo -e "${YELLOW}发现已存在的 Swap，正在卸载...${PLAIN}"
+        sudo swapoff "$swapfile_path" 2>/dev/null || true
+    fi
     sudo rm -f "$swapfile_path"
+    
+    sudo sed -i "\|${swapfile_path}|d" /etc/fstab
 
-    echo -e "${YELLOW}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
+    echo -e "${BLUE}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
+    
     if command -v fallocate >/dev/null 2>&1; then
         if ! sudo fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
-            echo -e "${YELLOW}fallocate 失败，尝试使用 dd...${PLAIN}"
-            sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+             echo -e "${YELLOW}fallocate 创建失败,尝试使用 dd 写零 (速度较慢,请耐心等待)...${PLAIN}"
+             sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
         fi
     else
         sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
@@ -231,16 +255,46 @@ set_swap() {
     sudo mkswap "$swapfile_path"
     sudo swapon "$swapfile_path"
 
-    sudo sed -i '\|^/swapfile |d' /etc/fstab
     echo "$swapfile_path none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
 
-    echo
-    echo -e "${GREEN}Swap 设置完成，当前情况：${PLAIN}"
+    echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
-    swapon --show
     press_any_key_to_continue
 }
 
+delete_swap() {
+    echo -e "${YELLOW}正在删除 Swap...${PLAIN}"
+    sudo swapoff "$swapfile_path" 2>/dev/null || true
+    sudo rm -f "$swapfile_path"
+    sudo sed -i "\|${swapfile_path}|d" /etc/fstab
+    echo -e "${GREEN}✓ Swap 已删除并关闭${PLAIN}"
+    free -h
+    press_any_key_to_continue
+}
+
+set_swappiness() {
+    local current_val
+    current_val=$(cat /proc/sys/vm/swappiness 2>/dev/null)
+    echo -e "当前 Swappiness: ${GREEN}${current_val}${PLAIN}"
+    echo -e "数值范围 0-100.数值越低,系统越倾向于使用物理内存(高性能);数值越高,越倾向于使用 Swap。"
+    echo -e "建议值:VPS/服务器: ${GREEN}10${PLAIN}, 桌面: ${GREEN}60${PLAIN}"
+    
+    read -rp "请输入新的 Swappiness 值 (0-100): " new_val
+    if [[ "$new_val" =~ ^[0-9]+$ ]] && (( new_val >= 0 && new_val <= 100 )); then
+        sudo sysctl vm.swappiness="$new_val"
+        
+        if grep -q "^vm.swappiness" /etc/sysctl.conf; then
+            sudo sed -i "s/^vm.swappiness.*/vm.swappiness = $new_val/" /etc/sysctl.conf
+        else
+            echo "vm.swappiness = $new_val" | sudo tee -a /etc/sysctl.conf >/dev/null
+        fi
+        
+        echo -e "${GREEN}✓ 设置成功！${PLAIN}"
+    else
+        echo -e "${RED}输入无效${PLAIN}"
+    fi
+    press_any_key_to_continue
+}
 # ====== SSH管理 ======
 ssh_config_menu() {
     while true; do
