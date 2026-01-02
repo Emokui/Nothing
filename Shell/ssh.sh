@@ -35,7 +35,7 @@ press_any_key_to_continue() {
     fi
 }
 
-# ====== SSH配置通用函数 ======
+# ====== SSH配置通用函数（解决冗余问题）======
 update_sshd_option() {
     local option="$1"
     local value="$2"
@@ -70,6 +70,7 @@ restart_sshd_safe() {
     return 0
 }
 
+# ====== 包管理器通用函数（解决冗余问题）======
 detect_pkg_manager() {
     if command -v apt &>/dev/null; then echo "apt"
     elif command -v dnf &>/dev/null; then echo "dnf"
