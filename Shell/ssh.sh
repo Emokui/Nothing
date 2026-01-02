@@ -15,6 +15,14 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+# ====== 动态获取路径 ======
+get_root_home() {
+    getent passwd root | cut -d: -f6
+}
+
+ROOT_HOME="$(get_root_home)"
+SSHD_CONFIG="/etc/ssh/sshd_config"
+
 # ====== 通用函数 ======
 press_any_key_to_continue() {
     if [ -t 0 ]; then
@@ -27,23 +35,112 @@ press_any_key_to_continue() {
     fi
 }
 
+# ====== SSH配置通用函数 ======
+update_sshd_option() {
+    local option="$1"
+    local value="$2"
+    local config_file="${3:-$SSHD_CONFIG}"
+    
+    sed -i "/^[#[:space:]]*${option}[[:space:]]\+\w\+/Id" "$config_file"
+    echo "${option} ${value}" >> "$config_file"
+}
+
+get_sshd_option() {
+    local option="$1"
+    local default="${2:-}"
+    local config_file="${3:-$SSHD_CONFIG}"
+    local line value
+    
+    if grep -Ei "^[#[:space:]]*${option}[[:space:]]+(yes|no|[0-9]+)" "$config_file" >/dev/null 2>&1; then
+        line=$(grep -Ei "^[#[:space:]]*${option}[[:space:]]+" "$config_file" | tail -1)
+        value=$(echo "$line" | awk '{print tolower($2)}')
+        echo "$value"
+    else
+        echo "$default"
+    fi
+}
+
+restart_sshd_safe() {
+    if ! sshd -t 2>/dev/null; then
+        echo -e "${RED}sshd 配置有误,未重启sshd请检查${SSHD_CONFIG}${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+    systemctl restart sshd
+    return 0
+}
+
+detect_pkg_manager() {
+    if command -v apt &>/dev/null; then echo "apt"
+    elif command -v dnf &>/dev/null; then echo "dnf"
+    elif command -v yum &>/dev/null; then echo "yum"
+    elif command -v apk &>/dev/null; then echo "apk"
+    elif command -v pacman &>/dev/null; then echo "pacman"
+    elif command -v zypper &>/dev/null; then echo "zypper"
+    elif command -v emerge &>/dev/null; then echo "emerge"
+    else echo ""
+    fi
+}
+
+pkg_install() {
+    local pkg="$1"
+    local pm
+    pm=$(detect_pkg_manager)
+    
+    case "$pm" in
+        apt)    apt update && apt install -y "$pkg" ;;
+        dnf)    dnf install -y "$pkg" ;;
+        yum)    yum install -y "$pkg" ;;
+        apk)    apk add "$pkg" ;;
+        pacman) pacman -Sy --noconfirm "$pkg" ;;
+        zypper) zypper --non-interactive install "$pkg" ;;
+        *)      return 1 ;;
+    esac
+}
+
+pkg_update() {
+    local pm
+    pm=$(detect_pkg_manager)
+    
+    case "$pm" in
+        apt)    apt update && apt upgrade -y ;;
+        dnf)    dnf upgrade --refresh -y ;;
+        yum)    yum update -y ;;
+        apk)    apk update && apk upgrade ;;
+        pacman) pacman -Syu --noconfirm ;;
+        zypper) zypper refresh && zypper update -y ;;
+        *)      return 1 ;;
+    esac
+}
+
+pkg_clean() {
+    local pm
+    pm=$(detect_pkg_manager)
+    
+    case "$pm" in
+        apt)    apt autoremove -y && apt autoclean -y && apt clean ;;
+        dnf)    dnf autoremove -y && dnf clean all ;;
+        yum)    yum autoremove -y && yum clean all ;;
+        apk)    apk cache clean ;;
+        pacman)
+            local orphans
+            orphans=$(pacman -Qtdq 2>/dev/null || true)
+            if [[ -n "$orphans" ]]; then
+                pacman -Rns $orphans --noconfirm
+            fi
+            pacman -Scc --noconfirm
+            ;;
+        zypper) zypper clean --all ;;
+        emerge) emerge --depclean && eclean-dist --deep ;;
+        *)      return 1 ;;
+    esac
+}
+
 # ====== 安装wget ======
 install_wget_if_missing() {
     if ! command -v wget &>/dev/null; then
         echo -e "${YELLOW}未检测到 wget，正在自动安装...${PLAIN}"
-        if command -v apt &>/dev/null; then
-            apt update && apt install -y wget
-        elif command -v dnf &>/dev/null; then
-            dnf install -y wget
-        elif command -v yum &>/dev/null; then
-            yum install -y wget
-        elif command -v apk &>/dev/null; then
-            apk add wget
-        elif command -v pacman &>/dev/null; then
-            pacman -Sy --noconfirm wget
-        elif command -v zypper &>/dev/null; then
-            zypper --non-interactive install wget
-        else
+        if ! pkg_install wget; then
             echo -e "${RED}无法识别的包管理器，wget 安装失败，请手动安装！${PLAIN}"
             exit 1
         fi
@@ -72,20 +169,9 @@ linux_update() {
         return 0
     fi
 
-    if command -v apt &>/dev/null; then
-        apt update && apt upgrade -y
-    elif command -v dnf &>/dev/null; then
-        dnf upgrade --refresh -y
-    elif command -v yum &>/dev/null; then
-        yum update -y
-    elif command -v apk &>/dev/null; then
-        apk update && apk upgrade
-    elif command -v pacman &>/dev/null; then
-        pacman -Syu --noconfirm
-    elif command -v zypper &>/dev/null; then
-        zypper refresh && zypper update -y
-    else
+    if ! pkg_update; then
         echo -e "${RED}未知的包管理器!${PLAIN}"
+        press_any_key_to_continue
         return 1
     fi
 
@@ -97,27 +183,7 @@ linux_clean() {
     clear
     echo -e "${YELLOW}正在清理系统垃圾...${PLAIN}"
 
-    if command -v apt &>/dev/null; then
-        apt autoremove -y && apt autoclean -y && apt clean
-    elif command -v dnf &>/dev/null; then
-        dnf autoremove -y && dnf clean all
-    elif command -v yum &>/dev/null; then
-        yum autoremove -y && yum clean all
-    elif command -v apk &>/dev/null; then
-        apk cache clean
-    elif command -v pacman &>/dev/null; then
-        orphans=$(pacman -Qtdq 2>/dev/null || true)
-        if [[ -n "$orphans" ]]; then
-            pacman -Rns $orphans --noconfirm
-        fi
-        pacman -Scc --noconfirm
-    elif command -v zypper &>/dev/null; then
-        zypper clean --all
-    elif command -v emerge &>/dev/null; then
-        emerge --depclean && eclean-dist --deep
-    else
-        echo -e "${RED}未知的包管理器!${PLAIN}"
-    fi
+    pkg_clean || echo -e "${RED}未知的包管理器!${PLAIN}"
 
     if command -v docker &>/dev/null; then
         echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
@@ -234,28 +300,28 @@ set_swap() {
 
     if grep -q "$swapfile_path" /proc/swaps; then
         echo -e "${YELLOW}发现已存在的 Swap,正在卸载...${PLAIN}"
-        sudo swapoff "$swapfile_path" 2>/dev/null || true
+        swapoff "$swapfile_path" 2>/dev/null || true
     fi
-    sudo rm -f "$swapfile_path"
+    rm -f "$swapfile_path"
     
-    sudo sed -i "\|${swapfile_path}|d" /etc/fstab
+    sed -i "\|${swapfile_path}|d" /etc/fstab
 
     echo -e "${BLUE}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
     
     if command -v fallocate >/dev/null 2>&1; then
-        if ! sudo fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
+        if ! fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
              echo -e "${YELLOW}fallocate 创建失败,尝试使用 dd 写零 (速度较慢,请耐心等待)...${PLAIN}"
-             sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+             dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
         fi
     else
-        sudo dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+        dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
     fi
 
-    sudo chmod 600 "$swapfile_path"
-    sudo mkswap "$swapfile_path"
-    sudo swapon "$swapfile_path"
+    chmod 600 "$swapfile_path"
+    mkswap "$swapfile_path"
+    swapon "$swapfile_path"
 
-    echo "$swapfile_path none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+    echo "$swapfile_path none swap sw 0 0" | tee -a /etc/fstab >/dev/null
 
     echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
@@ -264,9 +330,9 @@ set_swap() {
 
 delete_swap() {
     echo -e "${YELLOW}正在删除 Swap...${PLAIN}"
-    sudo swapoff "$swapfile_path" 2>/dev/null || true
-    sudo rm -f "$swapfile_path"
-    sudo sed -i "\|${swapfile_path}|d" /etc/fstab
+    swapoff "$swapfile_path" 2>/dev/null || true
+    rm -f "$swapfile_path"
+    sed -i "\|${swapfile_path}|d" /etc/fstab
     echo -e "${GREEN}✓ Swap 已删除并关闭${PLAIN}"
     free -h
     press_any_key_to_continue
@@ -280,12 +346,12 @@ set_swappiness() {
   
     read -rp "请输入新的 Swappiness 值 (0-100): " new_val
     if [[ "$new_val" =~ ^[0-9]+$ ]] && (( new_val >= 0 && new_val <= 100 )); then
-        sudo sysctl vm.swappiness="$new_val"
+        sysctl vm.swappiness="$new_val"
         
         if grep -q "^vm.swappiness" /etc/sysctl.conf; then
-            sudo sed -i "s/^vm.swappiness.*/vm.swappiness = $new_val/" /etc/sysctl.conf
+            sed -i "s/^vm.swappiness.*/vm.swappiness = $new_val/" /etc/sysctl.conf
         else
-            echo "vm.swappiness = $new_val" | sudo tee -a /etc/sysctl.conf >/dev/null
+            echo "vm.swappiness = $new_val" | tee -a /etc/sysctl.conf >/dev/null
         fi
         
         echo -e "${GREEN}✓ 设置成功！${PLAIN}"
@@ -294,6 +360,7 @@ set_swappiness() {
     fi
     press_any_key_to_continue
 }
+
 # ====== SSH管理 ======
 ssh_config_menu() {
     while true; do
@@ -327,17 +394,14 @@ change_ssh_port() {
             return
         fi
         if [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )); then
-            sed -i '/^[#[:space:]]*Port[[:space:]]\+[0-9]\+/Id' /etc/ssh/sshd_config
-            echo "Port $new_port" >> /etc/ssh/sshd_config
-            if ! sshd -t 2>/dev/null; then
-                echo -e "${RED}sshd 配置有误,未重启sshd请检查/etc/ssh/sshd_config${PLAIN}"
+            sed -i '/^[#[:space:]]*Port[[:space:]]\+[0-9]\+/Id' "$SSHD_CONFIG"
+            echo "Port $new_port" >> "$SSHD_CONFIG"
+            
+            if restart_sshd_safe; then
+                echo -e "${YELLOW}[✓]SSH端口已修改为 $new_port${PLAIN}"
                 press_any_key_to_continue
                 return
             fi
-            systemctl restart sshd
-            echo -e "${YELLOW}[✓]SSH端口已修改为 $new_port${PLAIN}"
-            press_any_key_to_continue
-            return
         else
             echo "[!] 无效的端口格式"
             press_any_key_to_continue
@@ -346,14 +410,8 @@ change_ssh_port() {
 }
 
 enable_or_change_root_password() {
-    local sshd_conf="/etc/ssh/sshd_config"
-    local pass_auth="no"
-    local line
-
-    if grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" >/dev/null; then
-        line=$(grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" | tail -1)
-        pass_auth=$(echo "$line" | awk '{print tolower($2)}')
-    fi
+    local pass_auth
+    pass_auth=$(get_sshd_option "PasswordAuthentication" "no")
 
     clear
     read -rp "$(echo -e "${BLUE}按回车继续,输入0返回:${PLAIN}")" input
@@ -364,17 +422,12 @@ enable_or_change_root_password() {
 
     passwd root
     if [[ "$pass_auth" != "yes" ]]; then
-        sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' "$sshd_conf"
-        echo 'PermitRootLogin yes' >> "$sshd_conf"
-        sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
-        echo 'PasswordAuthentication yes' >> "$sshd_conf"
-        if ! sshd -t 2>/dev/null; then
-            echo -e "${RED}sshd 配置有误,未重启sshd请检查/etc/ssh/sshd_config${PLAIN}"
-            press_any_key_to_continue
-            return
+        update_sshd_option "PermitRootLogin" "yes"
+        update_sshd_option "PasswordAuthentication" "yes"
+        
+        if restart_sshd_safe; then
+            echo -e "${GREEN}[✓]Root密码登陆已启用${PLAIN}"
         fi
-        systemctl restart sshd
-        echo -e "${GREEN}[✓]Root密码登陆已启用${PLAIN}"
     else
         echo -e "${GREEN}[✓]Root密码已修改${PLAIN}"
     fi
@@ -383,11 +436,10 @@ enable_or_change_root_password() {
 
 enable_root_key_login() {
     clear
-    ROOT_HOME="/root"
-    SSH_DIR="$ROOT_HOME/.ssh"
-    AUTH_KEYS="$SSH_DIR/authorized_keys"
-    TMP_KEY="$SSH_DIR/id_ed25519"
-    TMP_PUB="$SSH_DIR/id_ed25519.pub"
+    local SSH_DIR="$ROOT_HOME/.ssh"
+    local AUTH_KEYS="$SSH_DIR/authorized_keys"
+    local TMP_KEY="$SSH_DIR/id_ed25519"
+    local TMP_PUB="$SSH_DIR/id_ed25519.pub"
 
     mkdir -p "$SSH_DIR"
     chmod 700 "$SSH_DIR"
@@ -436,19 +488,12 @@ enable_root_key_login() {
 
     echo -e "${YELLOW}私钥内容已显示并删除。请务必妥善保存！${PLAIN}"
 
-    sed -i '/^[#[:space:]]*PermitRootLogin[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
-    sed -i '/^[#[:space:]]*PubkeyAuthentication[[:space:]]\+\w\+/Id' /etc/ssh/sshd_config
-    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
-    echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
+    update_sshd_option "PermitRootLogin" "yes"
+    update_sshd_option "PubkeyAuthentication" "yes"
 
-    if ! sshd -t 2>/dev/null; then
-        echo -e "${RED}sshd 配置有误,未重启 sshd 请检查 /etc/ssh/sshd_config${PLAIN}"
-        read -n 1 -s -r -p "按任意键继续..."
-        echo
-        return
+    if restart_sshd_safe; then
+        echo -e "${GREEN}root ed25519 密钥登录已配置完成。${PLAIN}"
     fi
-    systemctl restart sshd
-    echo -e "${GREEN}root ed25519 密钥登录已配置完成。${PLAIN}"
     read -n 1 -s -r -p "按任意键继续..."
     echo
 }
@@ -457,20 +502,10 @@ disable_ssh_login_menu() {
     clear
     local has_password=0
     local has_pubkey=0
-    local sshd_conf="/etc/ssh/sshd_config"
-    local pass_auth="yes"
-    local pubkey_auth="yes"
-    local line
+    local pass_auth pubkey_auth
 
-    if grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" >/dev/null; then
-        line=$(grep -Ei '^[#[:space:]]*PasswordAuthentication[[:space:]]+(yes|no)' "$sshd_conf" | tail -1)
-        pass_auth=$(echo "$line" | awk '{print tolower($2)}')
-    fi
-
-    if grep -Ei '^[#[:space:]]*PubkeyAuthentication[[:space:]]+(yes|no)' "$sshd_conf" >/dev/null; then
-        line=$(grep -Ei '^[#[:space:]]*PubkeyAuthentication[[:space:]]+(yes|no)' "$sshd_conf" | tail -1)
-        pubkey_auth=$(echo "$line" | awk '{print tolower($2)}')
-    fi
+    pass_auth=$(get_sshd_option "PasswordAuthentication" "yes")
+    pubkey_auth=$(get_sshd_option "PubkeyAuthentication" "yes")
 
     [[ "$pass_auth" == "yes" ]] && has_password=1
     [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1
@@ -491,10 +526,10 @@ disable_ssh_login_menu() {
     case "$disable_choice" in
         1)
             if [[ $has_password -eq 1 ]]; then
-                sed -i '/^[#[:space:]]*PasswordAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
-                echo 'PasswordAuthentication no' >> "$sshd_conf"
-                systemctl restart sshd
-                echo -e "${GREEN}[✓]密码登录已关闭${PLAIN}"
+                update_sshd_option "PasswordAuthentication" "no"
+                if restart_sshd_safe; then
+                    echo -e "${GREEN}[✓]密码登录已关闭${PLAIN}"
+                fi
             else
                 echo -e "${YELLOW}密码登录本就已关闭,无需操作${PLAIN}"
             fi
@@ -502,10 +537,10 @@ disable_ssh_login_menu() {
             ;;
         2)
             if [[ $has_pubkey -eq 1 ]]; then
-                sed -i '/^[#[:space:]]*PubkeyAuthentication[[:space:]]\+\w\+/Id' "$sshd_conf"
-                echo 'PubkeyAuthentication no' >> "$sshd_conf"
-                systemctl restart sshd
-                echo -e "${GREEN}[✓]密钥登录已关闭${PLAIN}"
+                update_sshd_option "PubkeyAuthentication" "no"
+                if restart_sshd_safe; then
+                    echo -e "${GREEN}[✓]密钥登录已关闭${PLAIN}"
+                fi
             else
                 echo -e "${YELLOW}密钥登录本就已关闭,无需操作${PLAIN}"
             fi
@@ -527,11 +562,7 @@ change_timezone() {
     
     if ! command -v curl >/dev/null; then
         echo -e "${YELLOW}未检测到 curl,正在自动安装...${PLAIN}"
-        if command -v apt &>/dev/null; then apt update && apt install -y curl; 
-        elif command -v dnf &>/dev/null; then dnf install -y curl; 
-        elif command -v yum &>/dev/null; then yum install -y curl; 
-        elif command -v apk &>/dev/null; then apk add curl; 
-        fi
+        pkg_install curl
     fi
 
     echo -e "${YELLOW}正在检测当前网络推荐时区...${PLAIN}"
@@ -659,11 +690,133 @@ reboot_vps() {
 }
 
 # ====== 防火墙配置 ======
+
+generate_firewall_awk_script() {
+    cat << 'AWKSCRIPT'
+BEGIN {
+    GREEN="\033[0;32m"
+    RED="\033[0;31m"
+    YELLOW="\033[0;33m"
+    PLAIN="\033[0m"
+}
+{
+    ver=$1
+    num=$2
+    target=$5
+    raw_prot=$6
+    in_iface=$8
+    
+    extra=""
+    for(i=12; i<=NF; i++) extra = extra $i " "
+    
+    if (raw_prot == "6") prot="tcp"
+    else if (raw_prot == "17") prot="udp"
+    else if (raw_prot == "1") prot="icmp"
+    else if (raw_prot == "58") prot="icmpv6"
+    else if (raw_prot == "0" || raw_prot == "all") prot="all"
+    else prot=raw_prot
+    
+    if (prot == "icmpv6") next
+    
+    gsub(/0.0.0.0\/0/, "", extra)
+    gsub(/::\/0/, "", extra)
+    gsub(/^[ \t]+|[ \t]+$/, "", extra)
+    if (extra ~ "^" prot " ") {
+        sub("^" prot " ", "", extra)
+    }
+
+    real_in=""
+    if ($7 == "--") real_in=$8
+    else real_in=$7
+    
+    if (real_in != "*") {
+        extra = "[网卡:" real_in "] " extra
+    }
+    
+    if (real_in == "lo") next
+    if (extra ~ /\[网卡:lo\]/) next 
+    
+    if (extra ~ /RELATED,ESTABLISHED/) next
+    
+    signature = target "|" prot "|" extra
+    
+    if (!seen[signature]++) {
+        order[count++] = signature
+    }
+    
+    if (ver == "v4") id_v4[signature] = num
+    else id_v6[signature] = num
+    
+    meta_target[signature] = target
+    meta_prot[signature] = prot
+    meta_extra[signature] = extra
+}
+END {
+    for(i=0; i<count; i++) {
+        sig = order[i]
+        
+        v4 = id_v4[sig]
+        v6 = id_v6[sig]
+        if (v4 && v6 && v4 == v6) disp_id = v4;
+        else if (v4 && v6) disp_id = v4 "(v4)/" v6 "(v6)";
+        else if (v4) disp_id = v4 "(v4)";
+        else disp_id = v6 "(v6)";
+        
+        t = meta_target[sig]
+        if (t == "ACCEPT") color = GREEN
+        else if (t == "DROP") color = RED
+        else color = YELLOW
+        
+        len_t = length(t)
+        pad_len = 14 - len_t
+        if (pad_len < 0) pad_len = 0
+        pad = sprintf("%" pad_len "s", "")
+        
+        final_target = color t pad PLAIN
+        
+        printf "%-14s %s %-14s %s\n", disp_id, final_target, meta_prot[sig], meta_extra[sig]
+    }
+}
+AWKSCRIPT
+}
+
+parse_firewall_table() {
+    local ver=$1
+    local cmd=$2
+    if ! command -v "$cmd" &>/dev/null; then return; fi
+    
+    $cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target" | while read -r line; do
+         echo "$ver $line"
+    done
+}
+
+list_firewall_rules() {
+    local check_cmd="$1"
+    
+    clear
+    echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
+    
+    local policy
+    policy=$($check_cmd -L INPUT -n | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
+    echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
+    
+    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+    printf "%-14s %-16s %-16s %-s\n" "ID" "行为" "协议" "端口"
+    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+    
+    {
+        parse_firewall_table "v4" "iptables"
+        parse_firewall_table "v6" "ip6tables"
+    } | awk "$(generate_firewall_awk_script)"
+    
+    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+}
+
 configure_firewall() {
     get_ssh_port() {
         local port
-        if [ -f /etc/ssh/sshd_config ]; then
-            port=$(grep "^Port" /etc/ssh/sshd_config | head -n 1 | awk '{print $2}')
+        if [ -f "$SSHD_CONFIG" ]; then
+            port=$(grep "^Port" "$SSHD_CONFIG" | head -n 1 | awk '{print $2}')
         fi
         
         if [[ -z "$port" ]]; then
@@ -671,6 +824,7 @@ configure_firewall() {
         fi
         echo "$port"
     }
+    
     apply_firewall_cmd() {
         if command -v iptables &>/dev/null; then
             iptables "$@" 2>/dev/null || true
@@ -680,6 +834,7 @@ configure_firewall() {
             ip6tables "$@" 2>/dev/null || true
         fi
     }
+    
     save_rules() {
         if command -v netfilter-persistent &>/dev/null; then
             netfilter-persistent save
@@ -688,6 +843,7 @@ configure_firewall() {
              service ip6tables save 2>/dev/null
         fi
     }
+    
     local current_ssh_port
     current_ssh_port=$(get_ssh_port)
     echo -e "${BLUE}[*] 检查 iptables/ip6tables 工具...${PLAIN}"
@@ -719,10 +875,12 @@ configure_firewall() {
              return 1
         fi
     fi
+    
     local check_cmd="iptables"
     if [[ "$has_iptables" == "false" ]]; then
         check_cmd="ip6tables"
     fi
+    
     while true; do
         clear
         echo -e "${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
@@ -812,119 +970,7 @@ configure_firewall() {
                 press_any_key_to_continue
                 ;;
             5)
-                list_rules() {
-                    clear
-                    echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
-                    
-                    local policy
-                    policy=$($check_cmd -L INPUT -n | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
-                    echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
-                    
-                    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
-                    # Header: ID(14v), Action(14v=16b), Prot(14v=16b), Port
-                    printf "%-14s %-16s %-16s %-s\n" "ID" "行为" "协议" "端口"
-                    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
-                    parse_table() {
-                        local ver=$1
-                        local cmd=$2
-                        if ! command -v $cmd &>/dev/null; then return; fi
-                        
-                        $cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target" | while read -r line; do
-                             echo "$ver $line"
-                        done
-                    }
-                    {
-                        parse_table "v4" "iptables"
-                        parse_table "v6" "ip6tables"
-                    } | awk '
-                    BEGIN {
-                        GREEN="\033[0;32m"
-                        RED="\033[0;31m"
-                        YELLOW="\033[0;33m"
-                        PLAIN="\033[0m"
-                    }
-                    {
-                        ver=$1
-                        num=$2
-                        # target=$5, prot=$6, in_iface=$8, extra=$12...
-                        target=$5
-                        raw_prot=$6
-                        in_iface=$8
-                        
-                        extra=""
-                        for(i=12; i<=NF; i++) extra = extra $i " "
-                        
-                        
-                        if (raw_prot == "6") prot="tcp"
-                        else if (raw_prot == "17") prot="udp"
-                        else if (raw_prot == "1") prot="icmp"
-                        else if (raw_prot == "58") prot="icmpv6"
-                        else if (raw_prot == "0" || raw_prot == "all") prot="all"
-                        else prot=raw_prot
-                        if (prot == "icmpv6") next
-                        
-                        gsub(/0.0.0.0\/0/, "", extra)
-                        gsub(/::\/0/, "", extra)
-                        gsub(/^[ \t]+|[ \t]+$/, "", extra) # trim
-                        if (extra ~ "^" prot " ") {
-                            sub("^" prot " ", "", extra)
-                        }
-          
-                        real_in=""
-                        if ($7 == "--") real_in=$8
-                        else real_in=$7
-                        
-                        if (real_in != "*") {
-                            extra = "[网卡:" real_in "] " extra
-                        }
-                        
-                        if (real_in == "lo") next
-                        if (extra ~ /\[网卡:lo\]/) next 
-                        
-                        if (extra ~ /RELATED,ESTABLISHED/) next
-                        signature = target "|" prot "|" extra
-                        
-                        if (!seen[signature]++) {
-                            order[count++] = signature
-                        }
-                        
-                        if (ver == "v4") id_v4[signature] = num
-                        else id_v6[signature] = num
-                        
-                        meta_target[signature] = target
-                        meta_prot[signature] = prot
-                        meta_extra[signature] = extra
-                    }
-                    END {
-                        for(i=0; i<count; i++) {
-                            sig = order[i]
-                            
-                            v4 = id_v4[sig]
-                            v6 = id_v6[sig]
-                            if (v4 && v6 && v4 == v6) disp_id = v4;
-                            else if (v4 && v6) disp_id = v4 "(v4)/" v6 "(v6)";
-                            else if (v4) disp_id = v4 "(v4)";
-                            else disp_id = v6 "(v6)";
-                            
-                            t = meta_target[sig]
-                            if (t == "ACCEPT") color = GREEN
-                            else if (t == "DROP") color = RED
-                            else color = YELLOW
-                            
-                            len_t = length(t)
-                            pad_len = 14 - len_t
-                            if (pad_len < 0) pad_len = 0
-                            pad = sprintf("%" pad_len "s", "")
-                            
-                            final_target = color t pad PLAIN
-                            
-                            printf "%-14s %s %-14s %s\n", disp_id, final_target, meta_prot[sig], meta_extra[sig]
-                        }
-                    }
-                    '
-                    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
-                }
-                list_rules
+                list_firewall_rules "$check_cmd"
                 press_any_key_to_continue
                 ;;
             *)
@@ -934,11 +980,12 @@ configure_firewall() {
         esac
     done
 }
+
 # ====== 主菜单 ======
 main_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Steins Gate_Ver.2.2 ✦${PLAIN}"
+        echo -e "${BLUE}✦ Steins Gate_Ver.2.3 ✦${PLAIN}"
         echo -e "${GREEN}  01.${PLAIN}系统更新"
         echo -e "${GREEN}  02.${PLAIN}系统清理"
         echo -e "${GREEN}  03.${PLAIN}重装系统"
