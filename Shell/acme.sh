@@ -100,6 +100,23 @@ validate_domain() {
     return 0
 }
 
+get_cf_credentials() {
+    read -rp "请输入 CloudFlare Global API Key: " cfgak
+    if [[ -z $cfgak ]]; then
+        echo -e "${RED}未输入 CloudFlare Global API Key，无法执行操作!${PLAIN}"
+        return 1
+    fi
+    export CF_Key="$cfgak"
+    
+    read -rp "请输入 CloudFlare 的登录邮箱: " cfemail
+    if [[ -z $cfemail ]]; then
+        echo -e "${RED}未输入 CloudFlare 的登录邮箱，无法执行操作!${PLAIN}"
+        return 1
+    fi
+    export CF_Email="$cfemail"
+    return 0
+}
+
 # ====== Acme 安装与卸载 ======
 inst_acme() {
     if [[ "$SYSTEM_TYPE" != "centos" ]]; then
@@ -176,8 +193,45 @@ check_80() {
         pkg_install lsof
     fi
 
-    echo -e "${YELLOW}正在检测 80 端口是否被占用...${PLAIN}"
+    echo -e "${YELLOW}正在检测 80 端口状态...${PLAIN}"
     sleep 1
+
+    local firewall_opened=false
+   
+    if command -v iptables &>/dev/null; then
+        if ! iptables -L INPUT -n | grep -qE "dpt:80\s.*ACCEPT|dports.*80.*ACCEPT"; then
+            echo -e "${YELLOW}检测到 iptables 未放行 80 端口，正在自动放行...${PLAIN}"
+            iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+            if command -v ip6tables &>/dev/null; then
+                ip6tables -I INPUT -p tcp --dport 80 -j ACCEPT
+            fi
+            firewall_opened=true
+            echo -e "${GREEN}✓ 80 端口已放行 (iptables)${PLAIN}"
+        fi
+    fi
+    
+    if command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
+        if ! firewall-cmd --list-ports 2>/dev/null | grep -q "80/tcp"; then
+            echo -e "${YELLOW}检测到 firewalld 未放行 80 端口，正在自动放行...${PLAIN}"
+            firewall-cmd --add-port=80/tcp --permanent
+            firewall-cmd --reload
+            firewall_opened=true
+            echo -e "${GREEN}✓ 80 端口已放行 (firewalld)${PLAIN}"
+        fi
+    fi
+    
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+        if ! ufw status | grep -qE "80.*ALLOW"; then
+            echo -e "${YELLOW}检测到 ufw 未放行 80 端口，正在自动放行...${PLAIN}"
+            ufw allow 80/tcp
+            firewall_opened=true
+            echo -e "${GREEN}✓ 80 端口已放行 (ufw)${PLAIN}"
+        fi
+    fi
+    
+    if [[ "$firewall_opened" == "false" ]]; then
+        echo -e "${GREEN}防火墙已放行 80 端口${PLAIN}"
+    fi
 
     if [[ $(lsof -i:"80" | grep -i -c "listen") -eq 0 ]]; then
         echo -e "${GREEN}检测到目前 80 端口未被占用${PLAIN}"
@@ -318,9 +372,7 @@ acme_standalone() {
 acme_cfapiTLD() {
     [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && inst_acme
 
-    check_ip
-
-    local domain cfgak cfemail
+    local domain
     read -rp "请输入需要申请证书的域名: " domain
     
     if [[ -z $domain ]]; then
@@ -329,27 +381,11 @@ acme_cfapiTLD() {
         return
     fi
     
-    if [[ $(echo "${domain: -2}") =~ cf|ga|gq|ml|tk ]]; then
-        echo -e "${RED}检测为 Freenom 免费域名，由于 CloudFlare API 不支持，故无法使用本模式申请!${PLAIN}"
-        back2menu
-        return
-    fi
 
-    read -rp "请输入 CloudFlare Global API Key: " cfgak
-    if [[ -z $cfgak ]]; then
-        echo -e "${RED}未输入 CloudFlare Global API Key，无法执行操作!${PLAIN}"
+    if ! get_cf_credentials; then
         back2menu
         return
     fi
-    export CF_Key="$cfgak"
-    
-    read -rp "请输入 CloudFlare 的登录邮箱: " cfemail
-    if [[ -z $cfemail ]]; then
-        echo -e "${RED}未输入 CloudFlare 的登录邮箱，无法执行操作!${PLAIN}"
-        back2menu
-        return
-    fi
-    export CF_Email="$cfemail"
 
     bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${domain}" -k ec-256 --insecure --force
 
@@ -362,9 +398,7 @@ acme_cfapiTLD() {
 acme_cfapiNTLD() {
     [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && inst_acme
 
-    check_ip
-
-    local domain cfgak cfemail
+    local domain
     read -rp "请输入需要申请证书的泛域名 (输入格式：example.com): " domain
     
     if [[ -z $domain ]]; then
@@ -373,27 +407,11 @@ acme_cfapiNTLD() {
         return
     fi
     
-    if [[ $(echo "${domain: -2}") =~ cf|ga|gq|ml|tk ]]; then
-        echo -e "${RED}检测为 Freenom 免费域名，由于 CloudFlare API 不支持，故无法使用本模式申请!${PLAIN}"
-        back2menu
-        return
-    fi
 
-    read -rp "请输入 CloudFlare Global API Key: " cfgak
-    if [[ -z $cfgak ]]; then
-        echo -e "${RED}未输入 CloudFlare Global API Key，无法执行操作！${PLAIN}"
+    if ! get_cf_credentials; then
         back2menu
         return
     fi
-    export CF_Key="$cfgak"
-    
-    read -rp "请输入 CloudFlare 的登录邮箱: " cfemail
-    if [[ -z $cfemail ]]; then
-        echo -e "${RED}未输入 CloudFlare 的登录邮箱，无法执行操作！${PLAIN}"
-        back2menu
-        return
-    fi
-    export CF_Email="$cfemail"
 
     bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "*.${domain}" -d "${domain}" -k ec-256 --insecure --force
 
