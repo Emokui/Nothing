@@ -691,7 +691,6 @@ reboot_vps() {
 }
 
 # ====== 防火墙配置 ======
-
 generate_firewall_awk_script() {
     cat << 'AWKSCRIPT'
 BEGIN {
@@ -725,7 +724,6 @@ BEGIN {
     if (extra ~ "^" prot " ") {
         sub("^" prot " ", "", extra)
     }
-
     real_in=""
     if ($7 == "--") real_in=$8
     else real_in=$7
@@ -780,7 +778,6 @@ END {
 }
 AWKSCRIPT
 }
-
 parse_firewall_table() {
     local ver=$1
     local cmd=$2
@@ -790,7 +787,6 @@ parse_firewall_table() {
          echo "$ver $line"
     done
 }
-
 list_firewall_rules() {
     local check_cmd="$1"
     
@@ -812,7 +808,6 @@ list_firewall_rules() {
     
     echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
 }
-
 configure_firewall() {
     get_ssh_port() {
         local port
@@ -838,10 +833,10 @@ configure_firewall() {
     
     save_rules() {
         if command -v netfilter-persistent &>/dev/null; then
-            netfilter-persistent save
+            netfilter-persistent save 2>/dev/null || true
         elif command -v service &>/dev/null; then
-             service iptables save 2>/dev/null
-             service ip6tables save 2>/dev/null
+             service iptables save 2>/dev/null || true
+             service ip6tables save 2>/dev/null || true
         fi
     }
     
@@ -852,8 +847,8 @@ configure_firewall() {
     local has_iptables=false
     local has_ip6tables=false
     
-    command -v iptables &>/dev/null && has_iptables=true
-    command -v ip6tables &>/dev/null && has_ip6tables=true
+    if command -v iptables &>/dev/null; then has_iptables=true; fi
+    if command -v ip6tables &>/dev/null; then has_ip6tables=true; fi
     
     if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
         echo -e "${YELLOW}[!] 未检测到防火墙工具，尝试安装...${PLAIN}"
@@ -868,8 +863,8 @@ configure_firewall() {
             return 1
         fi
         
-        command -v iptables &>/dev/null && has_iptables=true
-        command -v ip6tables &>/dev/null && has_ip6tables=true
+        if command -v iptables &>/dev/null; then has_iptables=true; fi
+        if command -v ip6tables &>/dev/null; then has_ip6tables=true; fi
         
         if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
              echo -e "${RED}[!] 无法安装或找到有效的防火墙工具，脚本退出${PLAIN}"
@@ -886,8 +881,8 @@ configure_firewall() {
         clear
         echo -e "${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
         echo -e "${BLUE}SSH端口:  ${YELLOW}${current_ssh_port}${PLAIN}"
-        echo -e "${BLUE}IPv4支持: $([[ "$has_iptables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未关闭${PLAIN}")${PLAIN}"
-        echo -e "${BLUE}IPv6支持: $([[ "$has_ip6tables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未关闭${PLAIN}")${PLAIN}"
+        echo -e "${BLUE}IPv4支持: $([[ "$has_iptables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未开启${PLAIN}")${PLAIN}"
+        echo -e "${BLUE}IPv6支持: $([[ "$has_ip6tables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未开启${PLAIN}")${PLAIN}"
         echo -e "${BLUE}=======================================${PLAIN}"
         echo -e "${GREEN}1.开启端口${PLAIN}"
         echo -e "${RED}2.关闭端口${PLAIN}"
