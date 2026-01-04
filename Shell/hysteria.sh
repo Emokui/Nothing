@@ -1,13 +1,65 @@
 #!/bin/bash
 
-# ======== 1.全局变量 ========
+# ======== 全局变量 ========
 RED="\033[1;31m"
 GREEN="\033[1;32m"
 YELLOW="\033[1;33m"
 BLUE="\033[1;34m"
 PLAIN="\033[0m"
 
-# ======== 2.通用函数 ========
+# ======== Root 权限检查 ========
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
+    exit 1
+fi
+
+# ======== 错误处理函数 ========
+error_exit() {
+    echo -e "${RED}错误: $1${PLAIN}"
+    exit 1
+}
+
+# ======== 包管理器检测 ========
+get_pkg_manager() {
+    if command -v apt-get &>/dev/null; then
+        echo "apt"
+    elif command -v yum &>/dev/null; then
+        echo "yum"
+    elif command -v dnf &>/dev/null; then
+        echo "dnf"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    else
+        echo "unknown"
+    fi
+}
+
+install_package() {
+    local pkg="$1"
+    local pkg_manager
+    pkg_manager=$(get_pkg_manager)
+    
+    case "$pkg_manager" in
+        apt)
+            apt-get update -y && apt-get install -y "$pkg"
+            ;;
+        yum)
+            yum install -y "$pkg"
+            ;;
+        dnf)
+            dnf install -y "$pkg"
+            ;;
+        pacman)
+            pacman -Sy --noconfirm "$pkg"
+            ;;
+        *)
+            echo -e "${RED}无法识别的包管理器,请手动安装 $pkg${PLAIN}"
+            return 1
+            ;;
+    esac
+}
+
+# ======== 通用函数 ========
 pause_and_return() {
     read -p "$(echo -e "${BLUE}按回车返回上一层...${PLAIN}")" temp
     clear
@@ -34,7 +86,7 @@ get_arch() {
 }
 
 random_pass() {
-    head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 10
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 10
 }
 
 has_ipv4() {
@@ -68,186 +120,62 @@ get_latest_download_url() {
     echo "$download_url"
 }
 
-# ======== 3.申请证书 ========
-generate_self_signed_cert() {
-    DEFAULT_DOMAIN="bing.com"
-    DEFAULT_CERT_PATH="/etc/cert"
-    DEFAULT_DAYS=36500
-
-    read -rp "$(echo -e "${GREEN}自签证书域名${PLAIN} ${BLUE}(默认:${DEFAULT_DOMAIN})${PLAIN}: ")" domain
-    domain="${domain:-$DEFAULT_DOMAIN}"
-    read -rp "$(echo -e "${GREEN}证书存放路径${PLAIN}${BLUE}(默认:${DEFAULT_CERT_PATH})${PLAIN}: ")" cert_path
-    cert_path="${cert_path:-$DEFAULT_CERT_PATH}"
-    read -rp "$(echo -e "${GREEN}证书有效天数${PLAIN}${BLUE}(默认:${DEFAULT_DAYS})${PLAIN}: ")" days
-    days="${days:-$DEFAULT_DAYS}"
-
-    key_file="${cert_path}/server.key"
-    crt_file="${cert_path}/server.crt"
-
-    sudo mkdir -p "$cert_path"
-    sudo openssl ecparam -name prime256v1 -genkey -noout -out "$key_file"
-
-    sudo openssl req -new -x509 -key "$key_file" -out "$crt_file" -days "$days" \
-        -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain"
-
-    sudo chmod 644 "$crt_file"
-    sudo chmod 600 "$key_file"
-
-    echo -e "${YELLOW}私钥位置:$key_file${PLAIN}"
-    echo -e "${YELLOW}证书位置:$crt_file${PLAIN}"
-    pause_and_return
-}
-
-issue_acme_cert() {
-    clear
-    CERT_DIR="/root/cert"
-    ACME_SH="$HOME/.acme.sh/acme.sh"
-
-    for bin in jq dig lsof curl wget socat openssl; do
-        if ! command -v $bin >/dev/null 2>&1; then
-            echo -e "${YELLOW}缺少依赖 $bin,正在安装...${PLAIN}"
-            apt update -y
-            case $bin in
-                jq) apt install -y jq ;;
-                dig) apt install -y dnsutils ;;
-                lsof) apt install -y lsof ;;
-                curl) apt install -y curl ;;
-                wget) apt install -y wget ;;
-                socat) apt install -y socat ;;
-                openssl) apt install -y openssl ;;
-            esac
-        fi
-    done
-
-    if [ ! -f "$ACME_SH" ]; then
-        echo -e "${YELLOW}[*] 正在安装 acme.sh ...${PLAIN}"
-        curl https://get.acme.sh | sh
-        source ~/.bashrc
-        bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
-    fi
-
-    $ACME_SH --set-default-ca --server letsencrypt
-
-    if ! $ACME_SH --list-account 2>/dev/null | grep -q letsencrypt; then
-        auto_email="$(date +%s%N | md5sum | cut -c 1-16)@gmail.com"
-        $ACME_SH --register-account -m "$auto_email"
-    else
-        auto_email="$($ACME_SH --list-account 2>/dev/null | grep Registered | grep letsencrypt | awk '{print $4}')"
-    fi
-
-    mkdir -p "$CERT_DIR"
-
-    ipv4=$(curl -s4m8 ip.sb -k | sed -n 1p)
-    ipv6=$(curl -s6m8 ip.sb -k | sed -n 1p)
-
-    clear
-    echo -e "${YELLOW}请输入需要申请证书的域名${PLAIN}"
-    read -p "$(echo -e "${BLUE}域名: ${PLAIN}")" domain
-    [[ -z $domain ]] && echo -e "${RED}未输入域名,操作中止${PLAIN}" && pause_and_return && return
-
-    domainIP=$(dig @8.8.8.8 +time=2 +short "$domain" 2>/dev/null | sed -n 1p)
-    if [[ -z $domainIP ]]; then
-        domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$domain" 2>/dev/null | sed -n 1p)
-    fi
-
-    ip_match=false
-    if [[ -n "$ipv4" && "$domainIP" == "$ipv4" ]]; then
-        ip_match=true
-    fi
-    if [[ -n "$ipv6" && "$domainIP" == "$ipv6" ]]; then
-        ip_match=true
-    fi
-
-    if [[ "$ip_match" != "true" ]]; then
-        echo -e "${RED}域名解析IP与本机不符${PLAIN}"
-        echo -e "${YELLOW}域名解析IP: $domainIP, 本机IPv4: $ipv4, IPv6: $ipv6${PLAIN}"
-        echo -e "${YELLOW}请检查域名解析后重试${PLAIN}"
-        pause_and_return
-        return
-    fi
-
-    if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
-        echo -e "${GREEN}[✓] 已检测到 ${domain} 证书,跳过签发步骤${PLAIN}"
-        pause_and_return
-        return 0
-    fi
-
-    $ACME_SH --issue -d "${domain}" --standalone -k ec-256 --insecure
-    $ACME_SH --install-cert -d "${domain}" --key-file "${CERT_DIR}/${domain}.key" --fullchain-file "${CERT_DIR}/${domain}.crt" --ecc
-
-    if [[ -f "${CERT_DIR}/${domain}.crt" && -f "${CERT_DIR}/${domain}.key" ]]; then
-        clear
-        echo -e "${GREEN}证书申请成功!${PLAIN}"
-        echo -e "${YELLOW}证书: ${CERT_DIR}/${domain}.crt${PLAIN}"
-        echo -e "${YELLOW}私钥: ${CERT_DIR}/${domain}.key${PLAIN}"
-        echo -e "${YELLOW}注册邮箱: $auto_email${PLAIN}"
-    else
-        echo -e "${RED}证书申请失败,请检查网络和域名解析!${PLAIN}"
-    fi
-    pause_and_return
-}
-
+# ======== 申请证书 ========
 cert_menu() {
-    while true; do
-        clear
-        echo -e " ${BLUE}✦ Hysteria_Cert ✦${PLAIN}"
-        echo -e " ${GREEN}  1.${PLAIN}自签证书"
-        echo -e " ${GREEN}  2.${PLAIN}域名证书"
-        echo -e " ${GREEN}  0.${PLAIN}返回主页"
-
-        read -p "$(echo -e "${BLUE} ✦ Steins Gate ✦ : ${PLAIN}")" choice
-
-        case "$choice" in
-            1) generate_self_signed_cert ;;
-            2) issue_acme_cert ;;
-            0) break ;;
-            *) echo -e "${RED}无效选项,请重新输入${PLAIN}"; pause_and_return ;;
-        esac
-    done
+    clear
+    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh)
 }
 
-# ======== 4.证书选择 ========
+# ======== 证书选择 ========
 
-list_root_certs() {
+list_etc_certs() {
     cert_files=()
-    if compgen -G "/root/cert/*.crt" > /dev/null; then
-        mapfile -t cert_files < <(ls /root/cert/*.crt 2>/dev/null | sort)
+    if compgen -G "/etc/cert/*.crt" > /dev/null 2>&1; then
+        mapfile -t cert_files < <(ls /etc/cert/*.crt 2>/dev/null | sort)
     fi
 }
 
 prompt_choose_cert_from_list() {
     while true; do
-        list_root_certs
+        list_etc_certs
         clear
         local cert_count=${#cert_files[@]}
         if (( cert_count == 0 )); then
-            echo -e "${BLUE}未检测到 /root/cert 下任何证书${PLAIN}"
-            sleep 0.4
+            echo -e "${YELLOW}未检测到 /etc/cert 下任何证书文件${PLAIN}"
+            echo -e "${YELLOW}请先使用证书配置功能申请证书${PLAIN}"
+            sleep 1
             return 1
         fi
 
         echo -e "${BLUE}检测到以下证书: ${PLAIN}"
         for ((i=0; i<cert_count; i++)); do
-            idx=$((i+1))
-            echo -e "${GREEN}${idx}.${PLAIN} ${GREEN}${cert_files[$i]}${PLAIN}"
+            local idx=$((i+1))
+            local crt_name
+            crt_name=$(basename "${cert_files[$i]}")
+            echo -e "${GREEN}${idx}.${PLAIN} ${crt_name}"
         done
-        read -p "$(echo -e "${BLUE}请输入编号(1-${cert_count} 输入0返回): ${PLAIN}")" crt_idx
+        echo -e "${GREEN}0.${PLAIN} 返回上级"
+        read -p "$(echo -e "${BLUE}请选择证书(1-${cert_count}): ${PLAIN}")" crt_idx
 
         if [[ "$crt_idx" == "0" ]]; then
             return 2
         fi
 
         if [[ "$crt_idx" =~ ^[0-9]+$ ]] && (( crt_idx >= 1 && crt_idx <= cert_count )); then
-            crtfile="${cert_files[$((crt_idx-1))]}"
+            local crtfile="${cert_files[$((crt_idx-1))]}"
+            local domain_base
             domain_base=$(basename "$crtfile" .crt)
-            keyfile="/root/cert/${domain_base}.key"
+            local keyfile="/etc/cert/${domain_base}.key"
             if [[ -f "$keyfile" ]]; then
                 cert_path="$crtfile"
                 key_path="$keyfile"
+                echo -e "${GREEN}已选择证书: $crtfile${PLAIN}"
+                sleep 0.5
                 return 0
             else
-                echo -e "${RED}未找到对应私钥:$keyfile,请重新选择或输入0返回${PLAIN}"
-                sleep 0.4
+                echo -e "${RED}未找到对应私钥: $keyfile${PLAIN}"
+                echo -e "${YELLOW}请确保证书和私钥文件名一致(如: domain.crt 和 domain.key)${PLAIN}"
+                sleep 1
                 continue
             fi
         else
@@ -276,7 +204,7 @@ prompt_custom_paths() {
         if [[ -f "$cert_path" && -f "$key_path" ]]; then
             return 0
         else
-            echo -e "${RED}自定义证书或私钥路径无效!请重新输入或输入0返回${PLAIN}"
+            echo -e "${RED}证书或私钥路径无效!请重新输入或输入0返回${PLAIN}"
             sleep 0.4
             continue
         fi
@@ -287,25 +215,13 @@ select_cert_for_hysteria_install() {
     while true; do
         clear
         echo -e "${BLUE}✦ Choice_Cert ✦ : ${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}自签证书"
-        echo -e "${GREEN}  2.${PLAIN}域名证书"
-        echo -e "${GREEN}  3.${PLAIN}输入路径"
+        echo -e "${GREEN}  1.${PLAIN}扫描证书(/etc/cert)"
+        echo -e "${GREEN}  2.${PLAIN}自定义路径"
         echo -e "${GREEN}  0.${PLAIN}退出返回"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
         case "$cert_option" in
             1)
-                if [[ -f /etc/cert/server.crt && -f /etc/cert/server.key ]]; then
-                    cert_path="/etc/cert/server.crt"
-                    key_path="/etc/cert/server.key"
-                    return 0
-                else
-                    echo -e "${RED}未检测到 /etc/cert 下任何证书${PLAIN}"
-                    sleep 0.4
-                    continue
-                fi
-                ;;
-            2)
                 prompt_choose_cert_from_list
                 rc=$?
                 if [[ $rc -eq 0 ]]; then
@@ -316,7 +232,7 @@ select_cert_for_hysteria_install() {
                     continue
                 fi
                 ;;
-            3)
+            2)
                 prompt_custom_paths
                 rc=$?
                 if [[ $rc -eq 0 ]]; then
@@ -346,9 +262,9 @@ select_cert_for_hysteria_modify() {
     while true; do
         clear
         echo -e "${BLUE}✦ Choice_Cert ✦ : ${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}自签证书"
-        echo -e "${GREEN}  2.${PLAIN}域名证书"
-        echo -e "${GREEN}  3.${PLAIN}输入路径"
+        echo -e "${GREEN}  1.${PLAIN}扫描证书(/etc/cert)"
+        echo -e "${GREEN}  2.${PLAIN}自定义路径"
+        echo -e "${YELLOW}(回车保持原配置)${PLAIN}"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" cert_option
 
         if [[ -z "$cert_option" ]]; then
@@ -359,17 +275,6 @@ select_cert_for_hysteria_modify() {
 
         case "$cert_option" in
             1)
-                if [[ -f /etc/cert/server.crt && -f /etc/cert/server.key ]]; then
-                    cert_path="/etc/cert/server.crt"
-                    key_path="/etc/cert/server.key"
-                    return 0
-                else
-                    echo -e "${RED}未检测到 /etc/cert 下任何证书${PLAIN}"
-                    sleep 0.4
-                    continue
-                fi
-                ;;
-            2)
                 prompt_choose_cert_from_list
                 rc=$?
                 if [[ $rc -eq 0 ]]; then
@@ -378,7 +283,7 @@ select_cert_for_hysteria_modify() {
                     continue
                 fi
                 ;;
-            3)
+            2)
                 prompt_custom_paths
                 rc=$?
                 if [[ $rc -eq 0 ]]; then
@@ -398,11 +303,11 @@ select_cert_for_hysteria_modify() {
     done
 }
 
-# ======== 5.显示配置 ========
+# ======== 显示配置 ========
 show_hysteria_config() {
     clear
-    HY2_DIR="/root/hysteria"
-    CONFIG_PATH="${HY2_DIR}/config.yaml"
+    CONFIG_DIR="/etc/hysteria"
+    CONFIG_PATH="${CONFIG_DIR}/config.yaml"
     if [ -f "$CONFIG_PATH" ]; then
         echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
         cat "$CONFIG_PATH"
@@ -424,22 +329,18 @@ show_hysteria_config() {
     pause_and_return
 }
 
-# ======== 6.端口跳跃 ========
+# ======== 端口跳跃 ========
 port_jump_set() {
     clear
     echo -e "${BLUE}检查 iptables/ip6tables 是否已安装...${PLAIN}"
     for bin in iptables ip6tables; do
-        if ! command -v $bin &> /dev/null; then
+        if ! command -v "$bin" &> /dev/null; then
             echo -e "${YELLOW}未检测到 $bin, 正在安装中...${PLAIN}"
-            if [ -f /etc/debian_version ]; then
-                sudo apt-get update
-                sudo apt-get install -y $bin
-            elif [ -f /etc/redhat-release ]; then
-                sudo yum install -y $bin
-            else
-                echo -e "${RED}无法识别的系统,请手动安装 $bin！中止任务!${PLAIN}"
+            install_package "$bin" || {
+                echo -e "${RED}安装 $bin 失败,请手动安装后重试${PLAIN}"
+                pause_and_return
                 return 1
-            fi
+            }
         fi
     done
 
@@ -467,7 +368,7 @@ port_jump_set() {
     read -p "$(echo -e "${YELLOW}请输入端口范围(默认18443:28444): ${PLAIN}")" port_range
     port_range=${port_range:-18443:28444}
 
-    CONFIG_PATH="/root/hysteria/config.yaml"
+    CONFIG_PATH="/etc/hysteria/config.yaml"
     default_port=""
     if [[ -f "$CONFIG_PATH" ]]; then
         cfg_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/^://')
@@ -578,10 +479,10 @@ port_jump_menu() {
     done
 }
 
-# ======== 7.主菜单 ========
+# ======== 主菜单 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Hysteria_Ver.1.6 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Hysteria_Ver.1.7 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}证书配置"
     echo -e "${GREEN}  2.${PLAIN}安装服务"
     echo -e "${GREEN}  3.${PLAIN}管理服务"
@@ -597,9 +498,9 @@ while true; do
             ;;
         2)
             clear
-            HY2_DIR="/root/hysteria"
-            EXEC_PATH="${HY2_DIR}/hysteria"
-            CONFIG_PATH="${HY2_DIR}/config.yaml"
+            EXEC_PATH="/usr/local/bin/hysteria"
+            CONFIG_DIR="/etc/hysteria"
+            CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 
             if [[ -f "$EXEC_PATH" && -f "$CONFIG_PATH" ]]; then
                 echo -e "${YELLOW}检测到已安装且存在配置${PLAIN}"
@@ -607,7 +508,7 @@ while true; do
                 continue
             fi
 
-            mkdir -p "$HY2_DIR"
+            mkdir -p "$CONFIG_DIR"
 
             ARCH=$(get_arch)
             echo -e "${BLUE}检测到系统架构: $ARCH${PLAIN}"
@@ -617,7 +518,12 @@ while true; do
                 exit 1
             fi
             echo -e "${BLUE}正在下载最新版本的 Hysteria ($ARCH)...${PLAIN}"
-            wget -O "${EXEC_PATH}" "$DOWNLOAD_URL"
+            if ! wget -O "${EXEC_PATH}" "$DOWNLOAD_URL"; then
+                echo -e "${RED}下载失败,请检查网络连接${PLAIN}"
+                rm -f "${EXEC_PATH}"
+                pause_and_return
+                continue
+            fi
 
             if [ ! -s "$EXEC_PATH" ]; then
                 echo -e "${RED}下载的文件为空,请检查网络或下载链接是否正确${PLAIN}"
@@ -661,7 +567,7 @@ while true; do
             masquerade_domain=${masquerade_domain:-www.bing.com}
             masquerade_url="https://${masquerade_domain}"
 
-            cat > "$HY2_DIR/config.yaml" << EOF
+            cat > "$CONFIG_PATH" << EOF
 listen: :${listen_port}
 
 tls:
@@ -701,7 +607,7 @@ outbounds:
       password: ${socks5_password}
 EOF2
 )
-                echo "$OUTBOUNDS_CONFIG" >> "$HY2_DIR/config.yaml"
+                echo "$OUTBOUNDS_CONFIG" >> "$CONFIG_PATH"
             fi
 
             clear
@@ -713,7 +619,7 @@ Description=Hysteria Server Service
 After=network.target
 
 [Service]
-ExecStart=/root/hysteria/hysteria server --config /root/hysteria/config.yaml
+ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml
 User=root
 Group=root
 Restart=always
@@ -743,9 +649,9 @@ EOF
             ;;
         3)
             SERVICE_NAME="hysteria"
-            HY2_DIR="/root/hysteria"
-            EXEC_PATH="${HY2_DIR}/hysteria"
-            CONFIG_PATH="${HY2_DIR}/config.yaml"
+            EXEC_PATH="/usr/local/bin/hysteria"
+            CONFIG_DIR="/etc/hysteria"
+            CONFIG_PATH="${CONFIG_DIR}/config.yaml"
             SERVICE_FILE="/etc/systemd/system/hysteria.service"
             CERT_DIR="/etc/cert"
             PORT_JUMP_SERVICE="/etc/systemd/system/port-jump.service"
@@ -780,17 +686,17 @@ EOF
                     2)
                         clear
                          echo -e "${BLUE}正在停止 Hysteria 服务...${PLAIN}"
-                         sudo systemctl stop $SERVICE_NAME
+                         sudo systemctl stop "$SERVICE_NAME"
                          echo -e "${GREEN}已停止${PLAIN}"
-                         sudo systemctl status --no-pager $SERVICE_NAME
+                         sudo systemctl status --no-pager "$SERVICE_NAME"
                          pause_and_return
                          ;;
                     3)
                         clear
                         echo -e "${BLUE}正在重启 Hysteria 服务...${PLAIN}"
-                        sudo systemctl restart $SERVICE_NAME
+                        sudo systemctl restart "$SERVICE_NAME"
                         echo -e "${GREEN}已重启${PLAIN}"
-                        sudo systemctl status --no-pager $SERVICE_NAME
+                        sudo systemctl status --no-pager "$SERVICE_NAME"
                         pause_and_return
                         ;;
                     4)
@@ -908,15 +814,15 @@ EOF2
 
                         clear
                         echo -e "${GREEN}新配置已保存,将重启 Hysteria 服务...${PLAIN}"
-                        sudo systemctl restart $SERVICE_NAME
-                        sudo systemctl status --no-pager $SERVICE_NAME
+                        sudo systemctl restart "$SERVICE_NAME"
+                        sudo systemctl status --no-pager "$SERVICE_NAME"
                         pause_and_return
                         ;;
                     5)
                         clear
                         echo -e "${BLUE}正在更新 Hysteria 内核...${PLAIN}"
                         echo -e "${BLUE}先停止 Hysteria 服务...${PLAIN}"
-                        sudo systemctl stop $SERVICE_NAME
+                        sudo systemctl stop "$SERVICE_NAME"
                         ARCH=$(get_arch)
                         echo -e "${BLUE}检测到系统架构: $ARCH${PLAIN}"
                         DOWNLOAD_URL=$(get_latest_download_url "$ARCH")
@@ -929,18 +835,19 @@ EOF2
                         chmod +x "$EXEC_PATH"
                         echo -e "${BLUE}内核已更新,重启服务中...${PLAIN}"
                         sudo systemctl daemon-reload
-                        sudo systemctl start $SERVICE_NAME
+                        sudo systemctl start "$SERVICE_NAME"
                         pause_and_return
                         ;;
                     6)
                         clear
                         echo -e "${BLUE}正在删除 Hysteria 相关资源...${PLAIN}"
-                        sudo systemctl stop $SERVICE_NAME
-                        sudo systemctl disable $SERVICE_NAME
-                        sudo rm -f $SERVICE_FILE
-                        sudo rm -rf $HY2_DIR
-                        sudo rm -f $CERT_DIR/server.key
-                        sudo rm -f $CERT_DIR/server.crt
+                        sudo systemctl stop "$SERVICE_NAME"
+                        sudo systemctl disable "$SERVICE_NAME"
+                        sudo rm -f "$SERVICE_FILE"
+                        sudo rm -f "$EXEC_PATH"
+                        sudo rm -rf "$CONFIG_DIR"
+                        sudo rm -f "$CERT_DIR/server.key"
+                        sudo rm -f "$CERT_DIR/server.crt"
                         if [ -f "$PORT_JUMP_SERVICE" ]; then
                             sudo systemctl stop port-jump.service
                             sudo systemctl disable port-jump.service
