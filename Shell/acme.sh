@@ -6,7 +6,11 @@ set -euo pipefail
 RED="\033[31m\033[01m"
 GREEN="\033[32m\033[01m"
 YELLOW="\033[33m\033[01m"
+BLUE="\033[34m\033[01m"
 PLAIN='\033[0m'
+
+# ====== 证书存放路径 ======
+CERT_PATH="/etc/cert"
 
 # ====== Root 权限检查 ======
 [[ $EUID -ne 0 ]] && echo -e "${RED}注意：请在 root 用户下运行脚本${PLAIN}" && exit 1
@@ -115,6 +119,13 @@ get_cf_credentials() {
     fi
     export CF_Email="$cfemail"
     return 0
+}
+
+# ====== 获取证书列表（返回数组）======
+get_cert_list() {
+    local output
+    output=$(~/.acme.sh/acme.sh --list 2>/dev/null | tail -n +2) || true
+    echo "$output"
 }
 
 # ====== Acme 安装与卸载 ======
@@ -251,18 +262,18 @@ check_80() {
 
 checktls() {
     local domain="$1"
-    mkdir -p /root/cert
+    mkdir -p "$CERT_PATH"
 
-    if [[ -f /root/cert/$domain.crt && -f /root/cert/$domain.key ]]; then
-        if [[ -s /root/cert/$domain.crt && -s /root/cert/$domain.key ]]; then
+    if [[ -f "$CERT_PATH/$domain.crt" && -f "$CERT_PATH/$domain.key" ]]; then
+        if [[ -s "$CERT_PATH/$domain.crt" && -s "$CERT_PATH/$domain.key" ]]; then
             warp_up
 
             sed -i '/--cron/d' /etc/crontab >/dev/null 2>&1 || true
             echo "0 0 * * * root bash /root/.acme.sh/acme.sh --cron -f >/dev/null 2>&1" >> /etc/crontab
 
-            echo -e "${GREEN}证书申请成功! 证书 ($domain.crt) 和私钥 ($domain.key) 已保存到 /root/cert${PLAIN}"
-            echo -e "${YELLOW}证书 crt 文件路径: /root/cert/$domain.crt${PLAIN}"
-            echo -e "${YELLOW}私钥 key 文件路径: /root/cert/$domain.key${PLAIN}"
+            echo -e "${GREEN}证书申请成功! 证书 ($domain.crt) 和私钥 ($domain.key) 已保存到 $CERT_PATH${PLAIN}"
+            echo -e "${YELLOW}证书 crt 文件路径: $CERT_PATH/$domain.crt${PLAIN}"
+            echo -e "${YELLOW}私钥 key 文件路径: $CERT_PATH/$domain.key${PLAIN}"
             return 0
         fi
     fi
@@ -363,8 +374,8 @@ acme_standalone() {
         fi
     fi
 
-    mkdir -p /root/cert
-    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file /root/cert/"$domain".key --fullchain-file /root/cert/"$domain".crt --ecc
+    mkdir -p "$CERT_PATH"
+    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
     checktls "$domain"
     back2menu
 }
@@ -380,7 +391,6 @@ acme_cfapiTLD() {
         back2menu
         return
     fi
-    
 
     if ! get_cf_credentials; then
         back2menu
@@ -389,8 +399,8 @@ acme_cfapiTLD() {
 
     bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${domain}" -k ec-256 --insecure --force
 
-    mkdir -p /root/cert
-    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file /root/cert/"$domain".key --fullchain-file /root/cert/"$domain".crt --ecc
+    mkdir -p "$CERT_PATH"
+    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
     checktls "$domain"
     back2menu
 }
@@ -406,7 +416,6 @@ acme_cfapiNTLD() {
         back2menu
         return
     fi
-    
 
     if ! get_cf_credentials; then
         back2menu
@@ -415,42 +424,130 @@ acme_cfapiNTLD() {
 
     bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "*.${domain}" -d "${domain}" -k ec-256 --insecure --force
 
-    mkdir -p /root/cert
-    bash ~/.acme.sh/acme.sh --install-cert -d "*.${domain}" --key-file /root/cert/"$domain".key --fullchain-file /root/cert/"$domain".crt --ecc
+    mkdir -p "$CERT_PATH"
+    bash ~/.acme.sh/acme.sh --install-cert -d "*.${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
     checktls "$domain"
     back2menu
 }
 
 view_cert() {
     [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && inst_acme
-    bash ~/.acme.sh/acme.sh --list
+    
+    echo ""
+    clear
+    echo -e "${BLUE}==================== 已申请的证书列表 ====================${PLAIN}"
+    
+    local cert_list
+    cert_list=$(get_cert_list)
+    
+    if [[ -z "$cert_list" ]]; then
+        echo -e "${YELLOW}暂无已申请的证书${PLAIN}"
+        back2menu
+        return
+    fi
+    
+    printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | ${GREEN}%-15s${PLAIN}\n" "序号" "域名" "到期时间"
+    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
+    
+    local index=1
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        
+        local main_domain expire_time
+        main_domain=$(echo "$line" | awk '{print $1}')
+        expire_time=$(echo "$line" | awk '{print $6}' | cut -d'T' -f1)
+        
+        if [[ "$main_domain" == \** ]]; then
+            printf "${YELLOW}%-4s${PLAIN} | ${YELLOW}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
+        else
+            printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
+        fi
+        ((index++))
+    done <<< "$cert_list"
+    
+    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
+    echo -e "证书存放路径: ${GREEN}$CERT_PATH${PLAIN}"
+    
     back2menu
 }
 
 revoke_cert() {
     [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && inst_acme
-
-    bash ~/.acme.sh/acme.sh --list
     
-    local domain
-    read -rp "请输入要撤销的域名证书 (复制 Main_Domain 下显示的域名): " domain
-    if [[ -z $domain ]]; then
-        echo -e "${RED}未输入域名，无法执行操作!${PLAIN}"
+    echo ""
+    clear
+    echo -e "${BLUE}==================== 已申请的证书列表 ====================${PLAIN}"
+    
+    local cert_list
+    cert_list=$(get_cert_list)
+    
+    if [[ -z "$cert_list" ]]; then
+        echo -e "${YELLOW}暂无已申请的证书${PLAIN}"
         back2menu
         return
     fi
-
-    if bash ~/.acme.sh/acme.sh --list | grep -q "$domain"; then
-        bash ~/.acme.sh/acme.sh --revoke -d "${domain}" --ecc
-        bash ~/.acme.sh/acme.sh --remove -d "${domain}" --ecc
-
-        rm -rf ~/.acme.sh/"${domain}"_ecc
-        rm -f /root/cert/"$domain".crt /root/cert/"$domain".key
-
-        echo -e "${GREEN}撤销 ${domain} 的域名证书成功${PLAIN}"
-    else
-        echo -e "${RED}未找到 ${domain} 的域名证书，请检查后重新运行!${PLAIN}"
+    
+    declare -a domains
+    local index=1
+    
+    printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | ${GREEN}%-15s${PLAIN}\n" "序号" "域名" "到期时间"
+    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
+    
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        
+        local main_domain expire_time
+        main_domain=$(echo "$line" | awk '{print $1}')
+        expire_time=$(echo "$line" | awk '{print $6}' | cut -d'T' -f1)
+        
+        domains+=("$main_domain")
+        
+        if [[ "$main_domain" == \** ]]; then
+            printf "${YELLOW}%-4s${PLAIN} | ${YELLOW}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
+        else
+            printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
+        fi
+        ((index++))
+    done <<< "$cert_list"
+    
+    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
+    echo ""
+    
+    local choice
+    read -rp "请输入要撤销的证书序号 (输入 0 返回): " choice
+    
+    if [[ "$choice" == "0" ]]; then
+        back2menu
+        return
     fi
+    
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt "${#domains[@]}" ]]; then
+        echo -e "${RED}无效的序号！${PLAIN}"
+        back2menu
+        return
+    fi
+    
+    local selected_domain="${domains[$((choice-1))]}"
+    
+    echo -e "${YELLOW}即将撤销证书: $selected_domain${PLAIN}"
+    read -rp "确认撤销? [y/N]: " confirm
+    
+    if [[ ! $confirm =~ [Yy] ]]; then
+        echo -e "${YELLOW}已取消操作${PLAIN}"
+        back2menu
+        return
+    fi
+    
+    bash ~/.acme.sh/acme.sh --revoke -d "${selected_domain}" --ecc
+    bash ~/.acme.sh/acme.sh --remove -d "${selected_domain}" --ecc
+    
+    rm -rf ~/.acme.sh/"${selected_domain}"_ecc
+    
+    local base_domain="${selected_domain#\*.}"
+    rm -f "$CERT_PATH/$base_domain.crt" "$CERT_PATH/$base_domain.key"
+    rm -f "$CERT_PATH/$selected_domain.crt" "$CERT_PATH/$selected_domain.key" 2>/dev/null || true
+    
+    echo -e "${GREEN}✓ 证书 ${selected_domain} 已成功撤销${PLAIN}"
     back2menu
 }
 
@@ -488,21 +585,18 @@ generate_self_signed_cert() {
     echo -e "${YELLOW}开始生成自签名ECC证书...${PLAIN}"
     
     local DEFAULT_DOMAIN="bing.com"
-    local DEFAULT_CERT_PATH="/etc/cert"
     local DEFAULT_DAYS=36500
 
-    local domain cert_path days
+    local domain days
     read -rp "请输入证书的域名（默认: ${DEFAULT_DOMAIN}）: " domain
     domain="${domain:-$DEFAULT_DOMAIN}"
-    read -rp "请输入证书存放路径（默认: ${DEFAULT_CERT_PATH}）: " cert_path
-    cert_path="${cert_path:-$DEFAULT_CERT_PATH}"
     read -rp "请输入证书有效天数（默认: ${DEFAULT_DAYS}）: " days
     days="${days:-$DEFAULT_DAYS}"
 
-    local key_file="${cert_path}/server.key"
-    local crt_file="${cert_path}/server.crt"
+    local key_file="$CERT_PATH/server.key"
+    local crt_file="$CERT_PATH/server.crt"
 
-    mkdir -p "$cert_path"
+    mkdir -p "$CERT_PATH"
     echo "生成 ECC 私钥..."
     openssl ecparam -name prime256v1 -genkey -noout -out "$key_file"
     echo "使用私钥生成自签证书..."
