@@ -70,7 +70,7 @@ get_current_mihomo_version() {
 
 get_latest_mihomo_url_and_version() {
     latest_version=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
-    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-v1-${latest_version}.gz"
+    url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/mihomo-linux-amd64-${latest_version}.gz"
     echo "$url|${latest_version}"
 }
 
