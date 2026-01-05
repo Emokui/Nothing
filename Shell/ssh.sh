@@ -783,7 +783,7 @@ parse_firewall_table() {
     local cmd=$2
     if ! command -v "$cmd" &>/dev/null; then return; fi
     
-    $cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target" | while read -r line; do
+    ($cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target" || true) | while read -r line; do
          echo "$ver $line"
     done
 }
