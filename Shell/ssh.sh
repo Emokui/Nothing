@@ -676,7 +676,6 @@ run_install_script() {
 install_acme()      { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh"; }
 install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell.sh"; }
 install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/mihomo.sh"; }
-install_trojan()    { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/trojan.sh"; }
 install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/hysteria.sh"; }
 install_substore()  { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/substore.sh"; }
 install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/Install.sh"; }
@@ -994,11 +993,10 @@ main_menu() {
         echo -e "${GREEN}  10.${PLAIN}配置Nginx"
         echo -e "${GREEN}  11.${PLAIN}安装Snell"
         echo -e "${GREEN}  12.${PLAIN}安装Mihomo"
-        echo -e "${GREEN}  13.${PLAIN}安装Trojan"
-        echo -e "${GREEN}  14.${PLAIN}安装Hysteria"
-        echo -e "${GREEN}  15.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  16.${PLAIN}安装SubStore"
-        echo -e "${GREEN}  17.${PLAIN}提取WireGuard"
+        echo -e "${GREEN}  13.${PLAIN}安装Hysteria"
+        echo -e "${GREEN}  14.${PLAIN}配置FireWall"
+        echo -e "${GREEN}  15.${PLAIN}安装SubStore"
+        echo -e "${GREEN}  16.${PLAIN}提取WireGuard"
         echo -e "${GREEN}   0.${PLAIN}离开SteinsGate"
         read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -1015,15 +1013,14 @@ main_menu() {
             10) install_nginx ;;
             11) install_snell ;;
             12) install_mihomo ;;
-            13) install_trojan ;;
-            14) install_hysteria ;;
-            15) configure_firewall ;;
-            16) install_substore ;;
-            17) install_wireguard ;;
+            13) install_hysteria ;;
+            14) configure_firewall ;;
+            15) install_substore ;;
+            16) install_wireguard ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
     done
 }
 
-main_menu
+main_men
