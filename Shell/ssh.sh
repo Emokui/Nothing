@@ -1023,4 +1023,4 @@ main_menu() {
     done
 }
 
-main_men
+main_menu
