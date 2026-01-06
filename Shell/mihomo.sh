@@ -41,14 +41,32 @@ random_pass() {
     tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12
 }
 
+# ======== 检测IPv4 ========
+check_ipv4() {
+    curl -s -4 --max-time 2 https://www.google.com > /dev/null 2>&1
+}
+
 get_latest_download_url() {
     local arch="$1"
-    local api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-    local latest_version asset_name download_url
+    local latest_version asset_name download_url base_url api_url
+
+    if check_ipv4; then
+        base_url="https://github.com"
+        api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+    else
+        base_url="https://mihomo.nicycc.workers.dev"
+        api_url="https://api.nicycc.workers.dev/repos/MetaCubeX/mihomo/releases/latest"
+    fi
 
     latest_version=$(curl -s "$api_url" | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
+    
+    if [[ -z "$latest_version" ]]; then
+        echo "ERROR|"
+        return 1
+    fi
+    
     asset_name="mihomo-linux-${arch}-${latest_version}.gz"
-    download_url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/${asset_name}"
+    download_url="${base_url}/MetaCubeX/mihomo/releases/download/${latest_version}/${asset_name}"
     echo "${download_url}|${latest_version}"
 }
 
@@ -107,7 +125,7 @@ select_cert() {
     done
 }
 
-# ======== 创建 systemd 服务 ========
+# ======== 创建systemd ========
 create_systemd_service() {
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -207,7 +225,7 @@ rules:
 EOF
 }
 
-# ======== 安装 Mihomo ========
+# ======== 安装Mihomo ========
 install_mihomo() {
     clear
     if [[ -f "$EXEC_PATH" && -f "$CONFIG_PATH" ]]; then
