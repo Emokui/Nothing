@@ -98,7 +98,7 @@ prompt_listener_config() {
   echo -e "${BLUE}===== ${title} =====${PLAIN}"
 
   while true; do
-    read -p "$(echo -e "${BLUE}端口(默认:${default_port}，支持 1000-2000): ${PLAIN}")" listener_port
+    read -p "$(echo -e "${BLUE}端口(默认:${default_port}): ${PLAIN}")" listener_port
     listener_port=${listener_port:-$default_port}
     if validate_port_expr "$listener_port"; then
       break
@@ -171,7 +171,7 @@ select_cert() {
         clear
         echo -e "${BLUE}选择证书:${PLAIN}"
         for ((i=0; i<${#cert_files[@]}; i++)); do
-          echo -e "${GREEN}$((i+1)).${PLAIN} $(basename "${cert_files[$i]}")"
+          echo -e "${GREEN}$((i+1)).${PLAIN}$(basename "${cert_files[$i]}")"
         done
         read -p "$(echo -e "${BLUE}输入编号: ${PLAIN}")" idx
         if [[ "$idx" =~ ^[0-9]+$ ]] && (( idx >= 1 && idx <= ${#cert_files[@]} )); then
@@ -466,14 +466,13 @@ EOF
 # ======== 应用配置并重启 ========
 apply_and_restart() {
   if ! render_config > "$CONFIG_PATH"; then
-    echo -e "${RED}生成配置失败：请检查 env 文件内容与 YAML 字段是否正确${PLAIN}"
+    echo -e "${RED}生成配置失败: 请检查 env 文件内容与 YAML 字段是否正确${PLAIN}"
     return 1
   fi
 
   if ! systemctl restart "$SERVICE_NAME" >/dev/null 2>&1; then
-    echo -e "${RED}重启 ${SERVICE_NAME} 失败：请查看日志定位原因${PLAIN}"
-    echo -e "${YELLOW}你也可以手动运行：systemctl status ${SERVICE_NAME} --no-pager${PLAIN}"
-    echo -e "${YELLOW}最近日志（最后 30 行）：${PLAIN}"
+    echo -e "${RED}重启 ${SERVICE_NAME} 失败: 请查看日志定位原因${PLAIN}"
+    echo -e "${YELLOW}最近日志: ${PLAIN}"
     journalctl -u "$SERVICE_NAME" -n 30 --no-pager || true
     return 1
   fi
@@ -517,7 +516,7 @@ install_mihomo() {
 
   ARCH=$(get_arch)
   result=$(get_latest_download_url "$ARCH") || {
-    echo -e "${RED}获取 Mihomo 最新版本失败（可能是 GitHub API 被限流/网络问题）${PLAIN}"
+    echo -e "${RED}获取 Mihomo 最新版本失败${PLAIN}"
     pause_and_return
     return
   }
@@ -590,7 +589,7 @@ install_mihomo() {
   systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || true
 
   if ! systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo -e "${RED}服务启动失败，请查看日志：journalctl -u ${SERVICE_NAME} -e --no-pager${PLAIN}"
+    echo -e "${RED}服务启动失败，请查看日志: journalctl -u ${SERVICE_NAME} -e --no-pager${PLAIN}"
     pause_and_return
     return
   fi
@@ -753,7 +752,7 @@ disable_listener() {
 # ======== 修改监听器端口 ========
 modify_listener_port() {
   local prefix="$1"
-  read -p "$(echo -e "${BLUE}新端口(支持 1000-2000): ${PLAIN}")" new_port
+  read -p "$(echo -e "${BLUE}新端口: ${PLAIN}")" new_port
 
   if [[ -z "$new_port" ]]; then
     sleep 1
@@ -765,7 +764,7 @@ modify_listener_port() {
     apply_and_restart
     echo -e "${GREEN}已更新${PLAIN}"
   else
-    echo -e "${YELLOW}端口格式无效：请输入 1-65535 的端口，或 1000-2000 这样的范围${PLAIN}"
+    echo -e "${YELLOW}端口格式无效: 请输入 1-65535 的端口，或 1000-2000 这样的范围${PLAIN}"
   fi
   sleep 1
 }
@@ -812,7 +811,7 @@ update_mihomo() {
 
   ARCH=$(get_arch)
   result=$(get_latest_download_url "$ARCH") || {
-    echo -e "${RED}获取 Mihomo 最新版本失败（可能是 GitHub API 被限流/网络问题）${PLAIN}"
+    echo -e "${RED}获取 Mihomo 最新版本失败${PLAIN}"
     pause_and_return
     return
   }
