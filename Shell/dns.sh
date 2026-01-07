@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =========================
-# 颜色定义
-# =========================
+#====== 颜色定义 ======
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,22 +11,17 @@ GRAY='\033[0;33m'
 MAGENTA='\033[0;35m'
 NC='\033[0m'
 
-# =========================
-# 路径定义
-# =========================
-INSTALL_DIR="/usr/local/bin"
-FIX_SCRIPT="$INSTALL_DIR/fix-dns.sh"
-SERVICE_FILE="/etc/systemd/system/fix-dns.service"
+#====== 路径定义 ======
 RESOLV_CONF="/etc/resolv.conf"
+RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
+RESOLVED_DROPIN_FILE="$RESOLVED_DROPIN_DIR/99-custom-dns.conf"
 
 [[ $EUID -ne 0 ]] && {
   echo -e "${RED}请使用 root 执行${NC}"
   exit 1
 }
 
-# =========================
-# 显示当前DNS
-# =========================
+#====== 显示当前DNS ======
 get_default_iface() {
   local iface
 
@@ -43,7 +36,7 @@ get_default_iface() {
 
 show_current_dns() {
   echo -e "${YELLOW}当前DNS配置:${NC}\n"
-
+  
   echo -e "${BLUE}resolv.conf:${NC}"
   if [[ -f "$RESOLV_CONF" ]]; then
     while read -r line; do
@@ -84,93 +77,115 @@ show_current_dns() {
   echo
 }
 
-# =========================
-# DNS修复脚本
-# =========================
-write_fix_script() {
-  local dns_list=("$@")
-
-  mkdir -p "$INSTALL_DIR"
-
-  cat > "$FIX_SCRIPT" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-RESOLV_CONF="$RESOLV_CONF"
-DNS_SERVERS=(
-$(printf '  "%s"\n' "${dns_list[@]}")
-)
-
-[[ \$EUID -ne 0 ]] && exit 0
-
-IMMUTABLE=false
-if command -v chattr >/dev/null 2>&1; then
-  if lsattr "\$RESOLV_CONF" 2>/dev/null | grep -q 'i'; then
-    IMMUTABLE=true
-    chattr -i "\$RESOLV_CONF" 2>/dev/null || true
-  fi
-fi
-
-{
-  for dns in "\${DNS_SERVERS[@]}"; do
-    echo "nameserver \$dns"
+#====== DNS输入校验 ======
+is_valid_ipv4() {
+  local ip="$1" IFS=.
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  read -r o1 o2 o3 o4 <<<"$ip"
+  for o in "$o1" "$o2" "$o3" "$o4"; do
+    [[ "$o" -ge 0 && "$o" -le 255 ]] 2>/dev/null || return 1
   done
-} > "\$RESOLV_CONF" 2>/dev/null || true
-
-if \$IMMUTABLE; then
-  chattr +i "\$RESOLV_CONF" 2>/dev/null || true
-fi
-
-if command -v resolvectl >/dev/null 2>&1; then
-  IFACE=\$(ip route show default 2>/dev/null | awk '{print \$5}' | head -n1)
-  if [[ -n "\$IFACE" ]]; then
-    resolvectl dns "\$IFACE" "\${DNS_SERVERS[@]}" 2>/dev/null || true
-    resolvectl domain "\$IFACE" "~." 2>/dev/null || true
-    resolvectl flush-caches 2>/dev/null || true
-    systemctl restart systemd-resolved 2>/dev/null || true
-  fi
-fi
-
-for svc in nscd dnsmasq named; do
-  systemctl is-active "\$svc" >/dev/null 2>&1 && systemctl restart "\$svc" >/dev/null 2>&1 || true
-done
-EOF
-
-  chmod +x "$FIX_SCRIPT"
-
-  if command -v systemctl >/dev/null 2>&1; then
-    cat > "$SERVICE_FILE" <<EOF
-[Unit]
-Description=DHCP-aware DNS auto repair
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=$FIX_SCRIPT
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reexec >/dev/null 2>&1 || true
-    systemctl daemon-reload
-    systemctl enable fix-dns.service >/dev/null 2>&1 || true
-  fi
-
-  "$FIX_SCRIPT"
+  return 0
 }
 
-# =========================
-# 主菜单
-# =========================
+is_valid_ipv6_like() {
+  local ip="$1"
+  [[ "$ip" =~ ^[0-9A-Fa-f:%.]+$ ]] || return 1
+  [[ "$ip" == *:* ]] || return 1
+  [[ ${#ip} -le 80 ]] || return 1
+  return 0
+}
+
+is_valid_dns_ip() {
+  local ip="$1"
+  [[ "$ip" =~ [[:space:]] ]] && return 1
+  [[ "$ip" == *\"* ]] && return 1
+  [[ "$ip" == *\'* ]] && return 1
+  [[ "$ip" == *\\* ]] && return 1
+  is_valid_ipv4 "$ip" && return 0
+  is_valid_ipv6_like "$ip" && return 0
+  return 1
+}
+
+#====== 应用DNS配置 ======
+apply_dns() {
+  local dns_list=("$@")
+
+  local ok=() bad=()
+  for dns in "${dns_list[@]}"; do
+    if is_valid_dns_ip "$dns"; then
+      ok+=("$dns")
+    else
+      bad+=("$dns")
+    fi
+  done
+  dns_list=("${ok[@]}")
+
+  if [[ ${#dns_list[@]} -eq 0 ]]; then
+    echo -e "${RED}未检测到有效的 DNS IP（请输入 IPv4/IPv6 地址）${NC}"
+    return 1
+  fi
+  if [[ ${#bad[@]} -gt 0 ]]; then
+    echo -e "${YELLOW}已忽略无效 DNS：${bad[*]}${NC}"
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1; then
+    mkdir -p "$RESOLVED_DROPIN_DIR"
+    {
+      echo "[Resolve]"
+      echo "DNS=${dns_list[*]}"
+      echo "Domains=~."
+    } > "$RESOLVED_DROPIN_FILE"
+
+    systemctl restart systemd-resolved 2>/dev/null || true
+
+    if command -v resolvectl >/dev/null 2>&1; then
+      resolvectl flush-caches 2>/dev/null || true
+    fi
+
+    if command -v resolvectl >/dev/null 2>&1; then
+      local iface
+      iface="$(get_default_iface)"
+      if [[ -n "$iface" ]]; then
+        resolvectl dns "$iface" "${dns_list[@]}" 2>/dev/null || true
+        resolvectl domain "$iface" "~." 2>/dev/null || true
+        resolvectl flush-caches 2>/dev/null || true
+      fi
+    fi
+
+    if [[ ! -L "$RESOLV_CONF" ]]; then
+      {
+        for dns in "${dns_list[@]}"; do
+          echo "nameserver $dns"
+        done
+      } > "$RESOLV_CONF" 2>/dev/null || true
+    fi
+  else
+    if [[ -L "$RESOLV_CONF" ]]; then
+      rm -f "$RESOLV_CONF" 2>/dev/null || true
+    fi
+
+    {
+      for dns in "${dns_list[@]}"; do
+        echo "nameserver $dns"
+      done
+    } > "$RESOLV_CONF" 2>/dev/null || true
+  fi
+
+  for svc in nscd dnsmasq named; do
+    systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1 || true
+  done
+
+  return 0
+}
+
+#====== 主菜单 ======
 while true; do
   clear
   echo -e "${GREEN}======== DNS 配置工具 ========${NC}\n"
   show_current_dns
   echo -e "${YELLOW}请选择操作:${NC}"
-  echo -e " ${CYAN}1.${NC}修改DNS为${GREEN}8.8.8.8${NC}和${GREEN}1.1.1.1${NC}"
+  echo -e " ${CYAN}1.${NC}修改DNS为 ${GREEN}8.8.8.8${NC} 和 ${GREEN}1.1.1.1${NC}"
   echo -e " ${CYAN}2.${NC}自定义修改DNS"
   echo -e " ${CYAN}0.${NC}退出脚本"
   echo -e "${GREEN}==============================${NC}"
@@ -178,8 +193,11 @@ while true; do
 
   case "$choice" in
     1)
-      write_fix_script "8.8.8.8" "1.1.1.1"
-      read -rp "$(echo -e "${BLUE}DNS已修改并立即生效,按回车继续...${NC}")"
+      if apply_dns "8.8.8.8" "1.1.1.1"; then
+        read -rp "$(echo -e "${BLUE}DNS已修改并立即生效,按回车继续...${NC}")"
+      else
+        read -rp "$(echo -e "${RED}DNS修改失败,按回车返回菜单...${NC}")"
+      fi
       ;;
     2)
       clear
@@ -194,8 +212,11 @@ while true; do
       if [[ ${#CUSTOM_DNS[@]} -eq 0 ]]; then
         read -rp "$(echo -e "${BLUE}未输入DNS,按回车返回菜单...${NC}")"
       else
-        write_fix_script "${CUSTOM_DNS[@]}"
-        read -rp "$(echo -e "${BLUE}DNS已修改并立即生效,按回车继续...${NC}")"
+        if apply_dns "${CUSTOM_DNS[@]}"; then
+          read -rp "$(echo -e "${BLUE}DNS已修改并立即生效,按回车继续...${NC}")"
+        else
+          read -rp "$(echo -e "${RED}DNS修改失败,按回车返回菜单...${NC}")"
+        fi
       fi
       ;;
     0)
