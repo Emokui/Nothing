@@ -33,6 +33,6 @@ DOMAIN-SUFFIX,stripe.com
 DOMAIN,api.revenuecat.com
 DOMAIN,openai.nooc.ink
 DOMAIN-SUFFIX,gstatic.com
-IP-CIDR,24.199.123.28/32,no-resolve
-IP-CIDR,64.23.132.171/32,no-resolve
-IP-ASN,20473,no-resolve
+DOMAIN-SUFFIX,livekit.cloud
+DOMAIN-SUFFIX,azureedge.net
+DOMAIN-SUFFIX,imgix.net
