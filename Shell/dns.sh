@@ -108,6 +108,12 @@ is_valid_dns_ip() {
 }
 
 #====== 应用DNS配置 ======
+unlock_resolv_conf() {
+  if command -v chattr >/dev/null 2>&1 && [[ -f "$RESOLV_CONF" ]]; then
+    chattr -i "$RESOLV_CONF" 2>/dev/null || true
+  fi
+}
+
 apply_dns() {
   local dns_list=("$@")
 
@@ -154,6 +160,7 @@ apply_dns() {
     fi
 
     if [[ ! -L "$RESOLV_CONF" ]]; then
+      unlock_resolv_conf
       {
         for dns in "${dns_list[@]}"; do
           echo "nameserver $dns"
@@ -165,6 +172,7 @@ apply_dns() {
       rm -f "$RESOLV_CONF" 2>/dev/null || true
     fi
 
+    unlock_resolv_conf
     {
       for dns in "${dns_list[@]}"; do
         echo "nameserver $dns"
