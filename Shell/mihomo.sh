@@ -74,10 +74,10 @@ get_latest_download_url() {
 select_cert() {
     while true; do
         clear
-        echo -e "${BLUE}✦ 证书配置 ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}扫描/etc/cert"
-        echo -e "${GREEN}  2.${PLAIN}自定义路径"
-        read -p "$(echo -e "${BLUE}✦ 输入选项 ✦: ${PLAIN}")" opt
+        echo -e "${BLUE}证书配置${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}扫描/etc/cert"
+        echo -e "${GREEN}2.${PLAIN}自定义路径"
+        read -p "$(echo -e "${BLUE}输入选项: ${PLAIN}")" opt
 
         case "$opt" in
             1)
