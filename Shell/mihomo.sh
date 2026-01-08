@@ -376,7 +376,7 @@ modify_config() {
         echo -e "${GREEN}  1.${PLAIN}AnyTLS  [${YELLOW}${anytls_status}${PLAIN}]"
         echo -e "${GREEN}  2.${PLAIN}Trojan  [${YELLOW}${trojan_status}${PLAIN}]"
         echo -e "${GREEN}  3.${PLAIN}Hysteria[${YELLOW}${hy2_status}${PLAIN}]"
-        echo -e "${GREEN}  0.${PLAIN}返回上级"
+        echo -e "${GREEN}  0.${PLAIN}Return"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
         
         case "$opt" in
@@ -416,7 +416,7 @@ toggle_or_modify_listener() {
                 0) break ;;
             esac
         else
-            echo -e "${YELLOW}当前未启用${PLAIN}"
+            echo -e "${YELLOW} 当前未启用${PLAIN}"
             read -p "$(echo -e "${BLUE}是否启用? [y/N]: ${PLAIN}")" enable
             if [[ "$enable" == "y" || "$enable" == "Y" ]]; then
                 add_listener "$name" "$display_name" "$default_port"
