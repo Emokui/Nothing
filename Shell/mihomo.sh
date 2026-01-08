@@ -416,7 +416,7 @@ toggle_or_modify_listener() {
                 0) break ;;
             esac
         else
-            echo -e "${YELLOW} 当前未启用${PLAIN}"
+            echo -e "${YELLOW}  当前未启用${PLAIN}"
             read -p "$(echo -e "${BLUE}是否启用? [y/N]: ${PLAIN}")" enable
             if [[ "$enable" == "y" || "$enable" == "Y" ]]; then
                 add_listener "$name" "$display_name" "$default_port"
