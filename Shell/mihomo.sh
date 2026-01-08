@@ -136,7 +136,7 @@ After=network.target network-online.target nss-lookup.target
 Type=simple
 User=root
 Environment=SKIP_SAFE_PATH_CHECK=1
-ExecStart=/usr/local/bin/mihomo -d /etc/mihomo
+ExecStart=${EXEC_PATH} -d ${CONFIG_DIR}
 Restart=on-failure
 RestartSec=5
 
@@ -445,20 +445,81 @@ add_listener() {
     
     select_cert
     
-    local listener_config=""
+    local tmp_config=$(mktemp)
     case "$name" in
         anytls-in)
-            listener_config="- name: anytls-in\n  type: anytls\n  port: ${port}\n  listen: ::0\n  users:\n    username1: ${pass}\n  certificate: ${cert_path}\n  private-key: ${key_path}\n  padding-scheme: |\n   stop=8\n   0=30-30\n   1=100-400\n   2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000\n   3=9-9,500-1000\n   4=500-1000\n   5=500-1000\n   6=500-1000\n   7=500-1000\n"
+            cat > "$tmp_config" <<LISTENER
+- name: anytls-in
+  type: anytls
+  port: ${port}
+  listen: ::0
+  users:
+    username1: ${pass}
+  certificate: ${cert_path}
+  private-key: ${key_path}
+  padding-scheme: |
+   stop=8
+   0=30-30
+   1=100-400
+   2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000
+   3=9-9,500-1000
+   4=500-1000
+   5=500-1000
+   6=500-1000
+   7=500-1000
+
+LISTENER
             ;;
         trojan-in)
-            listener_config="- name: trojan-in\n  type: trojan\n  port: ${port}\n  listen: ::0\n  users:\n    - username: 1\n      password: ${pass}\n  ws-path: \"/\"\n  certificate: ${cert_path}\n  private-key: ${key_path}\n"
+            cat > "$tmp_config" <<LISTENER
+- name: trojan-in
+  type: trojan
+  port: ${port}
+  listen: ::0
+  users:
+    - username: 1
+      password: ${pass}
+  ws-path: "/"
+  certificate: ${cert_path}
+  private-key: ${key_path}
+
+LISTENER
             ;;
         hysteria2-in)
-            listener_config="- name: hysteria2-in\n  type: hysteria2\n  port: ${port}\n  listen: ::0\n  users:\n    user1: ${pass}\n  masquerade: \"\"\n  alpn:\n  - h3\n  certificate: ${cert_path}\n  private-key: ${key_path}\n"
+            cat > "$tmp_config" <<LISTENER
+- name: hysteria2-in
+  type: hysteria2
+  port: ${port}
+  listen: ::0
+  users:
+    user1: ${pass}
+  masquerade: ""
+  alpn:
+  - h3
+  certificate: ${cert_path}
+  private-key: ${key_path}
+
+LISTENER
             ;;
     esac
     
-    sed -i "/^listeners:/a\\${listener_config}" "$CONFIG_PATH"
+    awk -v tmpfile="$tmp_config" '
+        BEGIN {inserted=0}
+        /^rules:/ && !inserted {
+            while ((getline line < tmpfile) > 0) print line
+            close(tmpfile)
+            inserted=1
+        }
+        {print}
+        END {
+            if (!inserted) {
+                while ((getline line < tmpfile) > 0) print line
+                close(tmpfile)
+            }
+        }
+    ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
+    
+    rm -f "$tmp_config"
     
     systemctl restart "$SERVICE_NAME"
     echo -e "${GREEN}${display_name} 已启用${PLAIN}"
@@ -496,7 +557,7 @@ modify_listener_port() {
     read -p "$(echo -e "${BLUE}新端口: ${PLAIN}")" new_port
     if [[ -n "$new_port" && "$new_port" =~ ^[0-9]+$ ]]; then
         awk -v name="$name" -v port="$new_port" '
-            /name: /{found=($0 ~ name)}
+            /^- name: /{found=($0 ~ name)}
             found && /^  port:/{$0="  port: "port; found=0}
             {print}
         ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
@@ -513,17 +574,25 @@ modify_listener_pass() {
     if [[ -n "$new_pass" ]]; then
         case "$name" in
             anytls-in)
-                sed -i "s/username1: .*/username1: $new_pass/" "$CONFIG_PATH"
+                awk -v pass="$new_pass" '
+                    /^- name: anytls-in/{found=1}
+                    found && /username1:/{$0="    username1: "pass; found=0}
+                    {print}
+                ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
                 ;;
             trojan-in)
                 awk -v pass="$new_pass" '
-                    /name: trojan-in/{found=1}
+                    /^- name: trojan-in/{found=1}
                     found && /password:/{$0="      password: "pass; found=0}
                     {print}
                 ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
                 ;;
             hysteria2-in)
-                sed -i "s/user1: .*/user1: $new_pass/" "$CONFIG_PATH"
+                awk -v pass="$new_pass" '
+                    /^- name: hysteria2-in/{found=1}
+                    found && /user1:/{$0="    user1: "pass; found=0}
+                    {print}
+                ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
                 ;;
         esac
         systemctl restart "$SERVICE_NAME"
@@ -537,7 +606,7 @@ modify_listener_cert() {
     local name="$1"
     select_cert
     awk -v name="$name" -v cert="$cert_path" -v key="$key_path" '
-        /name: /{block=($0 ~ name)}
+        /^- name: /{block=($0 ~ name)}
         block && /certificate:/{$0="  certificate: "cert}
         block && /private-key:/{$0="  private-key: "key; block=0}
         {print}
@@ -612,7 +681,7 @@ delete_mihomo() {
 # ======== 主菜单 ========
 while true; do
     clear
-    echo -e "${BLUE}✦ Mihomo_Ver.1.2 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Mihomo_Ver.1.3 ✦${PLAIN}"
     echo -e "${GREEN}  1.${PLAIN}安装服务"
     echo -e "${GREEN}  2.${PLAIN}管理服务"
     echo -e "${GREEN}  3.${PLAIN}更新内核"
