@@ -12,13 +12,6 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
     exit 1
 fi
-
-# ======== 错误处理函数 ========
-error_exit() {
-    echo -e "${RED}错误: $1${PLAIN}"
-    exit 1
-}
-
 # ======== 包管理器检测 ========
 get_pkg_manager() {
     if command -v apt-get &>/dev/null; then
@@ -329,13 +322,13 @@ show_hysteria_config() {
     pause_and_return
 }
 
-# ======== 端口跳跃 ========
+# ======== 6.端口跳跃 ========
 port_jump_set() {
     clear
     echo -e "${BLUE}检查 iptables/ip6tables 是否已安装...${PLAIN}"
     for bin in iptables ip6tables; do
         if ! command -v "$bin" &> /dev/null; then
-            echo -e "${YELLOW}未检测到 $bin, 正在安装中...${PLAIN}"
+            echo -e "${YELLOW}未检测到 $bin,正在安装中...${PLAIN}"
             install_package "$bin" || {
                 echo -e "${RED}安装 $bin 失败,请手动安装后重试${PLAIN}"
                 pause_and_return
@@ -351,22 +344,30 @@ port_jump_set() {
         echo -e "${GREEN}已检测到存在端口跳跃配置:${PLAIN}"
         [[ -n "$EXIST_RULE_V4" ]] && echo -e "${YELLOW}IPv4: $EXIST_RULE_V4${PLAIN}"
         [[ -n "$EXIST_RULE_V6" ]] && echo -e "${YELLOW}IPv6: $EXIST_RULE_V6${PLAIN}"
-        echo -e "${BLUE}如需修改,请选择【2.修改端口跳跃】${PLAIN}"
         pause_and_return
         return
     fi
 
-    interface=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n 1)
+    interface=$(ip route | grep default | awk '{print $5}' | head -n 1)
+    if [ -z "$interface" ]; then
+        interface=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n 1)
+    fi
     if [ -z "$interface" ]; then
         echo -e "${RED}未检测到有效的网卡,请检查网络配置${PLAIN}"
+        pause_and_return
         return 1
     fi
-    echo -e "${YELLOW}检测到的网卡名称为: ${YELLOW}$interface${PLAIN}"
-    read -p "$(echo -e "${YELLOW}如需更改网卡名称,请手动输入,默认为 $interface: ${PLAIN}")" user_interface
+    read -p "$(echo -e "${YELLOW}请输入网卡名称(默认:$interface): ${PLAIN}")" user_interface
     user_interface=${user_interface:-$interface}
 
     read -p "$(echo -e "${YELLOW}请输入端口范围(默认18443:28444): ${PLAIN}")" port_range
     port_range=${port_range:-18443:28444}
+
+    if ! [[ "$port_range" =~ ^[0-9]+:[0-9]+$ ]]; then
+        echo -e "${RED}端口范围格式错误${PLAIN}"
+        pause_and_return
+        return 1
+    fi
 
     CONFIG_PATH="/etc/hysteria/config.yaml"
     default_port=""
@@ -376,34 +377,59 @@ port_jump_set() {
             default_port="$cfg_port"
         fi
     fi
-    if [[ -z "$default_port" ]]; then
-        echo -e "${RED}未检测到 Hysteria 配置文件或未设置 listen 端口,请先安装并配置 Hysteria 后再设置端口跳跃${PLAIN}"
-        pause_and_return
-        return
+    
+    if [[ -n "$default_port" ]]; then
+        read -p "$(echo -e "${YELLOW}请输入源端口(默认:${default_port}): ${PLAIN}")" target_port
+        target_port=${target_port:-$default_port}
+    else
+        read -p "$(echo -e "${YELLOW}请输入源端口: ${PLAIN}")" target_port
+        if [[ -z "$target_port" ]]; then
+            echo -e "${RED}源端口不能为空${PLAIN}"
+            pause_and_return
+            return 1
+        fi
     fi
-    read -p "$(echo -e "${YELLOW}请输入HY端口(默认:${default_port}): ${PLAIN}")" target_port
-    target_port=${target_port:-$default_port}
+    
+    if ! [[ "$target_port" =~ ^[0-9]+$ ]] || (( target_port < 1 || target_port > 65535 )); then
+        echo -e "${RED}无效的端口号,请输入1-65535之间的数字${PLAIN}"
+        pause_and_return
+        return 1
+    fi
 
     echo -e "${BLUE}正在设置 IPv4 端口跳跃规则...${PLAIN}"
-    sudo iptables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"
+    if ! sudo iptables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"; then
+        echo -e "${RED}IPv4 端口跳跃规则设置失败${PLAIN}"
+        pause_and_return
+        return 1
+    fi
 
     echo -e "${BLUE}正在设置 IPv6 端口跳跃规则...${PLAIN}"
-    sudo ip6tables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"
+    if ! sudo ip6tables -t nat -A PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port"; then
+        echo -e "${RED}IPv6 端口跳跃规则设置失败${PLAIN}"
+        sudo iptables -t nat -D PREROUTING -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port" 2>/dev/null
+        pause_and_return
+        return 1
+    fi
 
     echo -e "${BLUE}当前 iptables 规则:${PLAIN}"
     sudo iptables -t nat -L -n
     echo -e "${BLUE}当前 ip6tables 规则:${PLAIN}"
     sudo ip6tables -t nat -L -n
 
+    local iptables_path ip6tables_path
+    iptables_path=$(command -v iptables)
+    ip6tables_path=$(command -v ip6tables)
+
     echo -e "${BLUE}创建 systemd 自启服务: port-jump.service${PLAIN}"
-    cat > /etc/systemd/system/port-jump.service << EOF
+    sudo tee /etc/systemd/system/port-jump.service > /dev/null << EOF
 [Unit]
 Description=UDP Port Jumping NAT Rule (IPv4/IPv6)
 After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c '/sbin/iptables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port; /sbin/ip6tables -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port'
+ExecStart=/bin/bash -c '$iptables_path -t nat -C PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null || $iptables_path -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port; $ip6tables_path -t nat -C PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null || $ip6tables_path -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port'
+ExecStop=/bin/bash -c 'while $iptables_path -t nat -D PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null; do :; done; while $ip6tables_path -t nat -D PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null; do :; done'
 RemainAfterExit=yes
 
 [Install]
@@ -420,13 +446,20 @@ EOF
 
 port_jump_modify() {
     clear
-    echo -e "${BLUE}正在修改端口跳跃规则...${PLAIN}"
+    echo -e "${BLUE}正在清除旧规则...${PLAIN}"
+    
+    while sudo iptables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT'; do
+        sudo iptables -t nat -D PREROUTING $(sudo iptables -t nat -S PREROUTING | grep 'REDIRECT' | head -n1 | sed 's/-A PREROUTING//') 2>/dev/null || break
+    done
+    while sudo ip6tables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT'; do
+        sudo ip6tables -t nat -D PREROUTING $(sudo ip6tables -t nat -S PREROUTING | grep 'REDIRECT' | head -n1 | sed 's/-A PREROUTING//') 2>/dev/null || break
+    done
+    
     sudo systemctl stop port-jump.service 2>/dev/null
     sudo systemctl disable port-jump.service 2>/dev/null
     sudo rm -f /etc/systemd/system/port-jump.service
-    sudo iptables -t nat -F PREROUTING
-    sudo ip6tables -t nat -F PREROUTING
     sudo systemctl daemon-reload
+    
     port_jump_set
 }
 
@@ -448,33 +481,72 @@ port_jump_view() {
 port_jump_delete() {
     clear
     echo -e "${BLUE}正在删除端口跳跃规则...${PLAIN}"
+    
+    while sudo iptables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT'; do
+        sudo iptables -t nat -D PREROUTING $(sudo iptables -t nat -S PREROUTING | grep 'REDIRECT' | head -n1 | sed 's/-A PREROUTING//')  2>/dev/null || break
+    done
+    
+    while sudo ip6tables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT'; do
+        sudo ip6tables -t nat -D PREROUTING $(sudo ip6tables -t nat -S PREROUTING | grep 'REDIRECT' | head -n1 | sed 's/-A PREROUTING//') 2>/dev/null || break
+    done
+    
+    echo -e "${GREEN}已清除所有 iptables REDIRECT 规则${PLAIN}"
+    
     sudo systemctl stop port-jump.service 2>/dev/null
     sudo systemctl disable port-jump.service 2>/dev/null
     sudo rm -f /etc/systemd/system/port-jump.service
-    sudo iptables -t nat -F PREROUTING
-    sudo ip6tables -t nat -F PREROUTING
     sudo systemctl daemon-reload
-    echo -e "${GREEN}IPv4/IPv6 端口跳跃规则已删除${PLAIN}"
+    
+    echo -e "${GREEN}端口跳跃配置已删除${PLAIN}"
     pause_and_return
 }
 
 port_jump_menu() {
     while true; do
         clear
-        echo -e "${BLUE}✦ Port_Jump ✦${PLAIN}"
+        echo -e "${BLUE}✦ Ports_Jump ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}设置跳跃"
         echo -e "${GREEN}  2.${PLAIN}修改跳跃"
         echo -e "${GREEN}  3.${PLAIN}查看跳跃"
         echo -e "${GREEN}  4.${PLAIN}删除跳跃"
         echo -e "${GREEN}  0.${PLAIN}返回主页"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
+        
+        local has_config=0
+        if sudo iptables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT' || \
+           sudo ip6tables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT' || \
+           [ -f /etc/systemd/system/port-jump.service ]; then
+            has_config=1
+        fi
+        
         case "$pjopt" in
             1) port_jump_set ;;
-            2) port_jump_modify ;;
-            3) port_jump_view ;;
-            4) port_jump_delete ;;
+            2) 
+                if [[ $has_config -eq 0 ]]; then
+                    echo -e "${YELLOW}未配置端口跳跃,请先设置${PLAIN}"
+                    sleep 1
+                else
+                    port_jump_modify
+                fi
+                ;;
+            3) 
+                if [[ $has_config -eq 0 ]]; then
+                    echo -e "${YELLOW}未配置端口跳跃${PLAIN}"
+                    sleep 1
+                else
+                    port_jump_view
+                fi
+                ;;
+            4) 
+                if [[ $has_config -eq 0 ]]; then
+                    echo -e "${YELLOW}未配置端口跳跃${PLAIN}"
+                    sleep 1
+                else
+                    port_jump_delete
+                fi
+                ;;
             0) break ;;
-            *) echo -e "${RED}无效选项,请重新输入${PLAIN}"; pause_and_return ;;
+            *) echo -e "${RED}无效选项,请重新输入${PLAIN}"; sleep 0.5 ;;
         esac
     done
 }
