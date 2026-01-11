@@ -428,8 +428,8 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c '$iptables_path -t nat -C PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null || $iptables_path -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port; $ip6tables_path -t nat -C PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null || $ip6tables_path -t nat -A PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port'
-ExecStop=/bin/bash -c 'while $iptables_path -t nat -D PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null; do :; done; while $ip6tables_path -t nat -D PREROUTING -i $user_interface -p udp --dport $port_range -j REDIRECT --to-ports $target_port 2>/dev/null; do :; done'
+ExecStart=/bin/bash -c "${iptables_path} -t nat -C PREROUTING -i ${user_interface} -p udp --dport ${port_range} -j REDIRECT --to-ports ${target_port} 2>/dev/null || ${iptables_path} -t nat -A PREROUTING -i ${user_interface} -p udp --dport ${port_range} -j REDIRECT --to-ports ${target_port}; ${ip6tables_path} -t nat -C PREROUTING -i ${user_interface} -p udp --dport ${port_range} -j REDIRECT --to-ports ${target_port} 2>/dev/null || ${ip6tables_path} -t nat -A PREROUTING -i ${user_interface} -p udp --dport ${port_range} -j REDIRECT --to-ports ${target_port}"
+ExecStop=/bin/bash -c "while ${iptables_path} -t nat -D PREROUTING -i ${user_interface} -p udp --dport ${port_range} -j REDIRECT --to-ports ${target_port} 2>/dev/null; do :; done; while ${ip6tables_path} -t nat -D PREROUTING -i ${user_interface} -p udp --dport ${port_range} -j REDIRECT --to-ports ${target_port} 2>/dev/null; do :; done"
 RemainAfterExit=yes
 
 [Install]
