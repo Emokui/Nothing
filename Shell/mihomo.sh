@@ -75,53 +75,41 @@ select_cert() {
     while true; do
         clear
         echo -e "${BLUE}证书配置${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN}扫描/etc/cert"
-        echo -e "${GREEN}2.${PLAIN}自定义路径"
+        
+        cert_files=()
+        if compgen -G "/etc/cert/*.crt" > /dev/null 2>&1; then
+            mapfile -t cert_files < <(ls /etc/cert/*.crt 2>/dev/null | sort)
+        fi
+        
+        for ((i=0; i<${#cert_files[@]}; i++)); do
+            echo -e "${GREEN}$((i+1)).${PLAIN}$(basename "${cert_files[$i]}")"
+        done
+        echo -e "${GREEN}0.${PLAIN}自定义路径"
+        
         read -p "$(echo -e "${BLUE}输入选项: ${PLAIN}")" opt
-
-        case "$opt" in
-            1)
-                cert_files=()
-                if compgen -G "/etc/cert/*.crt" > /dev/null 2>&1; then
-                    mapfile -t cert_files < <(ls /etc/cert/*.crt 2>/dev/null | sort)
-                fi
-                if (( ${#cert_files[@]} == 0 )); then
-                    echo -e "${YELLOW}未检测到证书${PLAIN}"
-                    sleep 1
-                    continue
-                fi
-                clear
-                echo -e "${BLUE}选择证书:${PLAIN}"
-                for ((i=0; i<${#cert_files[@]}; i++)); do
-                    echo -e "${GREEN}$((i+1)).${PLAIN}$(basename "${cert_files[$i]}")"
-                done
-                read -p "$(echo -e "${BLUE}输入编号: ${PLAIN}")" idx
-                if [[ "$idx" =~ ^[0-9]+$ ]] && (( idx >= 1 && idx <= ${#cert_files[@]} )); then
-                    cert_path="${cert_files[$((idx-1))]}"
-                    key_path="${cert_path%.crt}.key"
-                    if [[ -f "$key_path" ]]; then
-                        return 0
-                    else
-                        echo -e "${RED}未找到私钥${PLAIN}"
-                        sleep 1
-                    fi
-                fi
-                ;;
-            2)
-                read -p "$(echo -e "${BLUE}证书路径: ${PLAIN}")" cert_path
-                read -p "$(echo -e "${BLUE}私钥路径: ${PLAIN}")" key_path
-                if [[ -f "$cert_path" && -f "$key_path" ]]; then
-                    return 0
-                else
-                    echo -e "${RED}路径无效${PLAIN}"
-                    sleep 1
-                fi
-                ;;
-            *)
-                echo -e "${YELLOW}请输入 1 或 2${PLAIN}"
-                sleep 0.5
-                ;;
-        esac
+        
+        if [[ "$opt" == "0" ]]; then
+            read -p "$(echo -e "${BLUE}证书路径: ${PLAIN}")" cert_path
+            read -p "$(echo -e "${BLUE}私钥路径: ${PLAIN}")" key_path
+            if [[ -f "$cert_path" && -f "$key_path" ]]; then
+                return 0
+            else
+                echo -e "${RED}路径无效${PLAIN}"
+                sleep 1
+            fi
+        elif [[ "$opt" =~ ^[0-9]+$ ]] && (( opt >= 1 && opt <= ${#cert_files[@]} )); then
+            cert_path="${cert_files[$((opt-1))]}"
+            key_path="${cert_path%.crt}.key"
+            if [[ -f "$key_path" ]]; then
+                return 0
+            else
+                echo -e "${RED}未找到私钥${PLAIN}"
+                sleep 1
+            fi
+        else
+            echo -e "${YELLOW}无效选项${PLAIN}"
+            sleep 0.5
+        fi
     done
 }
 
