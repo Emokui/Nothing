@@ -322,7 +322,7 @@ show_hysteria_config() {
     pause_and_return
 }
 
-# ======== 6.端口跳跃 ========
+# ======== 端口跳跃 ========
 port_jump_set() {
     clear
     echo -e "${BLUE}检查 iptables/ip6tables 是否已安装...${PLAIN}"
