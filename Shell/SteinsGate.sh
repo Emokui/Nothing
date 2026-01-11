@@ -998,7 +998,7 @@ main_menu() {
         echo -e "${GREEN}  15.${PLAIN}安装SubStore"
         echo -e "${GREEN}  16.${PLAIN}提取WireGuard"
         echo -e "${GREEN}   0.${PLAIN}离开SteinsGate"
-        read -p "$(echo -e "${BLUE}✦ Choice [0-19] ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice [0-16] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
