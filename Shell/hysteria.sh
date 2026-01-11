@@ -440,6 +440,10 @@ EOF
     sudo systemctl enable port-jump.service
     sudo systemctl start port-jump.service
 
+    if command -v netfilter-persistent &>/dev/null; then
+        sudo netfilter-persistent save 2>/dev/null
+    fi
+
     echo -e "${GREEN}IPv4/IPv6 端口跳跃规则已启用并设置为开机自动启动${PLAIN}"
     pause_and_return
 }
@@ -482,15 +486,16 @@ port_jump_delete() {
     clear
     echo -e "${BLUE}正在删除端口跳跃规则...${PLAIN}"
     
-    while sudo iptables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT'; do
-        sudo iptables -t nat -D PREROUTING $(sudo iptables -t nat -S PREROUTING | grep 'REDIRECT' | head -n1 | sed 's/-A PREROUTING//')  2>/dev/null || break
-    done
+    sudo iptables -t nat -F PREROUTING 2>/dev/null
+    sudo ip6tables -t nat -F PREROUTING 2>/dev/null
     
-    while sudo ip6tables -t nat -S PREROUTING 2>/dev/null | grep -q 'REDIRECT'; do
-        sudo ip6tables -t nat -D PREROUTING $(sudo ip6tables -t nat -S PREROUTING | grep 'REDIRECT' | head -n1 | sed 's/-A PREROUTING//') 2>/dev/null || break
-    done
+    echo -e "${GREEN}已清空 PREROUTING 链所有规则${PLAIN}"
     
-    echo -e "${GREEN}已清除所有 iptables REDIRECT 规则${PLAIN}"
+    if command -v netfilter-persistent &>/dev/null; then
+        echo -e "${BLUE}正在更新 iptables-persistent 保存的规则...${PLAIN}"
+        sudo netfilter-persistent save 2>/dev/null
+        echo -e "${GREEN}已更新持久化规则${PLAIN}"
+    fi
     
     sudo systemctl stop port-jump.service 2>/dev/null
     sudo systemctl disable port-jump.service 2>/dev/null
