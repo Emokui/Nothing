@@ -690,6 +690,7 @@ DOMAIN-SUFFIX,zukunftswerkstatt.de
 DOMAIN-SUFFIX,zynamics.com
 DOMAIN-SUFFIX,googledrive.com
 DOMAIN-SUFFIX,googleusercontent.com
+DOMAIN,antigravity-unleash.goog
 PROCESS-NAME,Antigravity Helper*
 IP-CIDR,172.110.32.0/21,no-resolve
 IP-CIDR,216.73.80.0/20,no-resolve
