@@ -207,6 +207,26 @@ EOF
 EOF
     fi
 
+    if [[ "$enable_tuic" == "y" ]]; then
+        cat >> "$CONFIG_PATH" <<EOF
+- name: tuicv5-in
+  type: tuic
+  port: ${tuic_port}
+  listen: ::0
+  users:
+    ${tuic_uuid}: ${tuic_pass}
+  certificate: ${tuic_cert}
+  private-key: ${tuic_key}
+  congestion-controller: bbr
+  max-idle-time: 15000
+  authentication-timeout: 3000
+  alpn:
+    - h3
+  max-udp-relay-packet-size: 1408
+
+EOF
+    fi
+
     cat >> "$CONFIG_PATH" <<EOF
 rules:
   - MATCH,DIRECT
@@ -243,9 +263,11 @@ install_mihomo() {
 
     clear
     echo -e "${BLUE}选择要启用的监听器:${PLAIN}"
-    read -p "$(echo -e "${BLUE}启用 AnyTLS?   [y/N]: ${PLAIN}")" enable_anytls
+    read -p "$(echo -e "${BLUE}启用 Anytls?   [y/N]: ${PLAIN}")" enable_anytls
     read -p "$(echo -e "${BLUE}启用 Trojan?   [y/N]: ${PLAIN}")" enable_trojan
+    read -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
     read -p "$(echo -e "${BLUE}启用 Hysteria? [y/N]: ${PLAIN}")" enable_hy2
+    
 
     if [[ "$enable_anytls" == "y" || "$enable_anytls" == "Y" ]]; then
         enable_anytls="y"
@@ -293,6 +315,27 @@ install_mihomo() {
         select_cert
         hy2_cert="$cert_path"
         hy2_key="$key_path"
+    fi
+
+    if [[ "$enable_tuic" == "y" || "$enable_tuic" == "Y" ]]; then
+        enable_tuic="y"
+        clear
+        echo -e "${BLUE}===== TUIC 配置 =====${PLAIN}"
+        read -p "$(echo -e "${BLUE}端口(默认:28443): ${PLAIN}")" tuic_port
+        tuic_port=${tuic_port:-28443}
+        read -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" tuic_uuid
+        if [[ -z "$tuic_uuid" ]]; then
+            tuic_uuid=$(cat /proc/sys/kernel/random/uuid)
+            echo -e "${GREEN}UUID: $tuic_uuid${PLAIN}"
+        fi
+        read -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" tuic_pass
+        if [[ -z "$tuic_pass" ]]; then
+            tuic_pass=$(random_pass)
+            echo -e "${GREEN}密码: $tuic_pass${PLAIN}"
+        fi
+        select_cert
+        tuic_cert="$cert_path"
+        tuic_key="$key_path"
     fi
 
     generate_config
@@ -355,22 +398,26 @@ modify_config() {
         local anytls_status="未启用"
         local trojan_status="未启用"
         local hy2_status="未启用"
+        local tuic_status="未启用"
         grep -q "name: anytls-in" "$CONFIG_PATH" && anytls_status="已启用"
         grep -q "name: trojan-in" "$CONFIG_PATH" && trojan_status="已启用"
+        grep -q "name: tuicv5-in" "$CONFIG_PATH" && tuic_status="已启用"
         grep -q "name: hysteria2-in" "$CONFIG_PATH" && hy2_status="已启用"
         
         clear
         echo -e "${BLUE}✦ Modify_Conf ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}AnyTLS  [${YELLOW}${anytls_status}${PLAIN}]"
+        echo -e "${GREEN}  1.${PLAIN}Anytls  [${YELLOW}${anytls_status}${PLAIN}]"
         echo -e "${GREEN}  2.${PLAIN}Trojan  [${YELLOW}${trojan_status}${PLAIN}]"
-        echo -e "${GREEN}  3.${PLAIN}Hysteria[${YELLOW}${hy2_status}${PLAIN}]"
+        echo -e "${GREEN}  3.${PLAIN}Tuicv5  [${YELLOW}${tuic_status}${PLAIN}]"
+        echo -e "${GREEN}  4.${PLAIN}Hysteria[${YELLOW}${hy2_status}${PLAIN}]"
         echo -e "${GREEN}  0.${PLAIN}Return"
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
         
         case "$opt" in
             1) toggle_or_modify_listener "anytls-in" "AnyTLS" "8443" ;;
             2) toggle_or_modify_listener "trojan-in" "Trojan" "10819" ;;
-            3) toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
+            3) toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" ;;
+            4) toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
             0) break ;;
         esac
     done
@@ -425,6 +472,16 @@ add_listener() {
     echo -e "${BLUE}===== 添加 ${display_name} =====${PLAIN}"
     read -p "$(echo -e "${BLUE}端口(默认:${default_port}): ${PLAIN}")" port
     port=${port:-$default_port}
+    
+    local uuid=""
+    if [[ "$name" == "tuicv5-in" ]]; then
+        read -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" uuid
+        if [[ -z "$uuid" ]]; then
+            uuid=$(cat /proc/sys/kernel/random/uuid)
+            echo -e "${GREEN}UUID: $uuid${PLAIN}"
+        fi
+    fi
+    
     read -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" pass
     if [[ -z "$pass" ]]; then
         pass=$(random_pass)
@@ -486,6 +543,25 @@ LISTENER
   - h3
   certificate: ${cert_path}
   private-key: ${key_path}
+
+LISTENER
+            ;;
+        tuicv5-in)
+            cat > "$tmp_config" <<LISTENER
+- name: tuicv5-in
+  type: tuic
+  port: ${port}
+  listen: ::0
+  users:
+    ${uuid}: ${pass}
+  certificate: ${cert_path}
+  private-key: ${key_path}
+  congestion-controller: bbr
+  max-idle-time: 15000
+  authentication-timeout: 3000
+  alpn:
+    - h3
+  max-udp-relay-packet-size: 1408
 
 LISTENER
             ;;
@@ -579,6 +655,19 @@ modify_listener_pass() {
                 awk -v pass="$new_pass" '
                     /^- name: hysteria2-in/{found=1}
                     found && /user1:/{$0="    user1: "pass; found=0}
+                    {print}
+                ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
+                ;;
+            tuicv5-in)
+                awk -v pass="$new_pass" '
+                    /^- name: tuicv5-in/{found=1}
+                    found && /^    [a-f0-9-]+:/{
+                        split($0, arr, ":")
+                        uuid = arr[1]
+                        gsub(/^[[:space:]]+/, "", uuid)
+                        $0 = "    " uuid ": " pass
+                        found=0
+                    }
                     {print}
                 ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
                 ;;
