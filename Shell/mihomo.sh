@@ -147,10 +147,19 @@ allow-lan: false
 mode: rule
 log-level: silent
 ipv6: true
-sniffer:
-  enable: false
 dns:
-  enable: false
+  enable: true
+  listen: 127.0.0.1:1053
+  ipv6: true
+  nameserver:
+    - 1.1.1.1
+    - 2606:4700:4700::1111
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-range6: fdfe:dcba:9876::1/64
+profile:
+  store-selected: false
+  store-fake-ip: false
 listeners:
 EOF
 
