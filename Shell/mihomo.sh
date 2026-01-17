@@ -65,7 +65,11 @@ get_latest_download_url() {
         return 1
     fi
     
-    asset_name="mihomo-linux-${arch}-${latest_version}.gz"
+    if [[ "$arch" == "amd64" ]]; then
+        asset_name="mihomo-linux-${arch}-v3-go123-${latest_version}.gz"
+    else
+        asset_name="mihomo-linux-${arch}-${latest_version}.gz"
+    fi
     download_url="${base_url}/MetaCubeX/mihomo/releases/download/${latest_version}/${asset_name}"
     echo "${download_url}|${latest_version}"
 }
