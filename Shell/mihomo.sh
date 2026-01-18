@@ -149,7 +149,7 @@ log-level: silent
 ipv6: true
 dns:
   enable: true
-  listen: ::1:1053
+  listen: :1053
   ipv6: true
   nameserver:
     - 1.1.1.1
