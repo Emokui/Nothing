@@ -3,7 +3,7 @@
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/SteinsGate.sh)
 ```
-![SSH](./icon/Mine/ssh.png)
+![SteinsGate](./icon/Mine/SteinsGate.png)
 
 ## 𝐁𝐥𝐨𝐠 ##
 https://snell.us.kg
