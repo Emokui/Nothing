@@ -4,7 +4,6 @@ export PATH
 
 #=================================================
 #   Description: 一键重装系统
-#   Version: 1.0.1
 #=================================================
 
 github="raw.githubusercontent.com/Emokui/Steins/Gate/Bash"
