@@ -673,15 +673,15 @@ run_install_script() {
     set -e
 }
 
-install_acme()      { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh"; }
-install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/snell.sh"; }
-install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/mihomo.sh"; }
-install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/hysteria.sh"; }
-install_substore()  { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/substore.sh"; }
-install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/Install.sh"; }
-install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/nginx.sh"; }
-install_wireguard() { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/wireguard.sh"; }
-dns_fix()           { run_install_script "https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/dns.sh"; }
+install_acme()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/acme.sh"; }
+install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/snell.sh"; }
+install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh"; }
+install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/hysteria.sh"; }
+install_substore()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/substore.sh"; }
+install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
+install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/nginx.sh"; }
+install_wireguard() { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/wireguard.sh"; }
+dns_fix()           { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/dns.sh"; }
 
 # ====== VPS重启 ======
 reboot_vps() {
