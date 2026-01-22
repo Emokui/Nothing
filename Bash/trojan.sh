@@ -870,7 +870,7 @@ install_fake_web() {
         return
     fi
 
-    if ! wget -q -O index.html https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/index.html; then
+    if ! wget -q -O index.html https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/index.html; then
         echo -e "${YELLOW}下载 index.html 失败，请检查网络或 URL${PLAIN}"
     fi
 
