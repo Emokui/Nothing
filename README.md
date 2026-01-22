@@ -1,7 +1,7 @@
 ## 𝐔𝐬𝐞  ##
 
 ```
-bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/SteinsGate.sh)
+bash <(curl -sL https://raw.githubusercontent.com/Steins/Nothing/Gate/Shell/SteinsGate.sh)
 ```
 ![SteinsGate](./icon/Mine/SteinsGate.png)
 
