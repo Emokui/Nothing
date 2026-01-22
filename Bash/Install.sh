@@ -7,7 +7,7 @@ export PATH
 #   Version: 1.0.1
 #=================================================
 
-github="raw.githubusercontent.com/Emokui/Nothing/Zero/Shell"
+github="raw.githubusercontent.com/Emokui/Steins/Gate/Bash"
 
 # ====== 颜色变量 ======
 Green_font_prefix="\033[32m"
