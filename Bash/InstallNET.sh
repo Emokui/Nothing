@@ -1,11 +1,5 @@
 #!/bin/bash
 
-## License: GPL
-## It can reinstall Debian, Ubuntu, CentOS system with network.
-## Default root password: MoeClub.org
-## Blog: https://moeclub.org
-## Written By MoeClub.org
-
 export tmpVER=''
 export tmpDIST=''
 export tmpURL=''
@@ -790,5 +784,3 @@ else
   [[ -f "/boot/vmlinuz" ]] && rm -rf "/boot/vmlinuz"
   echo && ls -AR1 "$HOME/loader"
 fi
-
-
