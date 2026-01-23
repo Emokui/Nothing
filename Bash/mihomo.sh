@@ -233,7 +233,7 @@ EOF
   authentication-timeout: 3000
   alpn:
     - h3
-  max-udp-relay-packet-size: 1408
+  max-udp-relay-packet-size: 1472
 
 EOF
     fi
