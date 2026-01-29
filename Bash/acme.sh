@@ -9,18 +9,11 @@ YELLOW="\033[33m\033[01m"
 BLUE="\033[34m\033[01m"
 PLAIN='\033[0m'
 
-# ====== 证书存放路径 ======
+# ====== 证书路径 ======
 CERT_PATH="/etc/cert"
 mkdir -p "$CERT_PATH"
 
-# ====== 全局变量 ======
-ipv4=""
-ipv6=""
-
-# ====== Root 权限检查 ======
-[[ $EUID -ne 0 ]] && echo -e "${RED}注意：请在 root 用户下运行脚本${PLAIN}" && exit 1
-
-# ====== 检测 IPv4 函数 ======
+# ====== 检测IPv4 ======
 has_ipv4() {
     ip -4 addr show scope global | grep -q inet
 }
@@ -33,7 +26,7 @@ get_acme_download_url() {
     echo "$url"
 }
 
-# ====== 包管理器函数 ======
+# ====== 包管理器 ======
 pkg_update() {
     apt-get update
 }
@@ -42,29 +35,10 @@ pkg_install() {
     apt -y install "$@"
 }
 
-# ====== WARP 通用控制函数 ======
-warp_down() {
-    if [[ -n $(type -P wg-quick) && -n $(type -P wgcf) ]]; then
-        wg-quick down wgcf >/dev/null 2>&1 || true
-    fi
-    if [[ -f "/opt/warp-go/warp-go" ]]; then
-        systemctl stop warp-go >/dev/null 2>&1 || true
-    fi
-}
-
-warp_up() {
-    if [[ -n $(type -P wg-quick) && -n $(type -P wgcf) ]]; then
-        wg-quick up wgcf >/dev/null 2>&1 || true
-    fi
-    if [[ -f "/opt/warp-go/warp-go" ]]; then
-        systemctl start warp-go >/dev/null 2>&1 || true
-    fi
-}
-
 # ====== 辅助函数 ======
 back2menu() {
     echo ""
-    echo -e "${YELLOW}操作完成！按 Enter 键返回主菜单，或按 Ctrl+C 退出脚本...${PLAIN}"
+    echo -e "${YELLOW}操作完成！按 Enter 键返回主菜单${PLAIN}"
     read -r
 }
 
@@ -112,14 +86,6 @@ display_cert_list() {
     return 0
 }
 
-check_ip() {
-    local ipv4_result ipv6_result
-    ipv4_result=$(curl -s4m8 ip.sb -k 2>/dev/null | sed -n 1p) || true
-    ipv6_result=$(curl -s6m8 ip.sb -k 2>/dev/null | sed -n 1p) || true
-    ipv4="$ipv4_result"
-    ipv6="$ipv6_result"
-}
-
 validate_domain() {
     local domain="$1"
     if [[ ! "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]; then
@@ -160,34 +126,27 @@ install_acme_core() {
     systemctl start cron
     systemctl enable cron
 
-    read -rp "请输入注册邮箱 (留空自动生成一个 gmail 邮箱): " email
-    if [[ -z $email ]]; then
-        local automail
-        automail=$(date +%s%N | md5sum | cut -c 1-16)
-        email=$automail@gmail.com
-        echo -e "${YELLOW}已取消设置邮箱，使用自动生成的 gmail 邮箱: $email${PLAIN}"
-    fi
+    local automail
+    automail=$(date +%s%N | md5sum | cut -c 1-16)
+    local email=$automail@gmail.com
 
     local ACME_TAR_URL
     ACME_TAR_URL=$(get_acme_download_url)
     
     if wget --no-check-certificate -O master.tar.gz "$ACME_TAR_URL"; then
         tar zxvf master.tar.gz
-        cd acme.sh-master || return 1
-        ./acme.sh --install --accountemail "$email"
-        cd ..
+        (cd acme.sh-master && ./acme.sh --install --accountemail "$email")
         rm -rf acme.sh-master master.tar.gz
         bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
-        select_provider_core
+        
+        bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+
         if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
-            echo -e "${GREEN}Acme.sh 证书一键申请脚本安装成功!${PLAIN}"
+            echo -e "${GREEN}Acme 安装成功!${PLAIN}"
         else
-            echo -e "${RED}抱歉，Acme.sh 证书一键申请脚本安装失败${PLAIN}"
-            echo -e "${GREEN}建议如下：${PLAIN}"
-            echo -e "${YELLOW}检查 VPS 的网络环境${PLAIN}"
+            echo -e "${RED}Acme 安装失败${PLAIN}"
         fi
-    else
-        echo -e "${RED}Acme.sh 下载失败，请检查网络或稍后重试${PLAIN}"
+
     fi
 }
 
@@ -205,9 +164,9 @@ unst_acme() {
     
     if ~/.acme.sh/acme.sh --uninstall; then
         rm -rf ~/.acme.sh
-        echo -e "${GREEN}Acme.sh 证书一键申请脚本已彻底卸载!${PLAIN}"
+        echo -e "${GREEN}Acme 已彻底卸载!${PLAIN}"
     else
-        echo -e "${RED}Acme.sh 卸载失败，请手动检查${PLAIN}"
+        echo -e "${RED}Acme 卸载失败，请手动检查${PLAIN}"
     fi
     back2menu
 }
@@ -279,13 +238,10 @@ check_80() {
 
 checktls() {
     local domain="$1"
-    local restore_warp="${2:-false}"
     mkdir -p "$CERT_PATH"
 
     if [[ -f "$CERT_PATH/$domain.crt" && -f "$CERT_PATH/$domain.key" ]]; then
         if [[ -s "$CERT_PATH/$domain.crt" && -s "$CERT_PATH/$domain.key" ]]; then
-            [[ "$restore_warp" == "true" ]] && warp_up
-
             echo -e "${GREEN}证书申请成功! 证书 ($domain.crt) 和私钥 ($domain.key) 已保存到 $CERT_PATH${PLAIN}"
             echo -e "${YELLOW}证书 crt 文件路径: $CERT_PATH/$domain.crt${PLAIN}"
             echo -e "${YELLOW}私钥 key 文件路径: $CERT_PATH/$domain.key${PLAIN}"
@@ -293,11 +249,7 @@ checktls() {
         fi
     fi
     
-    [[ "$restore_warp" == "true" ]] && warp_up
-    echo -e "${RED}抱歉，证书申请失败${PLAIN}"
-    echo -e "${GREEN}建议如下:${PLAIN}"
-    echo -e "${YELLOW}1. 请检查防火墙配置，80端口是否被占用${PLAIN}"
-    echo -e "${YELLOW}2. 同一域名多次申请可能会触发风控，请尝试更换证书颁发机构，再重试申请${PLAIN}"
+    echo -e "${RED}证书申请失败${PLAIN}"
     return 1
 }
 
@@ -307,29 +259,6 @@ acme_standalone() {
     if ! check_80; then
         return
     fi
-
-    local WARPv4Status WARPv6Status warp_was_enabled=false
-    WARPv4Status=$(curl -s4m8 https://www.cloudflare.com/cdn-cgi/trace -k 2>/dev/null | grep warp | cut -d= -f2) || true
-    WARPv6Status=$(curl -s6m8 https://www.cloudflare.com/cdn-cgi/trace -k 2>/dev/null | grep warp | cut -d= -f2) || true
-    if [[ "$WARPv4Status" == "on" || "$WARPv4Status" == "plus" || "$WARPv6Status" == "on" || "$WARPv6Status" == "plus" ]]; then
-        warp_down
-        warp_was_enabled=true
-    fi
-
-    check_ip
-
-    echo ""
-    echo -e "${YELLOW}在使用 80 端口申请模式时，请先将您的域名解析至您的 VPS 的真实 IP 地址，否则会导致证书申请失败${PLAIN}"
-    echo ""
-    if [[ -n $ipv4 && -n $ipv6 ]]; then
-        echo -e "VPS 的真实 IPv4 地址为: ${GREEN}$ipv4${PLAIN}"
-        echo -e "VPS 的真实 IPv6 地址为: ${GREEN}$ipv6${PLAIN}"
-    elif [[ -n $ipv4 ]]; then
-        echo -e "VPS 的真实 IPv4 地址为: ${GREEN}$ipv4${PLAIN}"
-    elif [[ -n $ipv6 ]]; then
-        echo -e "VPS 的真实 IPv6 地址为: ${GREEN}$ipv6${PLAIN}"
-    fi
-    echo ""
 
     local domain
     read -rp "请输入解析完成的域名: " domain
@@ -347,56 +276,14 @@ acme_standalone() {
     
     echo -e "${GREEN}已输入的域名：$domain${PLAIN}" && sleep 1
 
-    local all_ips matched_ip use_ipv6=false
-    all_ips=$(dig @8.8.8.8 +time=2 +short "$domain" A 2>/dev/null) || true
-    all_ips+=$'\n'$(dig @8.8.8.8 +time=2 +short "$domain" AAAA 2>/dev/null) || true
-    
-    if [[ -z "$all_ips" ]] || echo "$all_ips" | grep -q "network unreachable\|timed out"; then
-        all_ips=$(dig @2001:4860:4860::8888 +time=2 +short "$domain" A 2>/dev/null) || true
-        all_ips+=$'\n'$(dig @2001:4860:4860::8888 +time=2 +short "$domain" AAAA 2>/dev/null) || true
-    fi
-    
-    all_ips=$(echo "$all_ips" | grep -v '^$' | sort -u)
-    
-    if [[ -z "$all_ips" ]]; then
-        echo -e "${RED}无法解析域名 IP，请自我检查${PLAIN}"
-        back2menu
-        return
-    fi
-
-    matched_ip=""
-    while IFS= read -r ip; do
-        [[ -z "$ip" ]] && continue
-        if [[ "$ip" == "$ipv4" ]]; then
-            matched_ip="$ip"
-            use_ipv6=false
-            break
-        elif [[ "$ip" == "$ipv6" ]]; then
-            matched_ip="$ip"
-            use_ipv6=true
-            break
-        fi
-    done <<< "$all_ips"
-
-    if [[ -z "$matched_ip" ]]; then
-        [[ "$warp_was_enabled" == "true" ]] && warp_up
-        echo -e "${GREEN}域名 ${domain} 解析的 IP 列表：${PLAIN}"
-        echo "$all_ips" | while read -r ip; do echo -e "  ${YELLOW}$ip${PLAIN}"; done
-        echo -e "${RED}当前域名解析的 IP 均与 VPS 真实 IP 不匹配${PLAIN}"
-        back2menu
-        return
-    fi
-
-    echo -e "${GREEN}域名解析匹配成功: $matched_ip${PLAIN}"
-
-    if [[ "$use_ipv6" == "true" ]]; then
+    if ! has_ipv4; then
         bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --listen-v6 --insecure
     else
         bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --insecure
     fi
 
     bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
-    checktls "$domain" "$warp_was_enabled"
+    checktls "$domain"
     back2menu
 }
 
@@ -428,7 +315,7 @@ acme_cfapiNTLD() {
     ensure_acme_installed || return
 
     local domain
-    read -rp "请输入需要申请证书的泛域名 (输入格式:example.com): " domain
+    read -rp "请输入需要申请证书的泛域名: " domain
     
     if [[ -z $domain ]]; then
         echo -e "${RED}未输入域名，无法执行操作！${PLAIN}"
@@ -448,22 +335,7 @@ acme_cfapiNTLD() {
     back2menu
 }
 
-view_cert() {
-    ensure_acme_installed || return
-    
-    echo ""
-    clear
-    echo -e "${BLUE}==================== 已申请的证书列表 ====================${PLAIN}"
-    
-    if ! display_cert_list; then
-        back2menu
-        return
-    fi
-    
-    echo -e "证书存放路径: ${GREEN}$CERT_PATH${PLAIN}"
-    
-    back2menu
-}
+
 
 revoke_cert() {
     ensure_acme_installed || return
@@ -508,7 +380,7 @@ revoke_cert() {
     echo ""
     
     local choice
-    read -rp "请输入要撤销的证书序号 (输入 0 返回): " choice
+    read -rp "请输入要撤销的证书序号(输入0返回): " choice
     
     if [[ "$choice" == "0" ]]; then
         back2menu
@@ -553,18 +425,17 @@ renew_cert() {
 }
 
 select_provider_core() {
-    echo -e "${YELLOW}请选择证书提供商，默认通过 Letsencrypt.org 来申请证书${PLAIN}"
-    echo -e "${YELLOW}如果证书申请失败，可选 BuyPass.com 或 ZeroSSL.com 来申请.${PLAIN}"
-    echo -e " ${GREEN}1.${PLAIN} Letsencrypt.org ${YELLOW}(默认)${PLAIN}"
+    echo -e "${YELLOW}证书颁发机构${PLAIN}"
+    echo -e " ${GREEN}1.${PLAIN} Letsencrypt.org${PLAIN}"
     echo -e " ${GREEN}2.${PLAIN} BuyPass.com${PLAIN}"
     echo -e " ${GREEN}3.${PLAIN} ZeroSSL.com${PLAIN}"
     
     local provider
-    read -rp "请选择证书提供商 [1-3]: " provider
+    read -rp "请选择 [1-3]: " provider
     case $provider in
-        2) bash ~/.acme.sh/acme.sh --set-default-ca --server buypass && echo -e "${GREEN}切换证书提供商为 BuyPass.com 成功！${PLAIN}" ;;
-        3) bash ~/.acme.sh/acme.sh --set-default-ca --server zerossl && echo -e "${GREEN}切换证书提供商为 ZeroSSL.com 成功！${PLAIN}" ;;
-        *) bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt && echo -e "${GREEN}切换证书提供商为 Letsencrypt.org 成功！${PLAIN}" ;;
+        2) bash ~/.acme.sh/acme.sh --set-default-ca --server buypass && echo -e "${GREEN}切换证书颁发机构为 BuyPass.com 成功！${PLAIN}" ;;
+        3) bash ~/.acme.sh/acme.sh --set-default-ca --server zerossl && echo -e "${GREEN}切换证书颁发机构为 ZeroSSL.com 成功！${PLAIN}" ;;
+        *) bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt && echo -e "${GREEN}切换证书颁发机构为 Letsencrypt.org 成功！${PLAIN}" ;;
     esac
 }
 
@@ -577,30 +448,26 @@ switch_provider() {
 
 generate_self_signed_cert() {
     echo ""
-    echo -e "${YELLOW}开始生成自签名ECC证书...${PLAIN}"
+    echo -e "${YELLOW}开始生成自签证书...${PLAIN}"
     
-    local DEFAULT_DOMAIN="bing.com"
-    local DEFAULT_DAYS=36500
+    local DEFAULT_DOMAIN="icloud.com.cn"
+    local days=3650
 
-    local domain days
+    local domain
     read -rp "请输入证书的域名（默认: ${DEFAULT_DOMAIN}）: " domain
     domain="${domain:-$DEFAULT_DOMAIN}"
-    read -rp "请输入证书有效天数（默认: ${DEFAULT_DAYS}）: " days
-    days="${days:-$DEFAULT_DAYS}"
 
-    local key_file="$CERT_PATH/server.key"
-    local crt_file="$CERT_PATH/server.crt"
+    local key_file="$CERT_PATH/${domain}.key"
+    local crt_file="$CERT_PATH/${domain}.crt"
 
-    echo "生成 ECC 私钥..."
     openssl ecparam -name prime256v1 -genkey -noout -out "$key_file"
-    echo "使用私钥生成自签证书..."
     openssl req -new -x509 -key "$key_file" -out "$crt_file" -days "$days" \
         -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain"
     chmod 644 "$crt_file"
     chmod 600 "$key_file"
 
     echo ""
-    echo -e "${GREEN}自签名证书生成完成！${PLAIN}"
+    echo -e "${GREEN}自签证书生成完成！${PLAIN}"
     echo "私钥位置: $key_file"
     echo "证书位置: $crt_file"
     back2menu
@@ -620,11 +487,10 @@ menu() {
         echo -e " ${GREEN} 4.${PLAIN}申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
         echo -e " ${GREEN} 5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
         echo " -------------"
-        echo -e " ${GREEN} 6.${PLAIN}查看已申请的证书"
-        echo -e " ${GREEN} 7.${PLAIN}撤销已申请的证书"
-        echo -e " ${GREEN} 8.${PLAIN}续期已申请的证书"
-        echo -e " ${GREEN} 9.${PLAIN}切换证书颁发机构"
-        echo -e " ${GREEN}10.${PLAIN}生成自签证书"
+        echo -e " ${GREEN} 6.${PLAIN}撤销已申请的证书"
+        echo -e " ${GREEN} 7.${PLAIN}续期已申请的证书"
+        echo -e " ${GREEN} 8.${PLAIN}切换证书颁发机构"
+        echo -e " ${GREEN} 9.${PLAIN}生成自签证书"
         echo " -------------"
         echo -e " ${GREEN} 0.${PLAIN}退出脚本"
         echo ""
@@ -637,11 +503,10 @@ menu() {
             3) acme_standalone ;;
             4) acme_cfapiTLD ;;
             5) acme_cfapiNTLD ;;
-            6) view_cert ;;
-            7) revoke_cert ;;
-            8) renew_cert ;;
-            9) switch_provider ;;
-            10) generate_self_signed_cert ;;
+            6) revoke_cert ;;
+            7) renew_cert ;;
+            8) switch_provider ;;
+            9) generate_self_signed_cert ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 1 ;;
         esac
