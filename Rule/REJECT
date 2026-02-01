@@ -11,3 +11,5 @@ DOMAIN,swscan.apple.com
 DOMAIN,swdownload.apple.com
 DOMAIN,updates.cdn-apple.com
 DOMAIN,updates-http.cdn-apple.com
+PROCESS-NAME,CleanMyMac_5
+AND,((PROTOCOL,UDP), (DEST-PORT,3478))
