@@ -149,15 +149,13 @@ log-level: silent
 ipv6: true
 dns:
   enable: true
-  listen: :1053
-  ipv6: true
+  listen: :53
+  ipv6: false
   nameserver:
     - 1.1.1.1
-    - 2606:4700:4700::1111
-  enhanced-mode: fake-ip
+  enhanced-mode: redir-host
 profile:
-  store-selected: false
-  store-fake-ip: false
+  store-selected: true
 listeners:
 EOF
 
