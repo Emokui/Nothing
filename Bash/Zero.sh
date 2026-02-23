@@ -996,8 +996,8 @@ main_menu() {
         echo -e "${GREEN}  13.${PLAIN}安装Hysteria"
         echo -e "${GREEN}  14.${PLAIN}配置FireWall"
         echo -e "${GREEN}  15.${PLAIN}安装SubStore"
-        echo -e "${GREEN}  16.${PLAIN}添加WARPSTACK"
-        echo -e "${GREEN}   0.${PLAIN}离开SteinsGate"
+        echo -e "${GREEN}  16.${PLAIN}添加WarpStack"
+        echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
         read -p "$(echo -e "${BLUE}✦ Choice [0-16] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
