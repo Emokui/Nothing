@@ -21,10 +21,8 @@ fi
 echo "=== 检测到系统版本: Debian $VERSION_ID ($CODENAME) ==="
 
 if [ "$CODENAME" = "bullseye" ]; then
-    # Debian 11
     COMPONENTS="main contrib non-free"
 elif [ "$CODENAME" = "bookworm" ] || [ "$CODENAME" = "trixie" ]; then
-    # Debian 12 & 13
     COMPONENTS="main contrib non-free non-free-firmware"
 else
     echo "错误: 不支持的系统代号 ($CODENAME)。本脚本支持 bullseye(11), bookworm(12), trixie(13)"
