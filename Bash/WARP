@@ -1,19 +1,9 @@
+
 #!/bin/bash
-# ============================================================
-#  WARP 一键双栈管理脚本
-#  支持：免费账户 / 团队账户 / 修改配置 / 删除服务
-# ============================================================
+# WARP 一键双栈管理脚本 v2.0
 
-# 不使用 set -e，因为交互式菜单中某些命令允许失败
-
-# ======================== 公共函数 ========================
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 info()  { echo -e "${CYAN}[INFO]${NC} $1"; }
 ok()    { echo -e "${GREEN}[ OK ]${NC} $1"; }
@@ -25,11 +15,7 @@ WG_CONF="/etc/wireguard/wg0.conf"
 WGCF_BIN="/usr/local/bin/wgcf"
 WGCF_VERSION="2.2.30"
 
-# ======================== 工具函数 ========================
-
-check_root() {
-    [[ $EUID -ne 0 ]] && err "请使用 root 用户运行此脚本"
-}
+check_root() { [[ $EUID -ne 0 ]] && err "请使用 root 用户运行此脚本"; }
 
 detect_arch() {
     ARCH=$(uname -m)
@@ -42,40 +28,25 @@ detect_arch() {
 }
 
 detect_network() {
-    HAS_V4=false
-    HAS_V6=false
-    if ping -4 -c 1 -W 3 1.1.1.1 &>/dev/null; then HAS_V4=true; fi
-    if ping -6 -c 1 -W 3 2606:4700:4700::1111 &>/dev/null; then HAS_V6=true; fi
+    HAS_V4=false; HAS_V6=false
+    ping -4 -c 1 -W 3 1.1.1.1 &>/dev/null && HAS_V4=true
+    ping -6 -c 1 -W 3 2606:4700:4700::1111 &>/dev/null && HAS_V6=true
 
-    if $HAS_V4 && $HAS_V6; then
-        NET_MODE="dual"
-    elif $HAS_V6 && ! $HAS_V4; then
-        NET_MODE="v6_only"
-    elif $HAS_V4 && ! $HAS_V6; then
-        NET_MODE="v4_only"
-    else
-        NET_MODE="none"
-    fi
+    if $HAS_V4 && $HAS_V6; then NET_MODE="dual"
+    elif $HAS_V6; then NET_MODE="v6_only"
+    elif $HAS_V4; then NET_MODE="v4_only"
+    else NET_MODE="none"; fi
 }
 
 show_network_status() {
     detect_network
     echo ""
     case "$NET_MODE" in
-        dual)
-            echo -e "  网络状态: ${GREEN}IPv4${NC} ✓  ${GREEN}IPv6${NC} ✓ (双栈)"
-            ;;
-        v6_only)
-            echo -e "  网络状态: ${RED}IPv4${NC} ✗  ${GREEN}IPv6${NC} ✓ (纯 IPv6)"
-            ;;
-        v4_only)
-            echo -e "  网络状态: ${GREEN}IPv4${NC} ✓  ${RED}IPv6${NC} ✗ (纯 IPv4)"
-            ;;
-        none)
-            echo -e "  网络状态: ${RED}IPv4${NC} ✗  ${RED}IPv6${NC} ✗ (无连接)"
-            ;;
+        dual)    echo -e "  网络状态: ${GREEN}IPv4${NC} ✓  ${GREEN}IPv6${NC} ✓ (双栈)" ;;
+        v6_only) echo -e "  网络状态: ${RED}IPv4${NC} ✗  ${GREEN}IPv6${NC} ✓ (纯 IPv6)" ;;
+        v4_only) echo -e "  网络状态: ${GREEN}IPv4${NC} ✓  ${RED}IPv6${NC} ✗ (纯 IPv4)" ;;
+        none)    echo -e "  网络状态: ${RED}IPv4${NC} ✗  ${RED}IPv6${NC} ✗ (无连接)" ;;
     esac
-
     if ip link show wg0 &>/dev/null 2>&1; then
         echo -e "  WARP 状态: ${GREEN}运行中${NC}"
     else
@@ -85,10 +56,7 @@ show_network_status() {
 }
 
 install_wireguard_tools() {
-    if command -v wg &>/dev/null; then
-        ok "wireguard-tools 已安装"
-        return
-    fi
+    command -v wg &>/dev/null && { ok "wireguard-tools 已安装"; return; }
     info "安装 wireguard-tools ..."
     if command -v apt &>/dev/null; then
         apt update -qq && apt install -y -qq wireguard-tools
@@ -103,23 +71,20 @@ install_wireguard_tools() {
 }
 
 check_dependencies() {
-    # curl 是必须的（验证 IP、团队 API）
-    if ! command -v curl &>/dev/null; then
+    command -v curl &>/dev/null || {
         info "安装 curl ..."
         apt install -y -qq curl 2>/dev/null || yum install -y curl 2>/dev/null || dnf install -y curl 2>/dev/null
-    fi
-    # dig 用于域名解析（可选，回退到硬编码地址）
-    if ! command -v dig &>/dev/null; then
+    }
+    command -v dig &>/dev/null || {
         info "安装 dnsutils (dig) ..."
         apt install -y -qq dnsutils 2>/dev/null || yum install -y bind-utils 2>/dev/null || dnf install -y bind-utils 2>/dev/null || true
-    fi
+    }
 }
 
 enable_bbr() {
-    local current_cc
-    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-    if [[ "$current_cc" != "bbr" ]]; then
-        info "启用 BBR 拥塞控制 ..."
+    local cc; cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
+    if [[ "$cc" != "bbr" ]]; then
+        info "启用 BBR ..."
         grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf 2>/dev/null || echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
         grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf 2>/dev/null || echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
         sysctl -p &>/dev/null
@@ -129,58 +94,38 @@ enable_bbr() {
     fi
 }
 
-# 从配置或 API 结果中解析 Endpoint
-# 参数: $1 = 原始 endpoint 字符串 (如 engage.cloudflareclient.com:2408)
 resolve_endpoint() {
-    local raw_ep="$1"
-    local host port
+    local raw_ep="$1" host port
 
-    # 分离 host 和 port
-    if [[ "$raw_ep" =~ ^\[.*\]:[0-9]+$ ]]; then
-        # 已经是 [IPv6]:port 格式，直接使用
-        ENDPOINT="$raw_ep"
-        return
-    fi
+    [[ "$raw_ep" =~ ^\[.*\]:[0-9]+$ ]] && { ENDPOINT="$raw_ep"; return; }
 
     host=$(echo "$raw_ep" | sed 's/:[0-9]*$//')
     port=$(echo "$raw_ep" | grep -oP ':\K[0-9]+$')
     [[ -z "$port" ]] && port=2408
 
-    # 如果是 IPv4 地址，直接使用
-    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        ENDPOINT="${host}:${port}"
-        return
-    fi
+    [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && { ENDPOINT="${host}:${port}"; return; }
 
-    # 如果是域名，根据网络类型解析
     if [[ "$NET_MODE" == "v6_only" ]]; then
-        # 纯 IPv6 环境：解析域名的 AAAA 记录
-        local resolved
-        resolved=$(dig +short AAAA "$host" 2>/dev/null | head -1)
+        local resolved; resolved=$(dig +short AAAA "$host" 2>/dev/null | head -1)
         if [[ -n "$resolved" ]]; then
             ENDPOINT="[${resolved}]:${port}"
             info "域名 ${host} 解析为 IPv6: ${resolved}"
         else
-            # 解析失败，使用已知的 WARP IPv6 地址作为回退
             ENDPOINT="[2606:4700:d0::a29f:c001]:${port}"
             warn "域名解析失败，使用回退 IPv6 Endpoint"
         fi
     else
-        # 有 IPv4：解析域名的 A 记录
-        local resolved
-        resolved=$(dig +short A "$host" 2>/dev/null | head -1)
+        local resolved; resolved=$(dig +short A "$host" 2>/dev/null | head -1)
         if [[ -n "$resolved" ]]; then
             ENDPOINT="${resolved}:${port}"
             info "域名 ${host} 解析为 IPv4: ${resolved}"
         else
-            # 解析失败，直接使用域名（让系统自己解析）
             ENDPOINT="${raw_ep}"
             warn "域名解析失败，保持原始 Endpoint"
         fi
     fi
 }
 
-# 确定安装模式（添加 v4 还是 v6）
 determine_install_mode() {
     detect_network
     case "$NET_MODE" in
@@ -188,174 +133,123 @@ determine_install_mode() {
             warn "当前服务器已经是双栈，无需添加"
             echo -e "  IPv4: $(curl -s -4 --max-time 5 ip.gs 2>/dev/null || echo '获取失败')"
             echo -e "  IPv6: $(curl -s -6 --max-time 5 ip.gs 2>/dev/null || echo '获取失败')"
-            return 1
-            ;;
-        v6_only)
-            INSTALL_MODE="add_v4"
-            info "检测到: 纯 IPv6 → 将通过 WARP 添加 IPv4 出口"
-            ;;
-        v4_only)
-            INSTALL_MODE="add_v6"
-            info "检测到: 纯 IPv4 → 将通过 WARP 添加 IPv6 出口"
-            ;;
-        none)
-            err "当前服务器无任何网络连接，无法继续"
-            ;;
+            return 1 ;;
+        v6_only) INSTALL_MODE="add_v4"; info "检测到: 纯 IPv6 → 将通过 WARP 添加 IPv4 出口" ;;
+        v4_only) INSTALL_MODE="add_v6"; info "检测到: 纯 IPv4 → 将通过 WARP 添加 IPv6 出口" ;;
+        none)    err "当前服务器无任何网络连接，无法继续" ;;
     esac
     return 0
 }
 
-# 检查 wg0 是否已存在
 check_wg0_exists() {
-    if ip link show wg0 &>/dev/null 2>&1; then
-        err "wg0 接口已存在。如需重新安装，请先选择「删除服务」"
-    fi
+    ip link show wg0 &>/dev/null 2>&1 && err "wg0 接口已存在。如需重新安装，请先选择「删除服务」"
 }
 
-# 写入 wg0.conf
 write_wg_conf() {
-    local private_key="$1"
-    local warp_v4="$2"
-    local warp_v6="$3"
-    local public_key="$4"
-    local endpoint="$5"
-    local install_mode="$6"
-    local account_type="$7"
-
+    local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5" mode="$6" acct="$7"
     mkdir -p /etc/wireguard
 
-    if [[ "$install_mode" == "add_v4" ]]; then
+    if [[ "$mode" == "add_v4" ]]; then
         cat > "$WG_CONF" << EOF
-# WARP 隧道 - 纯 IPv6 服务器添加 IPv4 出口
-# 账户类型: ${account_type} | 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-
+# WARP - ${acct} | $(date '+%Y-%m-%d %H:%M:%S')
 [Interface]
-PrivateKey = ${private_key}
-Address = ${warp_v4}/32, ${warp_v6}/128
+PrivateKey = ${priv}
+Address = ${v4}/32, ${v6}/128
 MTU = 1280
 Table = 51820
-
-# IPv4：添加默认路由到 main 表（获得 IPv4 出口）
 PostUp  = ip -4 route add default dev %i table main
 PostDown = ip -4 route del default dev %i table main
-
-# IPv6：策略路由，仅 WARP 源地址走隧道，原生 IPv6 不受影响
-PostUp  = ip -6 rule add from ${warp_v6}/128 table 51820
+PostUp  = ip -6 rule add from ${v6}/128 table 51820
 PostUp  = ip -6 rule add oif %i table 51820
-PostDown = ip -6 rule del from ${warp_v6}/128 table 51820
+PostDown = ip -6 rule del from ${v6}/128 table 51820
 PostDown = ip -6 rule del oif %i table 51820
 
 [Peer]
-PublicKey = ${public_key}
+PublicKey = ${pub}
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = ${endpoint}
+Endpoint = ${ep}
 PersistentKeepalive = 25
 EOF
-    elif [[ "$install_mode" == "add_v6" ]]; then
+    elif [[ "$mode" == "add_v6" ]]; then
         cat > "$WG_CONF" << EOF
-# WARP 隧道 - 纯 IPv4 服务器添加 IPv6 出口
-# 账户类型: ${account_type} | 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-
+# WARP - ${acct} | $(date '+%Y-%m-%d %H:%M:%S')
 [Interface]
-PrivateKey = ${private_key}
-Address = ${warp_v4}/32, ${warp_v6}/128
+PrivateKey = ${priv}
+Address = ${v4}/32, ${v6}/128
 MTU = 1280
 Table = 51820
-
-# IPv6：添加默认路由到 main 表（获得 IPv6 出口）
 PostUp  = ip -6 route add default dev %i table main
 PostDown = ip -6 route del default dev %i table main
-
-# IPv4：策略路由，仅 WARP 源地址走隧道，原生 IPv4 不受影响
-PostUp  = ip -4 rule add from ${warp_v4}/32 table 51820
+PostUp  = ip -4 rule add from ${v4}/32 table 51820
 PostUp  = ip -4 rule add oif %i table 51820
-PostDown = ip -4 rule del from ${warp_v4}/32 table 51820
+PostDown = ip -4 rule del from ${v4}/32 table 51820
 PostDown = ip -4 rule del oif %i table 51820
 
 [Peer]
-PublicKey = ${public_key}
+PublicKey = ${pub}
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = ${endpoint}
+Endpoint = ${ep}
 PersistentKeepalive = 25
 EOF
     fi
-
     chmod 600 "$WG_CONF"
     ok "wg0.conf 已写入"
 }
 
-# 启动隧道并设置自启
 start_and_enable() {
     info "启动 wg0 隧道 ..."
     wg-quick up wg0 || err "wg0 启动失败，请检查配置"
     ok "wg0 隧道已启动"
-
     systemctl enable wg-quick@wg0 &>/dev/null
     ok "已设置开机自启"
 }
 
-# 显示结果
 show_result() {
-    local install_mode="$1"
-
+    local mode="$1"
     echo ""
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}  WARP 隧道配置完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-
     sleep 2
 
-    local v4_addr v6_addr
-    v4_addr=$(curl -s -4 --max-time 5 ip.gs 2>/dev/null || echo "获取失败")
-    v6_addr=$(curl -s -6 --max-time 5 ip.gs 2>/dev/null || echo "获取失败")
+    local v4a v6a
+    v4a=$(curl -s -4 --max-time 5 ip.gs 2>/dev/null || echo "获取失败")
+    v6a=$(curl -s -6 --max-time 5 ip.gs 2>/dev/null || echo "获取失败")
 
-    if [[ "$install_mode" == "add_v4" ]]; then
+    if [[ "$mode" == "add_v4" ]]; then
         echo -e "  模式:      纯 IPv6 → 添加 IPv4"
-        echo -e "  IPv4 出口: ${GREEN}${v4_addr}${NC} (WARP)"
-        echo -e "  IPv6 出口: ${CYAN}${v6_addr}${NC} (原生)"
-    elif [[ "$install_mode" == "add_v6" ]]; then
+        echo -e "  IPv4 出口: ${GREEN}${v4a}${NC} (WARP)"
+        echo -e "  IPv6 出口: ${CYAN}${v6a}${NC} (原生)"
+    else
         echo -e "  模式:      纯 IPv4 → 添加 IPv6"
-        echo -e "  IPv4 出口: ${CYAN}${v4_addr}${NC} (原生)"
-        echo -e "  IPv6 出口: ${GREEN}${v6_addr}${NC} (WARP)"
+        echo -e "  IPv4 出口: ${CYAN}${v4a}${NC} (原生)"
+        echo -e "  IPv6 出口: ${GREEN}${v6a}${NC} (WARP)"
     fi
-
     echo ""
     echo -e "  BBR:       $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
     echo -e "  开机自启:   已启用"
     echo ""
-    echo -e "  常用命令:"
-    echo -e "    查看状态:  ${CYAN}wg show${NC}"
-    echo -e "    关闭隧道:  ${CYAN}wg-quick down wg0${NC}"
-    echo -e "    启动隧道:  ${CYAN}wg-quick up wg0${NC}"
-    echo ""
+    echo -e "  常用命令:  ${CYAN}wg show${NC} / ${CYAN}wg-quick down wg0${NC} / ${CYAN}wg-quick up wg0${NC}"
     echo -e "  隧道配置:  ${YELLOW}${WG_CONF}${NC}"
     echo ""
 }
 
-# ======================== 1. 免费账户安装 ========================
+# ======================== 1. 免费账户 ========================
 
 install_free() {
-    echo ""
-    info "===== 使用免费 WARP 账户安装 ====="
-    echo ""
+    echo ""; info "===== 免费 WARP 账户安装 ====="; echo ""
 
     determine_install_mode || return
-    check_wg0_exists
-    detect_arch
-    check_dependencies
-    install_wireguard_tools
+    check_wg0_exists; detect_arch; check_dependencies; install_wireguard_tools
 
-    # 下载 wgcf
     if [[ ! -f "$WGCF_BIN" ]]; then
-        local wgcf_url="https://github.com/ViRb3/wgcf/releases/download/v${WGCF_VERSION}/wgcf_${WGCF_VERSION}_linux_${WGCF_ARCH}"
+        local url="https://github.com/ViRb3/wgcf/releases/download/v${WGCF_VERSION}/wgcf_${WGCF_VERSION}_linux_${WGCF_ARCH}"
         info "下载 wgcf v${WGCF_VERSION} ..."
-        wget -qO "$WGCF_BIN" "$wgcf_url" || curl -sLo "$WGCF_BIN" "$wgcf_url" || err "wgcf 下载失败"
-        chmod +x "$WGCF_BIN"
-        ok "wgcf 已下载"
+        wget -qO "$WGCF_BIN" "$url" || curl -sLo "$WGCF_BIN" "$url" || err "wgcf 下载失败"
+        chmod +x "$WGCF_BIN"; ok "wgcf 已下载"
     fi
 
-    # 注册
     mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
     if [[ ! -f "wgcf-account.toml" ]]; then
         info "注册 WARP 免费账户 ..."
@@ -365,83 +259,55 @@ install_free() {
         info "已存在账户文件，跳过注册"
     fi
 
-    # 生成配置
     info "生成 WireGuard 配置 ..."
     wgcf generate || err "配置生成失败"
 
-    # 提取信息
-    local private_key public_key address warp_v4 warp_v6 raw_endpoint
-    private_key=$(grep 'PrivateKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    public_key=$(grep 'PublicKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    address=$(grep 'Address' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    raw_endpoint=$(grep 'Endpoint' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    warp_v4=$(echo "$address" | grep -oP '\d+\.\d+\.\d+\.\d+')
-    warp_v6=$(echo "$address" | grep -oP '2606:[0-9a-f:]+')
+    local priv pub addr ep warp_v4 warp_v6
+    priv=$(grep 'PrivateKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
+    pub=$(grep 'PublicKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
+    addr=$(grep 'Address' wgcf-profile.conf | awk -F' = ' '{print $2}')
+    ep=$(grep 'Endpoint' wgcf-profile.conf | awk -F' = ' '{print $2}')
+    warp_v4=$(echo "$addr" | grep -oP '\d+\.\d+\.\d+\.\d+')
+    warp_v6=$(echo "$addr" | grep -oP '2606:[0-9a-f:]+')
 
-    info "WARP IPv4: $warp_v4"
-    info "WARP IPv6: $warp_v6"
-    info "原始 Endpoint: $raw_endpoint"
+    info "WARP IPv4: $warp_v4 | IPv6: $warp_v6"
 
-    # 清理 wgcf
-    rm -f "$WGCF_BIN"
-    ok "wgcf 已清理"
+    rm -f "$WGCF_BIN"; ok "wgcf 已清理"
 
-    # 从生成的配置中解析 Endpoint
-    resolve_endpoint "$raw_endpoint"
-    info "最终 Endpoint: $ENDPOINT"
-    write_wg_conf "$private_key" "$warp_v4" "$warp_v6" "$public_key" "$ENDPOINT" "$INSTALL_MODE" "free"
-    enable_bbr
-    start_and_enable
-    show_result "$INSTALL_MODE"
+    resolve_endpoint "$ep"
+    info "Endpoint: $ENDPOINT"
+    write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$pub" "$ENDPOINT" "$INSTALL_MODE" "free"
+    enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
 }
 
-# ======================== 2. 团队账户安装 ========================
+# ======================== 2. 团队账户 ========================
 
 install_team() {
-    echo ""
-    info "===== 使用团队 (Zero Trust) 账户安装 ====="
-    echo ""
+    echo ""; info "===== 团队 (Zero Trust) 账户安装 ====="; echo ""
 
     determine_install_mode || return
-    check_wg0_exists
-    check_dependencies
-    install_wireguard_tools
-
-    # 需要 wg 命令来生成密钥
-    if ! command -v wg &>/dev/null; then
-        err "wg 命令不可用，请确认 wireguard-tools 已正确安装"
-    fi
+    check_wg0_exists; check_dependencies; install_wireguard_tools
+    command -v wg &>/dev/null || err "wg 命令不可用"
 
     echo ""
-    echo -e "${BOLD}团队账户注册流程：${NC}"
-    echo ""
-    echo -e "  1. 在浏览器打开你的团队注册页面："
-    echo -e "     ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
-    echo -e "  2. 完成身份验证登录"
-    echo -e "  3. 登录成功后，从跳转 URL 中复制 token= 后面的 JWT 令牌"
-    echo -e "  ${YELLOW}⚠ 令牌有效期仅 60 秒，请提前准备好再操作${NC}"
+    echo -e "${BOLD}获取 Token：${NC}打开 ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC} 并登录"
+    echo -e "  认证后按 F12 → Console 输入:"
+    echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
+    echo -e "  ${YELLOW}⚠ Token 有效期 60 秒，复制后立即粘贴${NC}"
     echo ""
     read -rp "请粘贴 JWT Token（直接回车取消）: " JWT_TOKEN
+    [[ -z "$JWT_TOKEN" ]] && { warn "已取消"; return; }
 
-    if [[ -z "$JWT_TOKEN" ]]; then
-        warn "已取消"
-        return
-    fi
-
-    # 生成密钥对
     info "生成 WireGuard 密钥对 ..."
-    local private_key public_key
-    private_key=$(wg genkey)
-    public_key=$(echo "$private_key" | wg pubkey)
+    local priv pub; priv=$(wg genkey); pub=$(echo "$priv" | wg pubkey)
 
-    # 调用 API 注册
-    info "向 Cloudflare API 注册设备（60秒内有效）..."
+    info "向 Cloudflare API 注册设备 ..."
     local response
     response=$(curl -s -X POST "https://api.cloudflareclient.com/v0a2158/reg" \
         -H "Content-Type: application/json" \
         -H "Cf-Access-Jwt-Assertion: ${JWT_TOKEN}" \
         -d "{
-            \"key\": \"${public_key}\",
+            \"key\": \"${pub}\",
             \"install_id\": \"\",
             \"fcm_token\": \"\",
             \"tos\": \"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",
@@ -449,150 +315,85 @@ install_team() {
             \"serial_number\": \"$(cat /proc/sys/kernel/random/uuid)\"
         }" 2>/dev/null)
 
-    # 检查是否成功
-    if echo "$response" | grep -q '"account"'; then
-        ok "团队设备注册成功"
-    else
-        echo ""
-        echo -e "${RED}API 返回:${NC}"
-        echo "$response"
-        err "注册失败，请检查 Token 是否过期或格式是否正确"
-    fi
+    echo "$response" | grep -q '"account"' || {
+        echo -e "${RED}API 返回:${NC}"; echo "$response"
+        err "注册失败，请检查 Token 是否过期"
+    }
+    ok "团队设备注册成功"
 
-    # 提取配置
-    # 注意: API 返回的 JSON 中有多个 "v4"/"v6" 字段（interface.addresses 和 peers.endpoint）
-    # 我们需要的是 interface.addresses 里的，它在 "addresses" 对象内
-    local warp_v4 warp_v6 peer_pubkey
+    local warp_v4 warp_v6 peer_pub
     warp_v4=$(echo "$response" | grep -oP '"addresses"\s*:\s*\{[^}]*"v4"\s*:\s*"\K[^"]+' | head -1)
     warp_v6=$(echo "$response" | grep -oP '"addresses"\s*:\s*\{[^}]*"v6"\s*:\s*"\K[^"]+' | head -1)
-
-    # 如果精确匹配失败，回退到第一次出现的 v4/v6（通常就是 addresses 的）
     [[ -z "$warp_v4" ]] && warp_v4=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | head -1)
     [[ -z "$warp_v6" ]] && warp_v6=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | head -1)
+    peer_pub=$(echo "$response" | grep -oP '"public_key"\s*:\s*"\K[^"]+' | tail -1)
 
-    # peers 中的 public_key（Cloudflare 服务端公钥）
-    peer_pubkey=$(echo "$response" | grep -oP '"public_key"\s*:\s*"\K[^"]+' | tail -1)
-
-    if [[ -z "$warp_v4" || -z "$warp_v6" || -z "$peer_pubkey" ]]; then
+    [[ -z "$warp_v4" || -z "$warp_v6" || -z "$peer_pub" ]] && {
         echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
-        err "无法从 API 响应中提取必要配置信息"
-    fi
+        err "无法从 API 响应中提取配置"
+    }
 
-    info "WARP IPv4: $warp_v4"
-    info "WARP IPv6: $warp_v6"
+    local org; org=$(echo "$response" | grep -oP '"organization"\s*:\s*"\K[^"]+' | head -1)
+    info "WARP IPv4: $warp_v4 | IPv6: $warp_v6 | 组织: $org"
 
-    local org
-    org=$(echo "$response" | grep -oP '"organization"\s*:\s*"\K[^"]+' | head -1)
-    info "组织: $org"
-
-    # 提取 Endpoint
-    # 优先使用 API 返回的 host 字段（如 engage.cloudflareclient.com:2408）
-    local raw_endpoint
-    raw_endpoint=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
-
-    if [[ -z "$raw_endpoint" ]]; then
-        # 回退：从 endpoint 对象中根据网络类型提取 v4/v6 地址
+    local raw_ep; raw_ep=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
+    if [[ -z "$raw_ep" ]]; then
         if [[ "$NET_MODE" == "v6_only" ]]; then
-            local ep_v6_raw
-            ep_v6_raw=$(echo "$response" | grep -oP '"endpoint"\s*:\s*\{[^}]*"v6"\s*:\s*"\K[^"]+' || \
-                        echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
-            ep_v6_raw=$(echo "$ep_v6_raw" | sed 's/\[//g; s/\]:.*//g; s/:0$//g')
-            raw_endpoint="[${ep_v6_raw}]:2408"
+            local v6r; v6r=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
+            v6r=$(echo "$v6r" | sed 's/\[//g; s/\]:.*//g; s/:0$//g')
+            raw_ep="[${v6r}]:2408"
         else
-            local ep_v4_raw
-            ep_v4_raw=$(echo "$response" | grep -oP '"endpoint"\s*:\s*\{[^}]*"v4"\s*:\s*"\K[^"]+' || \
-                        echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
-            ep_v4_raw=$(echo "$ep_v4_raw" | sed 's/:0$//g')
-            raw_endpoint="${ep_v4_raw}:2408"
+            local v4r; v4r=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
+            v4r=$(echo "$v4r" | sed 's/:0$//g')
+            raw_ep="${v4r}:2408"
         fi
     fi
-
-    resolve_endpoint "$raw_endpoint"
-
+    resolve_endpoint "$raw_ep"
     info "Endpoint: $ENDPOINT"
 
-    # 保存账户信息
     mkdir -p "$WORK_DIR"
-    cat > "$WORK_DIR/team-account.json" << EOF
-$(echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response")
-EOF
-    cat > "$WORK_DIR/team-private.key" << EOF
-${private_key}
-EOF
-    chmod 600 "$WORK_DIR/team-private.key"
+    echo "$response" | python3 -m json.tool 2>/dev/null > "$WORK_DIR/team-account.json" || echo "$response" > "$WORK_DIR/team-account.json"
+    echo "$priv" > "$WORK_DIR/team-private.key"; chmod 600 "$WORK_DIR/team-private.key"
     ok "账户信息已保存到 $WORK_DIR/"
 
-    # 写入配置并启动
-    write_wg_conf "$private_key" "$warp_v4" "$warp_v6" "$peer_pubkey" "$ENDPOINT" "$INSTALL_MODE" "team($org)"
-    enable_bbr
-    start_and_enable
-    show_result "$INSTALL_MODE"
+    write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$ENDPOINT" "$INSTALL_MODE" "team($org)"
+    enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
 }
 
 # ======================== 3. 修改配置 ========================
 
 modify_config() {
-    echo ""
-    info "===== 修改 WARP 配置 ====="
-    echo ""
-
-    if [[ ! -f "$WG_CONF" ]]; then
-        warn "未找到 ${WG_CONF}，请先安装 WARP 服务"
-        return
-    fi
+    echo ""; info "===== 修改 WARP 配置 ====="; echo ""
+    [[ ! -f "$WG_CONF" ]] && { warn "未找到 ${WG_CONF}，请先安装"; return; }
 
     echo -e "${BOLD}当前配置：${NC}"
     echo -e "${CYAN}────────────────────────────────────${NC}"
     cat "$WG_CONF"
     echo -e "${CYAN}────────────────────────────────────${NC}"
     echo ""
-    echo -e "  1) 修改 Endpoint"
-    echo -e "  2) 修改 MTU"
-    echo -e "  3) 手动编辑配置文件"
-    echo -e "  0) 返回主菜单"
+    echo -e "  1) 修改 Endpoint   2) 修改 MTU   3) 手动编辑   0) 返回"
     echo ""
-    read -rp "请选择 [0-3]: " sub_choice
+    read -rp "请选择 [0-3]: " sub
 
-    case "$sub_choice" in
+    case "$sub" in
         1)
-            echo ""
-            echo -e "  当前 Endpoint: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')"
-            echo ""
-            echo -e "  可用 Endpoint："
-            echo -e "    IPv4: ${CYAN}162.159.192.1:2408${NC}"
-            echo -e "    IPv6: ${CYAN}[2606:4700:d0::a29f:c001]:2408${NC}"
-            echo -e "  可用端口: 2408, 500, 1701, 4500"
-            echo ""
-            read -rp "输入新的 Endpoint: " new_ep
-            if [[ -n "$new_ep" ]]; then
-                sed -i "s|^Endpoint = .*|Endpoint = ${new_ep}|" "$WG_CONF"
-                ok "Endpoint 已更新为: $new_ep"
-                restart_wg
-            fi
+            echo -e "\n  当前: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')"
+            echo -e "  可用: ${CYAN}162.159.192.1:2408${NC} / ${CYAN}[2606:4700:d0::a29f:c001]:2408${NC}"
+            echo -e "  端口: 2408, 500, 1701, 4500\n"
+            read -rp "新 Endpoint: " new_ep
+            [[ -n "$new_ep" ]] && { sed -i "s|^Endpoint = .*|Endpoint = ${new_ep}|" "$WG_CONF"; ok "已更新"; restart_wg; }
             ;;
         2)
-            echo ""
-            echo -e "  当前 MTU: $(grep 'MTU' "$WG_CONF" | awk -F' = ' '{print $2}')"
-            echo -e "  建议值: 1280 (最保守) / 1420 (较优)"
-            echo ""
-            read -rp "输入新的 MTU [1280-1500]: " new_mtu
-            if [[ -n "$new_mtu" ]] && [[ "$new_mtu" -ge 1280 ]] && [[ "$new_mtu" -le 1500 ]]; then
-                sed -i "s|^MTU = .*|MTU = ${new_mtu}|" "$WG_CONF"
-                ok "MTU 已更新为: $new_mtu"
-                restart_wg
-            else
-                warn "无效的 MTU 值"
-            fi
+            echo -e "\n  当前: $(grep 'MTU' "$WG_CONF" | awk -F' = ' '{print $2}')  建议: 1280(保守) / 1420(较优)\n"
+            read -rp "新 MTU [1280-1500]: " mtu
+            [[ -n "$mtu" ]] && [[ "$mtu" -ge 1280 ]] && [[ "$mtu" -le 1500 ]] && {
+                sed -i "s|^MTU = .*|MTU = ${mtu}|" "$WG_CONF"; ok "已更新"; restart_wg
+            } || warn "无效的 MTU 值"
             ;;
         3)
-            echo ""
-            info "正在打开编辑器 ..."
             ${EDITOR:-nano} "$WG_CONF"
-            echo ""
-            read -rp "是否重启 wg0 使配置生效？[y/N]: " yn
-            if [[ "$yn" =~ ^[Yy]$ ]]; then
-                restart_wg
-            fi
+            read -rp "重启 wg0？[y/N]: " yn
+            [[ "$yn" =~ ^[Yy]$ ]] && restart_wg
             ;;
         0) return ;;
         *) warn "无效选择" ;;
@@ -601,63 +402,27 @@ modify_config() {
 
 restart_wg() {
     if ip link show wg0 &>/dev/null 2>&1; then
-        info "重启 wg0 ..."
-        wg-quick down wg0 2>/dev/null || true
-        wg-quick up wg0 || err "wg0 重启失败"
-        ok "wg0 已重启"
+        info "重启 wg0 ..."; wg-quick down wg0 2>/dev/null || true
+        wg-quick up wg0 || err "wg0 重启失败"; ok "wg0 已重启"
     else
-        info "wg0 未运行，正在启动 ..."
-        wg-quick up wg0 || err "wg0 启动失败"
-        ok "wg0 已启动"
+        info "启动 wg0 ..."; wg-quick up wg0 || err "wg0 启动失败"; ok "wg0 已启动"
     fi
 }
 
 # ======================== 4. 删除服务 ========================
 
 uninstall_warp() {
-    echo ""
-    info "===== 删除 WARP 服务 ====="
-    echo ""
-
-    echo -e "  ${RED}此操作将：${NC}"
-    echo -e "    • 关闭 wg0 隧道"
-    echo -e "    • 取消开机自启"
-    echo -e "    • 删除 ${WG_CONF}"
-    echo -e "    • 删除 ${WORK_DIR}"
-    echo -e "    • 删除 ${WGCF_BIN} (如存在)"
-    echo ""
+    echo ""; info "===== 删除 WARP 服务 ====="; echo ""
+    echo -e "  ${RED}将删除: wg0 隧道 / 开机自启 / ${WG_CONF} / ${WORK_DIR}${NC}\n"
     read -rp "确认删除？[y/N]: " yn
+    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return; }
 
-    if [[ ! "$yn" =~ ^[Yy]$ ]]; then
-        warn "已取消"
-        return
-    fi
-
-    # 关闭隧道
-    if ip link show wg0 &>/dev/null 2>&1; then
-        info "关闭 wg0 隧道 ..."
-        wg-quick down wg0 2>/dev/null || true
-        ok "隧道已关闭"
-    fi
-
-    # 取消自启
-    systemctl disable wg-quick@wg0 &>/dev/null 2>&1 || true
-    ok "已取消开机自启"
-
-    # 删除配置
-    rm -f "$WG_CONF"
-    ok "已删除 $WG_CONF"
-
-    # 删除工作目录
-    rm -rf "$WORK_DIR"
-    ok "已删除 $WORK_DIR"
-
-    # 删除 wgcf
+    ip link show wg0 &>/dev/null 2>&1 && { wg-quick down wg0 2>/dev/null || true; ok "隧道已关闭"; }
+    systemctl disable wg-quick@wg0 &>/dev/null 2>&1 || true; ok "已取消自启"
+    rm -f "$WG_CONF"; ok "已删除 $WG_CONF"
+    rm -rf "$WORK_DIR"; ok "已删除 $WORK_DIR"
     rm -f "$WGCF_BIN"
-
-    echo ""
-    echo -e "${GREEN}WARP 服务已完全删除${NC}"
-    echo ""
+    echo -e "\n${GREEN}WARP 服务已完全删除${NC}\n"
 }
 
 # ======================== 主菜单 ========================
@@ -669,43 +434,25 @@ show_menu() {
     echo "  ║     WARP 一键双栈管理脚本  v2.0     ║"
     echo "  ╚══════════════════════════════════════╝"
     echo -e "${NC}"
-
     show_network_status
-
-    echo -e "  ${BOLD}请选择操作：${NC}"
-    echo ""
-    echo -e "    ${GREEN}1)${NC} 免费账户安装 (wgcf)"
-    echo -e "    ${CYAN}2)${NC} 团队账户安装 (Zero Trust)"
-    echo -e "    ${YELLOW}3)${NC} 修改配置"
-    echo -e "    ${RED}4)${NC} 删除服务"
-    echo ""
-    echo -e "    0) 退出"
-    echo ""
+    echo -e "  ${BOLD}请选择操作：${NC}\n"
+    echo -e "    ${GREEN}1)${NC} 免费账户安装    ${CYAN}2)${NC} 团队账户安装"
+    echo -e "    ${YELLOW}3)${NC} 修改配置        ${RED}4)${NC} 删除服务"
+    echo -e "\n    0) 退出\n"
 }
 
 main() {
     check_root
-
     while true; do
         show_menu
         read -rp "  请输入选项 [0-4]: " choice
         case "$choice" in
-            1) install_free ;;
-            2) install_team ;;
-            3) modify_config ;;
-            4) uninstall_warp ;;
-            0)
-                echo ""
-                info "再见！"
-                exit 0
-                ;;
-            *)
-                warn "无效选项，请重新选择"
-                ;;
+            1) install_free ;; 2) install_team ;;
+            3) modify_config ;; 4) uninstall_warp ;;
+            0) echo ""; info "再见！"; exit 0 ;;
+            *) warn "无效选项" ;;
         esac
-
-        echo ""
-        read -rp "按回车返回主菜单 ..." _
+        echo ""; read -rp "按回车返回主菜单 ..." _
     done
 }
 
