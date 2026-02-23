@@ -680,7 +680,7 @@ install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emok
 install_substore()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/substore.sh"; }
 install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
 install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/nginx.sh"; }
-install_warp() { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp"; }
+install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
 dns_fix()           { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/dns.sh"; }
 
 # ====== VPS重启 ======
@@ -996,7 +996,7 @@ main_menu() {
         echo -e "${GREEN}  13.${PLAIN}安装Hysteria"
         echo -e "${GREEN}  14.${PLAIN}配置FireWall"
         echo -e "${GREEN}  15.${PLAIN}安装SubStore"
-        echo -e "${GREEN}  16.${PLAIN}添加WARP出站"
+        echo -e "${GREEN}  16.${PLAIN}添加WARPSTACK"
         echo -e "${GREEN}   0.${PLAIN}离开SteinsGate"
         read -p "$(echo -e "${BLUE}✦ Choice [0-16] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
