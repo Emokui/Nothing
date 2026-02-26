@@ -389,19 +389,16 @@ install_free() {
 
 install_team() {
     echo ""; info "团队账户安装"; echo ""
-
     check_dependencies
     determine_install_mode || return
     check_wg0_exists; install_wireguard_tools
     command -v wg &>/dev/null || err "wg 命令不可用"
-    echo ""
-    echo -e "${BOLD}获取 Token：${NC}打开 ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC} 并登录"
-    echo -e "  认证后按 F12 → Console 输入:"
+    echo -e "${YELLOW}获取 Token：${NC}"
+    echo -e "  打开{CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
+    echo -e "  登陆后按 F12 → Console 输入:"
     echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
     echo -e "  ${YELLOW}⚠ Token 有效期 60 秒，复制后立即粘贴${NC}"
-    echo ""
     read -rsp "请粘贴 JWT Token（直接回车取消）: " JWT_TOKEN
-    echo ""
     [[ -z "$JWT_TOKEN" ]] && { warn "已取消"; return; }
 
     info "生成 WireGuard 密钥对 ..."
