@@ -1,5 +1,5 @@
 #!/bin/bash
-# WARP 一键双栈管理脚本 v2.0
+# WARP 双栈管理脚本 v2.0
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -59,21 +59,6 @@ has_ipv6_connectivity() {
     ping -6 -c 1 -W 1 2606:4700:4700::1111 &>/dev/null && return 0
     command -v curl &>/dev/null && curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && return 0
     return 1
-}
-
-resolve_host_record() {
-    local family="$1" host="$2"
-    if command -v dig &>/dev/null; then
-        dig +short "$family" "$host" 2>/dev/null | head -1
-        return
-    fi
-    if command -v getent &>/dev/null; then
-        if [[ "$family" == "A" ]]; then
-            getent ahostsv4 "$host" 2>/dev/null | awk 'NR==1{print $1}'
-        else
-            getent ahostsv6 "$host" 2>/dev/null | awk 'NR==1{print $1}'
-        fi
-    fi
 }
 
 is_valid_endpoint() {
@@ -167,17 +152,6 @@ check_dependencies() {
         install_pkg curl || err "curl 安装失败"
     fi
     command -v curl &>/dev/null || err "curl 不可用，无法继续"
-
-    if ! command -v dig &>/dev/null; then
-        info "安装 dns 工具 ..."
-        detect_pkg_manager
-        case "$PKG_MANAGER" in
-            apt) install_pkg dnsutils || warn "dnsutils 安装失败，将尝试使用 getent 解析域名" ;;
-            yum|dnf) install_pkg bind-utils || warn "bind-utils 安装失败，将尝试使用 getent 解析域名" ;;
-            *) warn "未识别包管理器，将尝试使用 getent 解析域名" ;;
-        esac
-    fi
-    command -v dig &>/dev/null || command -v getent &>/dev/null || warn "未检测到 dig/getent，域名解析将依赖固定回退 Endpoint"
 }
 
 enable_bbr() {
@@ -190,38 +164,6 @@ enable_bbr() {
         ok "BBR 已启用"
     else
         ok "BBR 已处于启用状态"
-    fi
-}
-
-resolve_endpoint() {
-    local raw_ep="$1" host port
-
-    [[ "$raw_ep" =~ ^\[.*\]:[0-9]+$ ]] && { ENDPOINT="$raw_ep"; return; }
-
-    host=$(echo "$raw_ep" | sed 's/:[0-9]*$//')
-    port=$(echo "$raw_ep" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')
-    [[ -z "$port" ]] && port=2408
-
-    [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && { ENDPOINT="${host}:${port}"; return; }
-
-    if [[ "$NET_MODE" == "v6_only" ]]; then
-        local resolved; resolved=$(resolve_host_record AAAA "$host")
-        if [[ -n "$resolved" ]]; then
-            ENDPOINT="[${resolved}]:${port}"
-            info "域名 ${host} 解析为 IPv6: ${resolved}"
-        else
-            ENDPOINT="[2606:4700:d0::a29f:c001]:${port}"
-            warn "域名解析失败，使用回退 IPv6 Endpoint"
-        fi
-    else
-        local resolved; resolved=$(resolve_host_record A "$host")
-        if [[ -n "$resolved" ]]; then
-            ENDPOINT="${resolved}:${port}"
-            info "域名 ${host} 解析为 IPv4: ${resolved}"
-        else
-            ENDPOINT="${raw_ep}"
-            warn "域名解析失败，保持原始 Endpoint"
-        fi
     fi
 }
 
@@ -387,7 +329,7 @@ install_free() {
         ok "临时文件已清理"
     fi
 
-    resolve_endpoint "$ep"
+    ENDPOINT="$ep"
     info "Endpoint: $ENDPOINT"
     write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$pub" "$ENDPOINT" "$INSTALL_MODE" "free"
     enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
@@ -450,33 +392,34 @@ install_team() {
 
     local org; org=$(echo "$response" | grep -oP '"organization"\s*:\s*"\K[^"]+' | head -1)
     info "WARP IPv4: $warp_v4 | IPv6: $warp_v6 | 组织: $org"
+
     local ep_port=2408
     local api_ports; api_ports=$(echo "$response" | grep -oP '"ports"\s*:\s*\[\K[^\]]+' | head -1)
     [[ -n "$api_ports" ]] && ep_port=$(echo "$api_ports" | cut -d',' -f1 | tr -d ' ')
 
+    local ep_host; ep_host=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
     if [[ "$NET_MODE" == "v6_only" ]]; then
         local ep_v6; ep_v6=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
         ep_v6=$(echo "$ep_v6" | sed 's/\[//g; s/\]//g; s/:0$//g')
         if [[ -n "$ep_v6" && "$ep_v6" != *"cf1"* ]]; then
             ENDPOINT="[${ep_v6}]:${ep_port}"
-            info "使用 API 返回的 IPv6 Endpoint: $ENDPOINT"
+        elif [[ -n "$ep_host" ]]; then
+            ENDPOINT="${ep_host%%:*}:${ep_port}"
         else
-            local host_ep; host_ep=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
-            [[ -n "$host_ep" ]] && resolve_endpoint "$host_ep" || ENDPOINT="[2606:4700:d0::a29f:c001]:${ep_port}"
-            info "Endpoint: $ENDPOINT"
+            err "API 未返回可用的 Endpoint"
         fi
     else
         local ep_v4; ep_v4=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
         ep_v4=$(echo "$ep_v4" | sed 's/:0$//g')
         if [[ -n "$ep_v4" && "$ep_v4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             ENDPOINT="${ep_v4}:${ep_port}"
-            info "使用 API 返回的 IPv4 Endpoint: $ENDPOINT"
+        elif [[ -n "$ep_host" ]]; then
+            ENDPOINT="${ep_host%%:*}:${ep_port}"
         else
-            local host_ep; host_ep=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
-            [[ -n "$host_ep" ]] && resolve_endpoint "$host_ep" || ENDPOINT="162.159.192.1:${ep_port}"
-            info "Endpoint: $ENDPOINT"
+            err "API 未返回可用的 Endpoint"
         fi
     fi
+    info "Endpoint: $ENDPOINT"
 
     write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$ENDPOINT" "$INSTALL_MODE" "team($org)"
     enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
@@ -496,7 +439,7 @@ modify_config() {
 
     case "$sub" in
         1)
-            echo -e "\n  当前: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')"
+            echo -e "\n  当前: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')\n"
             read -rp "新 Endpoint: " new_ep
             if [[ -n "$new_ep" ]]; then
                 if ! is_valid_endpoint "$new_ep"; then
@@ -562,7 +505,7 @@ show_menu() {
     clear
     echo -e "${BOLD}"
     echo "  ╔══════════════════════════════════════╗"
-    echo "  ║       WARP 双栈管理脚本  v2.0     ║"
+    echo "  ║       WARP 双栈管理脚本  v2.0       ║"
     echo "  ╚══════════════════════════════════════╝"
     echo -e "${NC}"
     show_network_status
