@@ -48,14 +48,16 @@ install_pkg() {
 }
 
 has_ipv4_connectivity() {
-    ping -4 -c 1 -W 3 1.1.1.1 &>/dev/null && return 0
-    command -v curl &>/dev/null && curl -4 -s --max-time 4 http://1.1.1.1/cdn-cgi/trace &>/dev/null && return 0
+    ip -4 addr show scope global 2>/dev/null | grep -q inet || return 1
+    ping -4 -c 1 -W 1 1.1.1.1 &>/dev/null && return 0
+    command -v curl &>/dev/null && curl -4 -s --max-time 2 http://1.1.1.1/cdn-cgi/trace &>/dev/null && return 0
     return 1
 }
 
 has_ipv6_connectivity() {
-    ping -6 -c 1 -W 3 2606:4700:4700::1111 &>/dev/null && return 0
-    command -v curl &>/dev/null && curl -6 -g -s --max-time 4 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && return 0
+    ip -6 addr show scope global 2>/dev/null | grep -q inet6 || return 1
+    ping -6 -c 1 -W 1 2606:4700:4700::1111 &>/dev/null && return 0
+    command -v curl &>/dev/null && curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && return 0
     return 1
 }
 
@@ -105,8 +107,14 @@ detect_arch() {
 
 detect_network() {
     HAS_V4=false; HAS_V6=false
-    has_ipv4_connectivity && HAS_V4=true
-    has_ipv6_connectivity && HAS_V6=true
+    local tmp4="/tmp/.warp_v4_$$" tmp6="/tmp/.warp_v6_$$"
+    rm -f "$tmp4" "$tmp6"
+    ( has_ipv4_connectivity && touch "$tmp4" ) &
+    ( has_ipv6_connectivity && touch "$tmp6" ) &
+    wait
+    [[ -f "$tmp4" ]] && HAS_V4=true
+    [[ -f "$tmp6" ]] && HAS_V6=true
+    rm -f "$tmp4" "$tmp6"
 
     if $HAS_V4 && $HAS_V6; then NET_MODE="dual"
     elif $HAS_V6; then NET_MODE="v6_only"
@@ -399,6 +407,7 @@ install_team() {
     echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
     echo -e "  ${YELLOW}⚠ Token 有效期 60 秒，复制后立即粘贴${NC}"
     read -rsp "请粘贴 JWT Token（直接回车取消）: " JWT_TOKEN
+    echo ""
     [[ -z "$JWT_TOKEN" ]] && { warn "已取消"; return; }
 
     info "生成 WireGuard 密钥对 ..."
@@ -441,21 +450,33 @@ install_team() {
 
     local org; org=$(echo "$response" | grep -oP '"organization"\s*:\s*"\K[^"]+' | head -1)
     info "WARP IPv4: $warp_v4 | IPv6: $warp_v6 | 组织: $org"
+    local ep_port=2408
+    local api_ports; api_ports=$(echo "$response" | grep -oP '"ports"\s*:\s*\[\K[^\]]+' | head -1)
+    [[ -n "$api_ports" ]] && ep_port=$(echo "$api_ports" | cut -d',' -f1 | tr -d ' ')
 
-    local raw_ep; raw_ep=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
-    if [[ -z "$raw_ep" ]]; then
-        if [[ "$NET_MODE" == "v6_only" ]]; then
-            local v6r; v6r=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
-            v6r=$(echo "$v6r" | sed 's/\[//g; s/\]:.*//g; s/:0$//g')
-            raw_ep="[${v6r}]:2408"
+    if [[ "$NET_MODE" == "v6_only" ]]; then
+        local ep_v6; ep_v6=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
+        ep_v6=$(echo "$ep_v6" | sed 's/\[//g; s/\]//g; s/:0$//g')
+        if [[ -n "$ep_v6" && "$ep_v6" != *"cf1"* ]]; then
+            ENDPOINT="[${ep_v6}]:${ep_port}"
+            info "使用 API 返回的 IPv6 Endpoint: $ENDPOINT"
         else
-            local v4r; v4r=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
-            v4r=$(echo "$v4r" | sed 's/:0$//g')
-            raw_ep="${v4r}:2408"
+            local host_ep; host_ep=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
+            [[ -n "$host_ep" ]] && resolve_endpoint "$host_ep" || ENDPOINT="[2606:4700:d0::a29f:c001]:${ep_port}"
+            info "Endpoint: $ENDPOINT"
+        fi
+    else
+        local ep_v4; ep_v4=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
+        ep_v4=$(echo "$ep_v4" | sed 's/:0$//g')
+        if [[ -n "$ep_v4" && "$ep_v4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            ENDPOINT="${ep_v4}:${ep_port}"
+            info "使用 API 返回的 IPv4 Endpoint: $ENDPOINT"
+        else
+            local host_ep; host_ep=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
+            [[ -n "$host_ep" ]] && resolve_endpoint "$host_ep" || ENDPOINT="162.159.192.1:${ep_port}"
+            info "Endpoint: $ENDPOINT"
         fi
     fi
-    resolve_endpoint "$raw_ep"
-    info "Endpoint: $ENDPOINT"
 
     write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$ENDPOINT" "$INSTALL_MODE" "team($org)"
     enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
@@ -476,7 +497,6 @@ modify_config() {
     case "$sub" in
         1)
             echo -e "\n  当前: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')"
-            echo -e "  示例: ${CYAN}162.159.192.1:2408${NC} 或 ${CYAN}[2606:4700:d0::a29f:c001]:2408${NC}\n"
             read -rp "新 Endpoint: " new_ep
             if [[ -n "$new_ep" ]]; then
                 if ! is_valid_endpoint "$new_ep"; then
