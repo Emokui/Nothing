@@ -394,7 +394,7 @@ install_team() {
     check_wg0_exists; install_wireguard_tools
     command -v wg &>/dev/null || err "wg 命令不可用"
     echo -e "${YELLOW}获取 Token：${NC}"
-    echo -e "  打开{CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
+    echo -e "  打开 ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
     echo -e "  登陆后按 F12 → Console 输入:"
     echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
     echo -e "  ${YELLOW}⚠ Token 有效期 60 秒，复制后立即粘贴${NC}"
