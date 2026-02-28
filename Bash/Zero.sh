@@ -152,23 +152,9 @@ install_wget_if_missing() {
 install_wget_if_missing
 
 # ====== 系统管理 ======
-is_gcp_instance() {
-    org=$(curl -s --max-time 3 https://ipinfo.io/org)
-    if [[ -z "$org" ]]; then
-        return 1
-    fi
-    grep -qi 'Google' <<< "$org"
-}
-
 linux_update() {
     clear
     echo -e "${YELLOW}正在更新系统...${PLAIN}"
-
-    if is_gcp_instance; then
-        echo -e "${BLUE}检测为GCP实例,跳过更新。${PLAIN}"
-        press_any_key_to_continue
-        return 0
-    fi
 
     if ! pkg_update; then
         echo -e "${RED}未知的包管理器!${PLAIN}"
@@ -638,12 +624,12 @@ change_timezone() {
     fi
 
     echo -e "${YELLOW}正在检测当前网络推荐时区...${PLAIN}"
-    current_tz_web=$(curl -s --connect-timeout 5 http://ip-api.com/line?fields=timezone)
-    
-    local sys_tz
-    sys_tz=$(timedatectl | grep 'Time zone' | awk '{print $3}')
+    local current_tz_web
+    current_tz_web=$(curl -s --connect-timeout 5 https://ipapi.co/timezone)
 
     while true; do
+        local sys_tz
+        sys_tz=$(timedatectl | grep 'Time zone' | awk '{print $3}')
         clear
         echo -e "${BLUE}========= 更改时区管理 ========${PLAIN}"
         echo -e "${YELLOW} 当前系统时区: ${GREEN}${sys_tz}${PLAIN}"
@@ -687,7 +673,7 @@ change_timezone() {
                     continue
                 fi
 
-                mapfile -t lines < <(grep -E "^$input_code\s" "$zone_tab" | awk '{print $3}' | sort -u)
+                mapfile -t lines < <(awk -v code="$input_code" '$1 == code {print $3}' "$zone_tab" | sort -u)
                 
                 if [ "${#lines[@]}" -eq 0 ]; then
                     echo -e "${RED}未找到代码 [$input_code] 对应的时区信息。${PLAIN}"
