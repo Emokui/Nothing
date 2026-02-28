@@ -457,6 +457,9 @@ ssh_config_menu() {
 change_ssh_port() {
     while true; do
         clear
+        local current_port
+        current_port=$(grep "^Port" "$SSHD_CONFIG" 2>/dev/null | head -n 1 | awk '{print $2}')
+        echo -e "${YELLOW}当前SSH端口: ${GREEN}${current_port:-22}${PLAIN}\n"
         read -rp "$(echo -e "${BLUE}请输入新的SSH端口(输入0返回): ${PLAIN}")" new_port
         new_port=$(echo "$new_port" | xargs)
         if [[ "$new_port" == "0" ]]; then
@@ -483,6 +486,12 @@ enable_or_change_root_password() {
     pass_auth=$(get_sshd_option "PasswordAuthentication" "no")
 
     clear
+    if [[ "$pass_auth" == "yes" ]]; then
+        echo -e "${YELLOW}当前状态: ${GREEN}密码登录已启用${PLAIN}"
+    else
+        echo -e "${YELLOW}当前状态: ${RED}密码登录未启用${PLAIN}(设置后将自动启用)"
+    fi
+    echo
     read -rp "$(echo -e "${BLUE}按回车继续,输入0返回:${PLAIN}")" input
     input=$(echo "$input" | xargs)
     if [[ "$input" == "0" ]]; then
@@ -538,6 +547,7 @@ enable_root_key_login() {
         ssh-keygen -t ed25519 -N "" -f "$TMP_KEY"
     fi
 
+    local PUB_CONTENT
     PUB_CONTENT=$(cat "$TMP_PUB")
     if ! grep -qxF "$PUB_CONTENT" "$AUTH_KEYS"; then
         echo "$PUB_CONTENT" >> "$AUTH_KEYS"
@@ -553,6 +563,8 @@ enable_root_key_login() {
         rm -f "$TMP_PUB"
     else
         echo -e "${RED}私钥生成失败！${PLAIN}"
+        press_any_key_to_continue
+        return 1
     fi
 
     echo -e "${YELLOW}私钥内容已显示并删除。请务必妥善保存！${PLAIN}"
@@ -563,8 +575,7 @@ enable_root_key_login() {
     if restart_sshd_safe; then
         echo -e "${GREEN}root ed25519 密钥登录已配置完成。${PLAIN}"
     fi
-    read -n 1 -s -r -p "按任意键继续..."
-    echo
+    press_any_key_to_continue
 }
 
 disable_ssh_login_menu() {
@@ -745,9 +756,7 @@ install_acme()      { run_install_script "https://raw.githubusercontent.com/Emok
 install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/snell.sh"; }
 install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh"; }
 install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/hysteria.sh"; }
-install_substore()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/substore.sh"; }
-install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
-install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/nginx.sh"; }
+install_system()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
 
 # ====== DNS配置 ======
@@ -1249,6 +1258,76 @@ configure_firewall() {
     done
 }
 
+# ====== IPv4/IPv6优先级 ======
+set_ip_priority() {
+    local GAI_CONF="/etc/gai.conf"
+    local IPV4_RULE="precedence ::ffff:0:0/96  100"
+
+    _get_current_priority() {
+        if [[ ! -f "$GAI_CONF" ]]; then
+            echo "IPv6 (系统默认)"
+            return
+        fi
+        if grep -qE '^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+100' "$GAI_CONF" 2>/dev/null; then
+            echo "IPv4 优先"
+        else
+            echo "IPv6 优先 (默认)"
+        fi
+    }
+
+    while true; do
+        clear
+        local current_priority
+        current_priority=$(_get_current_priority)
+        echo -e "${BLUE}======== IP优先级设置 ========${PLAIN}"
+        echo -e "${YELLOW}当前优先级: ${GREEN}${current_priority}${PLAIN}"
+        echo -e "${BLUE}==============================${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}设置IPv4优先"
+        echo -e "${GREEN}2.${PLAIN}设置IPv6优先"
+        echo -e "${GREEN}3.${PLAIN}恢复系统默认"
+        echo -e "${YELLOW}0.${PLAIN}返回主菜单"
+        echo -e "${BLUE}==============================${PLAIN}"
+        read -rp "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" choice
+
+        case "$choice" in
+            1)
+                if [[ ! -f "$GAI_CONF" ]]; then
+                    echo "$IPV4_RULE" > "$GAI_CONF"
+                elif grep -qE '^precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF"; then
+                    sed -i 's/^precedence[[:space:]]\+::ffff:0:0\/96.*/precedence ::ffff:0:0\/96  100/' "$GAI_CONF"
+                elif grep -qE '^#.*precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF"; then
+                    sed -i 's/^#.*\(precedence[[:space:]]\+::ffff:0:0\/96\).*/precedence ::ffff:0:0\/96  100/' "$GAI_CONF"
+                else
+                    echo "$IPV4_RULE" >> "$GAI_CONF"
+                fi
+                echo -e "${GREEN}✔ 已设置为 IPv4 优先${PLAIN}"
+                press_any_key_to_continue
+                ;;
+            2)
+                if [[ -f "$GAI_CONF" ]]; then
+                    sed -i '/^precedence[[:space:]]\+::ffff:0:0\/96/d' "$GAI_CONF"
+                fi
+                echo -e "${GREEN}✔ 已设置为 IPv6 优先${PLAIN}"
+                press_any_key_to_continue
+                ;;
+            3)
+                if [[ -f "$GAI_CONF" ]]; then
+                    sed -i '/^precedence[[:space:]]\+::ffff:0:0\/96/d' "$GAI_CONF"
+                fi
+                echo -e "${GREEN}✔ 已恢复系统默认 (IPv6 优先)${PLAIN}"
+                press_any_key_to_continue
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo -e "${RED}无效选项${PLAIN}"
+                sleep 0.5
+                ;;
+        esac
+    done
+}
+
 # ====== 主菜单 ======
 main_menu() {
     while true; do
@@ -1258,38 +1337,36 @@ main_menu() {
         echo -e "${GREEN}  02.${PLAIN}系统清理"
         echo -e "${GREEN}  03.${PLAIN}重装系统"
         echo -e "${GREEN}  04.${PLAIN}设置时区"
-        echo -e "${GREEN}  05.${PLAIN}配置DNS"
-        echo -e "${GREEN}  06.${PLAIN}配置SSH"
-        echo -e "${GREEN}  07.${PLAIN}重启VPS"
-        echo -e "${GREEN}  08.${PLAIN}配置SWAP"
-        echo -e "${GREEN}  09.${PLAIN}配置ACME"
-        echo -e "${GREEN}  10.${PLAIN}配置Nginx"
-        echo -e "${GREEN}  11.${PLAIN}安装Snell"
-        echo -e "${GREEN}  12.${PLAIN}安装Mihomo"
-        echo -e "${GREEN}  13.${PLAIN}安装Hysteria"
+        echo -e "${GREEN}  05.${PLAIN}配置IP栈"
+        echo -e "${GREEN}  06.${PLAIN}配置DNS"
+        echo -e "${GREEN}  07.${PLAIN}配置SSH"
+        echo -e "${GREEN}  08.${PLAIN}重启VPS"
+        echo -e "${GREEN}  09.${PLAIN}配置SWAP"
+        echo -e "${GREEN}  10.${PLAIN}配置ACME"
+        echo -e "${GREEN}  11.${PLAIN}配置Snell"
+        echo -e "${GREEN}  12.${PLAIN}配置Mihomo"
+        echo -e "${GREEN}  13.${PLAIN}配置Hysteria"
         echo -e "${GREEN}  14.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  15.${PLAIN}安装SubStore"
-        echo -e "${GREEN}  16.${PLAIN}添加WarpStack"
+        echo -e "${GREEN}  15.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
-        read -p "$(echo -e "${BLUE}✦ Choice [0-16] ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
             1)  linux_update ;;
             2)  linux_clean ;;
-            3)  install_install ;;
+            3)  install_system ;;
             4)  change_timezone ;;
-            5)  dns_fix ;;
-            6)  ssh_config_menu ;;
-            7)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            8)  set_swap_menu ;;
-            9)  install_acme ;;
-            10) install_nginx ;;
+            5)  set_ip_priority ;;
+            6)  dns_fix ;;
+            7)  ssh_config_menu ;;
+            8)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
+            9)  set_swap_menu ;;
+            10) install_acme ;;
             11) install_snell ;;
             12) install_mihomo ;;
             13) install_hysteria ;;
             14) configure_firewall ;;
-            15) install_substore ;;
-            16) install_warp ;;
+            15) install_warp ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
