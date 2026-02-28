@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # ======== 全局变量 ========
 RED="\033[1;31m"
 GREEN="\033[1;32m"
@@ -21,7 +23,7 @@ fi
 
 # ======== 通用函数 ========
 pause_and_return() {
-    read -p "$(echo -e "${BLUE}按回车返回...${PLAIN}")" temp
+    read -rp "$(echo -e "${BLUE}按回车返回...${PLAIN}")"
     clear
 }
 
@@ -254,6 +256,7 @@ install_mihomo() {
     echo -e "${BLUE}[*] 下载 Mihomo...${PLAIN}"
     mkdir -p "$CONFIG_DIR"
     
+    local ARCH result download_url
     ARCH=$(get_arch)
     result=$(get_latest_download_url "$ARCH")
     download_url="${result%|*}"
@@ -272,6 +275,7 @@ install_mihomo() {
 
     clear
     echo -e "${BLUE}选择要启用的监听器:${PLAIN}"
+    local enable_anytls enable_trojan enable_tuic enable_hy2
     read -p "$(echo -e "${BLUE}启用 Anytls?   [y/N]: ${PLAIN}")" enable_anytls
     read -p "$(echo -e "${BLUE}启用 Trojan?   [y/N]: ${PLAIN}")" enable_trojan
     read -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
@@ -282,6 +286,7 @@ install_mihomo() {
         enable_anytls="y"
         clear
         echo -e "${BLUE}===== AnyTLS 配置 =====${PLAIN}"
+        local anytls_port anytls_pass anytls_cert anytls_key
         read -p "$(echo -e "${BLUE}端口(默认:8443): ${PLAIN}")" anytls_port
         anytls_port=${anytls_port:-8443}
         read -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" anytls_pass
@@ -298,6 +303,7 @@ install_mihomo() {
         enable_trojan="y"
         clear
         echo -e "${BLUE}===== Trojan 配置 =====${PLAIN}"
+        local trojan_port trojan_pass trojan_cert trojan_key
         read -p "$(echo -e "${BLUE}端口(默认:10819): ${PLAIN}")" trojan_port
         trojan_port=${trojan_port:-10819}
         read -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" trojan_pass
@@ -314,6 +320,7 @@ install_mihomo() {
         enable_hy2="y"
         clear
         echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
+        local hy2_port hy2_pass hy2_cert hy2_key
         read -p "$(echo -e "${BLUE}端口(默认:18443): ${PLAIN}")" hy2_port
         hy2_port=${hy2_port:-18443}
         read -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" hy2_pass
@@ -330,6 +337,7 @@ install_mihomo() {
         enable_tuic="y"
         clear
         echo -e "${BLUE}===== TUIC 配置 =====${PLAIN}"
+        local tuic_port tuic_uuid tuic_pass tuic_cert tuic_key
         read -p "$(echo -e "${BLUE}端口(默认:28443): ${PLAIN}")" tuic_port
         tuic_port=${tuic_port:-28443}
         read -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" tuic_uuid
@@ -711,6 +719,7 @@ update_mihomo() {
         return
     fi
 
+    local current_version ARCH result download_url latest_version
     current_version=$($EXEC_PATH -v 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "未知")
     
     ARCH=$(get_arch)
