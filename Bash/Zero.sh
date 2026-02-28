@@ -752,7 +752,212 @@ install_substore()  { run_install_script "https://raw.githubusercontent.com/Emok
 install_install()   { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
 install_nginx()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/nginx.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
-dns_fix()           { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/dns.sh"; }
+
+# ====== DNS配置 ======
+dns_fix() {
+    local RESOLV_CONF="/etc/resolv.conf"
+    local RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
+    local RESOLVED_DROPIN_FILE="$RESOLVED_DROPIN_DIR/99-custom-dns.conf"
+
+    _dns_get_default_iface() {
+        local iface
+        iface="$(ip route show default 2>/dev/null | awk '{print $5}' | head -n1)"
+        if [[ -z "$iface" ]]; then
+            iface="$(ip -6 route show default 2>/dev/null | awk '{print $5}' | head -n1)"
+        fi
+        echo "$iface"
+    }
+
+    _dns_show_current() {
+        echo -e "${YELLOW}当前DNS配置:${PLAIN}\n"
+
+        echo -e "${BLUE}resolv.conf:${PLAIN}"
+        if [[ -f "$RESOLV_CONF" ]]; then
+            while read -r line; do
+                [[ "$line" =~ ^nameserver ]] || continue
+                echo -e "  ${GREEN}${line}${PLAIN}"
+            done < "$RESOLV_CONF"
+        else
+            echo -e "  (不存在)"
+        fi
+        echo
+
+        echo -e "${BLUE}systemd-resolved:${PLAIN}"
+        if systemctl is-active systemd-resolved >/dev/null 2>&1; then
+            local iface dns_list
+            iface="$(_dns_get_default_iface)"
+            if [[ -n "$iface" ]]; then
+                echo -e "  默认网卡: ${GREEN}${iface}${PLAIN}"
+                dns_list="$(resolvectl status "$iface" 2>/dev/null \
+                    | awk '/DNS Servers:/ {for (i=3; i<=NF; i++) print $i}')"
+                if [[ -n "$dns_list" ]]; then
+                    echo -e "  DNS Servers:"
+                    while read -r dns; do
+                        echo -e "    ${GREEN}- ${dns}${PLAIN}"
+                    done <<< "$dns_list"
+                else
+                    echo -e "  (systemd-resolved 未接管 DNS)"
+                fi
+            else
+                echo -e "  (未检测到默认网卡)"
+            fi
+        else
+            echo -e "  (systemd-resolved 未运行)"
+        fi
+        echo
+    }
+
+    _dns_is_valid_ipv4() {
+        local ip="$1" IFS=.
+        [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+        read -r o1 o2 o3 o4 <<<"$ip"
+        for o in "$o1" "$o2" "$o3" "$o4"; do
+            [[ "$o" -ge 0 && "$o" -le 255 ]] 2>/dev/null || return 1
+        done
+        return 0
+    }
+
+    _dns_is_valid_ipv6() {
+        local ip="$1"
+        [[ "$ip" =~ ^[0-9A-Fa-f:%.]+$ ]] || return 1
+        [[ "$ip" == *:* ]] || return 1
+        [[ ${#ip} -le 80 ]] || return 1
+        return 0
+    }
+
+    _dns_is_valid_ip() {
+        local ip="$1"
+        [[ "$ip" =~ [[:space:]] ]] && return 1
+        [[ "$ip" == *\"* || "$ip" == *\'* || "$ip" == *\\* ]] && return 1
+        _dns_is_valid_ipv4 "$ip" && return 0
+        _dns_is_valid_ipv6 "$ip" && return 0
+        return 1
+    }
+
+    _dns_unlock_resolv() {
+        if command -v chattr >/dev/null 2>&1 && [[ -f "$RESOLV_CONF" ]]; then
+            chattr -i "$RESOLV_CONF" 2>/dev/null || true
+        fi
+    }
+
+    _dns_apply() {
+        local dns_list=("$@")
+        local ok=() bad=()
+
+        for dns in "${dns_list[@]}"; do
+            if _dns_is_valid_ip "$dns"; then
+                ok+=("$dns")
+            else
+                bad+=("$dns")
+            fi
+        done
+        dns_list=("${ok[@]}")
+
+        if [[ ${#dns_list[@]} -eq 0 ]]; then
+            echo -e "${RED}未检测到有效的DNS IP（请输入IPv4/IPv6地址）${PLAIN}"
+            return 1
+        fi
+        if [[ ${#bad[@]} -gt 0 ]]; then
+            echo -e "${YELLOW}已忽略无效DNS：${bad[*]}${PLAIN}"
+        fi
+
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1; then
+            mkdir -p "$RESOLVED_DROPIN_DIR"
+            {
+                echo "[Resolve]"
+                echo "DNS=${dns_list[*]}"
+                echo "Domains=~."
+            } > "$RESOLVED_DROPIN_FILE"
+
+            systemctl restart systemd-resolved 2>/dev/null || true
+
+            if command -v resolvectl >/dev/null 2>&1; then
+                resolvectl flush-caches 2>/dev/null || true
+                local iface
+                iface="$(_dns_get_default_iface)"
+                if [[ -n "$iface" ]]; then
+                    resolvectl dns "$iface" "${dns_list[@]}" 2>/dev/null || true
+                    resolvectl domain "$iface" "~." 2>/dev/null || true
+                    resolvectl flush-caches 2>/dev/null || true
+                fi
+            fi
+
+            if [[ ! -L "$RESOLV_CONF" ]]; then
+                _dns_unlock_resolv
+                {
+                    for dns in "${dns_list[@]}"; do
+                        echo "nameserver $dns"
+                    done
+                } > "$RESOLV_CONF" 2>/dev/null || true
+            fi
+        else
+            if [[ -L "$RESOLV_CONF" ]]; then
+                rm -f "$RESOLV_CONF" 2>/dev/null || true
+            fi
+            _dns_unlock_resolv
+            {
+                for dns in "${dns_list[@]}"; do
+                    echo "nameserver $dns"
+                done
+            } > "$RESOLV_CONF" 2>/dev/null || true
+        fi
+
+        for svc in nscd dnsmasq named; do
+            systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1 || true
+        done
+        return 0
+    }
+
+    while true; do
+        clear
+        echo -e "${BLUE}======== DNS 配置工具 ========${PLAIN}\n"
+        _dns_show_current
+        echo -e "${GREEN}1.${PLAIN}修改DNS为 ${GREEN}8.8.8.8${PLAIN} 和 ${GREEN}1.1.1.1${PLAIN}"
+        echo -e "${GREEN}2.${PLAIN}自定义修改DNS"
+        echo -e "${YELLOW}0.${PLAIN}返回主菜单"
+        echo -e "${BLUE}==============================${PLAIN}"
+        read -rp "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" choice
+
+        case "$choice" in
+            1)
+                if _dns_apply "8.8.8.8" "1.1.1.1"; then
+                    echo -e "${GREEN}DNS已修改并立即生效${PLAIN}"
+                else
+                    echo -e "${RED}DNS修改失败${PLAIN}"
+                fi
+                press_any_key_to_continue
+                ;;
+            2)
+                clear
+                echo -e "\n${YELLOW}请输入DNS(每行一个,空行结束):${PLAIN}"
+                local custom_dns=()
+                while true; do
+                    read -rp "> " dns
+                    [[ -z "$dns" ]] && break
+                    custom_dns+=("$dns")
+                done
+
+                if [[ ${#custom_dns[@]} -eq 0 ]]; then
+                    echo -e "${YELLOW}未输入DNS${PLAIN}"
+                else
+                    if _dns_apply "${custom_dns[@]}"; then
+                        echo -e "${GREEN}DNS已修改并立即生效${PLAIN}"
+                    else
+                        echo -e "${RED}DNS修改失败${PLAIN}"
+                    fi
+                fi
+                press_any_key_to_continue
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo -e "${RED}无效选项${PLAIN}"
+                sleep 0.5
+                ;;
+        esac
+    done
+}
 
 # ====== VPS重启 ======
 reboot_vps() {
