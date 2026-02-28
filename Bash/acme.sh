@@ -1,13 +1,19 @@
 #!/bin/bash
 
-set -uo pipefail
+set -euo pipefail
 
 # ====== 颜色变量 ======
-RED="\033[31m\033[01m"
-GREEN="\033[32m\033[01m"
-YELLOW="\033[33m\033[01m"
-BLUE="\033[34m\033[01m"
-PLAIN='\033[0m'
+RED="\033[1;31m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;34m"
+PLAIN="\033[0m"
+
+# ====== Root检查 ======
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
+    exit 1
+fi
 
 # ====== 证书路径 ======
 CERT_PATH="/etc/cert"
@@ -28,11 +34,32 @@ get_acme_download_url() {
 
 # ====== 包管理器 ======
 pkg_update() {
-    apt-get update
+    if command -v apt-get &>/dev/null; then
+        apt-get update
+    elif command -v dnf &>/dev/null; then
+        dnf check-update || true
+    elif command -v yum &>/dev/null; then
+        yum check-update || true
+    elif command -v pacman &>/dev/null; then
+        pacman -Sy
+    fi
 }
 
 pkg_install() {
-    apt -y install "$@"
+    if command -v apt &>/dev/null; then
+        apt -y install "$@"
+    elif command -v dnf &>/dev/null; then
+        dnf install -y "$@"
+    elif command -v yum &>/dev/null; then
+        yum install -y "$@"
+    elif command -v pacman &>/dev/null; then
+        pacman -S --noconfirm "$@"
+    elif command -v apk &>/dev/null; then
+        apk add "$@"
+    else
+        echo -e "${RED}无法识别的包管理器${PLAIN}"
+        return 1
+    fi
 }
 
 # ====== 辅助函数 ======
@@ -133,20 +160,27 @@ install_acme_core() {
     local ACME_TAR_URL
     ACME_TAR_URL=$(get_acme_download_url)
     
-    if wget --no-check-certificate -O master.tar.gz "$ACME_TAR_URL"; then
-        tar zxvf master.tar.gz
-        (cd acme.sh-master && ./acme.sh --install --accountemail "$email")
-        rm -rf acme.sh-master master.tar.gz
-        bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
-        
-        bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+    if ! wget --no-check-certificate -O master.tar.gz "$ACME_TAR_URL"; then
+        echo -e "${RED}下载失败${PLAIN}"
+        rm -f master.tar.gz
+        return 1
+    fi
 
-        if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
-            echo -e "${GREEN}Acme 安装成功!${PLAIN}"
-        else
-            echo -e "${RED}Acme 安装失败${PLAIN}"
-        fi
+    if ! tar zxf master.tar.gz; then
+        echo -e "${RED}解压失败${PLAIN}"
+        rm -f master.tar.gz
+        return 1
+    fi
 
+    (cd acme.sh-master && ./acme.sh --install --accountemail "$email")
+    rm -rf acme.sh-master master.tar.gz
+    bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+    bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+
+    if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
+        echo -e "${GREEN}Acme 安装成功!${PLAIN}"
+    else
+        echo -e "${RED}Acme 安装失败${PLAIN}"
     fi
 }
 
@@ -340,43 +374,23 @@ acme_cfapiNTLD() {
 revoke_cert() {
     ensure_acme_installed || return
     
-    echo ""
     clear
     echo -e "${BLUE}==================== 已申请的证书列表 ====================${PLAIN}"
     
-    local cert_list
-    cert_list=$(get_cert_list)
-    
-    if [[ -z "$cert_list" ]]; then
-        echo -e "${YELLOW}暂无已申请的证书${PLAIN}"
+    if ! display_cert_list; then
         back2menu
         return
     fi
-    
+
+    local cert_list
+    cert_list=$(get_cert_list)
     declare -a domains
     local index=1
-    
-    printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | ${GREEN}%-15s${PLAIN}\n" "序号" "域名" "到期时间"
-    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
-    
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        
-        local main_domain expire_time
-        main_domain=$(echo "$line" | awk '{print $1}')
-        expire_time=$(echo "$line" | awk '{print $6}' | cut -d'T' -f1)
-        
-        domains+=("$main_domain")
-        
-        if [[ "$main_domain" == \** ]]; then
-            printf "${YELLOW}%-4s${PLAIN} | ${YELLOW}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
-        else
-            printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
-        fi
+        domains+=("$(echo "$line" | awk '{print $1}')")
         ((index++))
     done <<< "$cert_list"
-    
-    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
     echo ""
     
     local choice
@@ -496,7 +510,7 @@ menu() {
         echo ""
         
         local menuInput
-        read -rp "$(echo -e "${RED}请输入选项 [0-10]: ${PLAIN}")" menuInput
+        read -rp "$(echo -e "${RED}请输入选项 [0-9]: ${PLAIN}")" menuInput
         case "$menuInput" in
             1) inst_acme ;;
             2) unst_acme ;;
