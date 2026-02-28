@@ -200,8 +200,8 @@ linux_clean() {
                 grep -E '^ii|^rc' | \
                 grep -E 'linux-(image|headers|modules)' | \
                 awk '{print $2}' | \
-                grep -v "$current_kernel" | \
-                grep -vE 'linux-(image|headers|modules)(-extra)?-(generic|cloud|virtual|lowlatency|rt|gcp|aws|azure|kvm|oem)[^0-9]*$' \
+                grep -E 'linux-(image|headers|modules)(-extra)?-[0-9]' | \
+                grep -v "$current_kernel" \
                 || true)
             if [ -n "$old_kernels" ]; then
                 echo -e "${YELLOW}发现以下旧内核包:${PLAIN}"
