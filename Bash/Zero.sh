@@ -186,6 +186,77 @@ linux_clean() {
 
     pkg_clean || echo -e "${RED}未知的包管理器!${PLAIN}"
 
+    echo -e "${YELLOW}正在清理旧内核...${PLAIN}"
+    local current_kernel
+    current_kernel=$(uname -r)
+    echo -e "${BLUE}当前运行内核: ${GREEN}${current_kernel}${PLAIN}"
+
+    local pm old_kernels=""
+    pm=$(detect_pkg_manager)
+
+    case "$pm" in
+        apt)
+            old_kernels=$(dpkg -l | \
+                grep -E '^ii|^rc' | \
+                grep -E 'linux-(image|headers|modules)' | \
+                awk '{print $2}' | \
+                grep -v "$current_kernel" | \
+                grep -vE 'linux-(image|headers|modules)(-extra)?-(generic|cloud|virtual|lowlatency|rt|gcp|aws|azure|kvm|oem)[^0-9]*$' \
+                || true)
+            if [ -n "$old_kernels" ]; then
+                echo -e "${YELLOW}发现以下旧内核包:${PLAIN}"
+                echo "$old_kernels"
+                for pkg in $old_kernels; do
+                    echo -e "  清理: $pkg"
+                    if ! apt-get purge -y "$pkg" > /dev/null 2>&1; then
+                        echo -e "  ${RED}警告: $pkg 清理失败${PLAIN}"
+                    fi
+                done
+            else
+                echo -e "${GREEN}无旧内核需要清理${PLAIN}"
+            fi
+            ;;
+        dnf|yum)
+            local installed_kernels keep_count=1
+            installed_kernels=$(rpm -q kernel kernel-core kernel-modules 2>/dev/null | grep -v "not installed" | grep -v "$current_kernel" || true)
+            if [ -n "$installed_kernels" ]; then
+                echo -e "${YELLOW}发现以下旧内核包:${PLAIN}"
+                echo "$installed_kernels"
+                for pkg in $installed_kernels; do
+                    echo -e "  清理: $pkg"
+                    if ! $pm remove -y "$pkg" > /dev/null 2>&1; then
+                        echo -e "  ${RED}警告: $pkg 清理失败${PLAIN}"
+                    fi
+                done
+            else
+                echo -e "${GREEN}无旧内核需要清理${PLAIN}"
+            fi
+            ;;
+        pacman)
+            local cached_kernels
+            cached_kernels=$(ls /var/cache/pacman/pkg/linux-[0-9]* 2>/dev/null | grep -v "$(pacman -Q linux 2>/dev/null | awk '{print $2}')" || true)
+            if [ -n "$cached_kernels" ]; then
+                echo -e "${YELLOW}清理旧内核缓存...${PLAIN}"
+                paccache -rk1 2>/dev/null || true
+            else
+                echo -e "${GREEN}无旧内核缓存需要清理${PLAIN}"
+            fi
+            ;;
+        *)
+            echo -e "${YELLOW}当前包管理器不支持自动清理旧内核,跳过${PLAIN}"
+            ;;
+    esac
+
+    if [ -n "$old_kernels" ] || [ -n "${installed_kernels:-}" ]; then
+        if command -v update-grub &>/dev/null; then
+            echo -e "${YELLOW}正在更新GRUB引导...${PLAIN}"
+            update-grub > /dev/null 2>&1
+        elif command -v grub2-mkconfig &>/dev/null; then
+            echo -e "${YELLOW}正在更新GRUB引导...${PLAIN}"
+            grub2-mkconfig -o /boot/grub2/grub.cfg > /dev/null 2>&1
+        fi
+    fi
+
     if command -v docker &>/dev/null; then
         echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
         docker system prune -af
@@ -194,7 +265,7 @@ linux_clean() {
 
     echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=3d --vacuum-size=100M
+        journalctl --vacuum-time=1d --vacuum-size=10M
     fi
     find /var/log -type f -name "*.log" -mtime +1 -exec rm -f {} \;
     find /var/log -type f -name "*.gz" -mtime +1 -exec rm -f {} \;
