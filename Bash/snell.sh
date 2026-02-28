@@ -1,4 +1,7 @@
 #!/bin/bash
+
+set -euo pipefail
+
 # ========== 颜色定义 ==========
 RED="\033[0;31m"
 GREEN="\033[1;32m"
@@ -20,6 +23,12 @@ readonly DEFAULT_OBFS_HOST="icloud.com"
 readonly SNELL_RELEASE_PAGE="https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell"
 readonly SNELL_DOWNLOAD_BASE="https://dl.nssurge.com/snell"
 readonly SNELL_CDN_BASE="https://snell-cdn.pages.dev/snell"
+
+# ========== Root检查 ==========
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
+    exit 1
+fi
 
 # ========== 工具函数 ==========
 pause_and_clear() {
@@ -851,7 +860,7 @@ list_configs() {
 # ========== 菜单函数 ==========
 show_sub_menu() {
   clear
-  echo -e "${BLUE}✦ Confing_Menu ✦${PLAIN}"
+  echo -e "${BLUE}✦ Config_Menu ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}生成配置"
   echo -e "${GREEN}  2.${PLAIN}停止服务"
   echo -e "${GREEN}  3.${PLAIN}查看配置"
@@ -902,8 +911,6 @@ show_main_menu() {
 }
 
 main() {
-  install_unzip_if_missing
-  auto_enable_tcp_fastopen
   while true; do
     show_main_menu
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
@@ -918,4 +925,6 @@ main() {
   done
 }
 
+install_unzip_if_missing
+auto_enable_tcp_fastopen
 main
