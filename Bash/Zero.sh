@@ -317,7 +317,7 @@ set_swap_menu() {
                 set_swap "$recommend_swap"
                 ;;
             2)
-                read -rp "请输入 Swap 大小 (单位 MB,,建议 >=128): " custom
+                read -rp "请输入 Swap 大小 (单位 MB,建议 >=128): " custom
                 if [[ "$custom" =~ ^[0-9]+$ ]] && (( custom >= 128 )); then
                     set_swap "$custom"
                 else
@@ -365,8 +365,14 @@ set_swap() {
     sed -i "\|${swapfile_path}|d" /etc/fstab
 
     echo -e "${BLUE}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
-    
-    if command -v fallocate >/dev/null 2>&1; then
+
+    local root_fstype
+    root_fstype=$(df --output=fstype / | tail -1 | xargs)
+
+    if [[ "$root_fstype" == "btrfs" || "$root_fstype" == "xfs" ]]; then
+        echo -e "${YELLOW}检测到 ${root_fstype} 文件系统,使用 dd 创建 (请耐心等待)...${PLAIN}"
+        dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+    elif command -v fallocate >/dev/null 2>&1; then
         if ! fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
              echo -e "${YELLOW}fallocate 创建失败,尝试使用 dd 写零 (速度较慢,请耐心等待)...${PLAIN}"
              dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
@@ -387,6 +393,11 @@ set_swap() {
 }
 
 delete_swap() {
+    if ! grep -q "$swapfile_path" /proc/swaps 2>/dev/null && [ ! -f "$swapfile_path" ]; then
+        echo -e "${YELLOW}当前没有 Swap 文件,无需操作${PLAIN}"
+        press_any_key_to_continue
+        return 0
+    fi
     echo -e "${YELLOW}正在删除 Swap...${PLAIN}"
     swapoff "$swapfile_path" 2>/dev/null || true
     rm -f "$swapfile_path"
