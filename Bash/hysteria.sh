@@ -94,7 +94,7 @@ random_pass() {
 }
 
 has_ipv4() {
-    ip -4 addr show scope global | grep -q inet || return 1
+    ip -4 addr show scope global 2>/dev/null | grep -q inet || return 1
 }
 
 get_latest_download_url() {
@@ -873,8 +873,8 @@ EOF
 
     clear
     echo -e "${GREEN}新配置已保存,将重启 Hysteria 服务...${PLAIN}"
-    systemctl restart "$SERVICE_NAME"
-    systemctl status --no-pager "$SERVICE_NAME"
+    systemctl restart "$SERVICE_NAME" || true
+    systemctl status --no-pager "$SERVICE_NAME" || true
     pause_and_return
 }
 
@@ -883,7 +883,7 @@ update_hysteria() {
     clear
     echo -e "${BLUE}正在更新 Hysteria 内核...${PLAIN}"
     echo -e "${BLUE}先停止 Hysteria 服务...${PLAIN}"
-    systemctl stop "$SERVICE_NAME"
+    systemctl stop "$SERVICE_NAME" || true
 
     local ARCH DOWNLOAD_URL
     ARCH=$(get_arch)
