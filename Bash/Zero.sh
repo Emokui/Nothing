@@ -52,7 +52,7 @@ get_sshd_option() {
     local line value
     
     if grep -Ei "^[#[:space:]]*${option}[[:space:]]+(yes|no|[0-9]+)" "$config_file" >/dev/null 2>&1; then
-        line=$(grep -Ei "^[#[:space:]]*${option}[[:space:]]+" "$config_file" | tail -1)
+        line=$(grep -Ei "^[#[:space:]]*${option}[[:space:]]+" "$config_file" | tail -1) || true
         value=$(echo "$line" | awk '{print tolower($2)}')
         echo "$value"
     else
@@ -66,7 +66,7 @@ restart_sshd_safe() {
         press_any_key_to_continue
         return 1
     fi
-    systemctl restart sshd
+    systemctl restart sshd || true
     return 0
 }
 
@@ -245,13 +245,13 @@ linux_clean() {
 
     if command -v docker &>/dev/null; then
         echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
-        docker system prune -af
-        docker volume prune -f
+        docker system prune -af || true
+        docker volume prune -f || true
     fi
 
     echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=1d --vacuum-size=10M
+        journalctl --vacuum-time=1d --vacuum-size=10M || true
     fi
     find /var/log -type f -name "*.log" -mtime +1 -exec rm -f {} \;
     find /var/log -type f -name "*.gz" -mtime +1 -exec rm -f {} \;
@@ -265,8 +265,8 @@ linux_clean() {
         rm -rf "$HOME/.cache/"*
     fi
     
-    for uhome in /home/*; do
-        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
+    for uhome in /home/*/; do
+        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"* || true
     done
 
     echo -e "${GREEN}系统清理完成${PLAIN}"
@@ -314,22 +314,22 @@ set_swap_menu() {
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" opt
         case "$opt" in
             1)
-                set_swap "$recommend_swap"
+                set_swap "$recommend_swap" || true
                 ;;
             2)
                 read -rp "请输入 Swap 大小 (单位 MB,建议 >=128): " custom
                 if [[ "$custom" =~ ^[0-9]+$ ]] && (( custom >= 128 )); then
-                    set_swap "$custom"
+                    set_swap "$custom" || true
                 else
                     echo -e "${RED}输入无效！${PLAIN}"
                     sleep 2
                 fi
                 ;;
             3)
-                set_swappiness
+                set_swappiness || true
                 ;;
             4)
-                delete_swap
+                delete_swap || true
                 ;;
             0)
                 return
@@ -356,7 +356,7 @@ set_swap() {
         return 1
     fi
 
-    if grep -q "$swapfile_path" /proc/swaps; then
+    if grep -q "$swapfile_path" /proc/swaps 2>/dev/null; then
         echo -e "${YELLOW}发现已存在的 Swap,正在卸载...${PLAIN}"
         swapoff "$swapfile_path" 2>/dev/null || true
     fi
@@ -409,7 +409,7 @@ delete_swap() {
 
 set_swappiness() {
     local current_val
-    current_val=$(cat /proc/sys/vm/swappiness 2>/dev/null)
+    current_val=$(cat /proc/sys/vm/swappiness 2>/dev/null) || true
     echo -e "当前 Swappiness: ${GREEN}${current_val}${PLAIN}"
     echo -e "数值范围 0-100.数值越低,越倾向于使用物理内存;数值越高,越倾向于使用 Swap。"
   
@@ -444,10 +444,10 @@ ssh_config_menu() {
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
-            1) enable_or_change_root_password ;;
-            2) enable_root_key_login ;;
-            3) change_ssh_port ;;
-            4) disable_ssh_login_menu ;;
+            1) enable_or_change_root_password || true ;;
+            2) enable_root_key_login || true ;;
+            3) change_ssh_port || true ;;
+            4) disable_ssh_login_menu || true ;;
             0) return ;;
             *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 0.3 ;;
         esac
@@ -458,7 +458,7 @@ change_ssh_port() {
     while true; do
         clear
         local current_port
-        current_port=$(grep "^Port" "$SSHD_CONFIG" 2>/dev/null | head -n 1 | awk '{print $2}')
+        current_port=$(grep "^Port" "$SSHD_CONFIG" 2>/dev/null | head -n 1 | awk '{print $2}') || true
         echo -e "${YELLOW}当前SSH端口: ${GREEN}${current_port:-22}${PLAIN}\n"
         read -rp "$(echo -e "${BLUE}请输入新的SSH端口(输入0返回): ${PLAIN}")" new_port
         new_port=$(echo "$new_port" | xargs)
@@ -498,7 +498,7 @@ enable_or_change_root_password() {
         return
     fi
 
-    passwd root
+    passwd root || { echo -e "${RED}密码设置失败${PLAIN}"; press_any_key_to_continue; return; }
     if [[ "$pass_auth" != "yes" ]]; then
         update_sshd_option "PermitRootLogin" "yes"
         update_sshd_option "PasswordAuthentication" "yes"
@@ -541,15 +541,23 @@ enable_root_key_login() {
         read -s key_passphrase
         echo
         rm -f "$TMP_KEY" "$TMP_PUB"
-        ssh-keygen -t ed25519 -N "$key_passphrase" -f "$TMP_KEY"
+        if ! ssh-keygen -t ed25519 -N "$key_passphrase" -f "$TMP_KEY"; then
+            echo -e "${RED}密钥生成失败${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
     else
         rm -f "$TMP_KEY" "$TMP_PUB"
-        ssh-keygen -t ed25519 -N "" -f "$TMP_KEY"
+        if ! ssh-keygen -t ed25519 -N "" -f "$TMP_KEY"; then
+            echo -e "${RED}密钥生成失败${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
     fi
 
     local PUB_CONTENT
     PUB_CONTENT=$(cat "$TMP_PUB")
-    if ! grep -qxF "$PUB_CONTENT" "$AUTH_KEYS"; then
+    if ! grep -qxF "$PUB_CONTENT" "$AUTH_KEYS" 2>/dev/null; then
         echo "$PUB_CONTENT" >> "$AUTH_KEYS"
     fi
 
@@ -587,8 +595,8 @@ disable_ssh_login_menu() {
     pass_auth=$(get_sshd_option "PasswordAuthentication" "yes")
     pubkey_auth=$(get_sshd_option "PubkeyAuthentication" "yes")
 
-    [[ "$pass_auth" == "yes" ]] && has_password=1
-    [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1
+    [[ "$pass_auth" == "yes" ]] && has_password=1 || true
+    [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1 || true
 
     local enabled_count=$((has_password + has_pubkey))
 
@@ -642,16 +650,16 @@ change_timezone() {
     
     if ! command -v curl >/dev/null; then
         echo -e "${YELLOW}未检测到 curl,正在自动安装...${PLAIN}"
-        pkg_install curl
+        pkg_install curl || true
     fi
 
     echo -e "${YELLOW}正在检测当前网络推荐时区...${PLAIN}"
     local current_tz_web
-    current_tz_web=$(curl -s --connect-timeout 5 https://ipapi.co/timezone)
+    current_tz_web=$(curl -s --connect-timeout 5 https://ipapi.co/timezone) || true
 
     while true; do
         local sys_tz
-        sys_tz=$(timedatectl | grep 'Time zone' | awk '{print $3}')
+        sys_tz=$(timedatectl 2>/dev/null | grep -i 'time zone' | awk '{print $3}') || true
         clear
         echo -e "${BLUE}========= 更改时区管理 ========${PLAIN}"
         echo -e "${YELLOW} 当前系统时区: ${GREEN}${sys_tz}${PLAIN}"
@@ -1075,7 +1083,7 @@ list_firewall_rules() {
     echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
     
     local policy
-    policy=$($check_cmd -L INPUT -n | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
+    policy=$($check_cmd -L INPUT -n 2>/dev/null | grep "Chain INPUT" | awk '{print $4}' | tr -d ')') || true
     echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
     
     echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
@@ -1093,7 +1101,7 @@ configure_firewall() {
     get_ssh_port() {
         local port
         if [ -f "$SSHD_CONFIG" ]; then
-            port=$(grep "^Port" "$SSHD_CONFIG" | head -n 1 | awk '{print $2}')
+            port=$(grep "^Port" "$SSHD_CONFIG" | head -n 1 | awk '{print $2}') || true
         fi
         
         if [[ -z "$port" ]]; then
@@ -1134,11 +1142,11 @@ configure_firewall() {
     if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
         echo -e "${YELLOW}[!] 未检测到防火墙工具，尝试安装...${PLAIN}"
         if command -v apt &>/dev/null; then
-            apt update && apt install -y iptables iptables-persistent
+            apt update && apt install -y iptables iptables-persistent || true
         elif command -v dnf &>/dev/null; then
-            dnf install -y iptables-services
+            dnf install -y iptables-services || true
         elif command -v yum &>/dev/null; then
-            yum install -y iptables-services
+            yum install -y iptables-services || true
         else
             echo -e "${RED}[!] 请手动安装 iptables!${PLAIN}"
             return 1
@@ -1293,9 +1301,9 @@ set_ip_priority() {
             1)
                 if [[ ! -f "$GAI_CONF" ]]; then
                     echo "$IPV4_RULE" > "$GAI_CONF"
-                elif grep -qE '^precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF"; then
+                elif grep -qE '^precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF" 2>/dev/null; then
                     sed -i 's/^precedence[[:space:]]\+::ffff:0:0\/96.*/precedence ::ffff:0:0\/96  100/' "$GAI_CONF"
-                elif grep -qE '^#.*precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF"; then
+                elif grep -qE '^#.*precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF" 2>/dev/null; then
                     sed -i 's/^#.*\(precedence[[:space:]]\+::ffff:0:0\/96\).*/precedence ::ffff:0:0\/96  100/' "$GAI_CONF"
                 else
                     echo "$IPV4_RULE" >> "$GAI_CONF"
@@ -1352,21 +1360,21 @@ main_menu() {
         read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
-            1)  linux_update ;;
-            2)  linux_clean ;;
-            3)  install_system ;;
-            4)  change_timezone ;;
-            5)  set_ip_priority ;;
-            6)  dns_fix ;;
-            7)  ssh_config_menu ;;
+            1)  linux_update || true ;;
+            2)  linux_clean || true ;;
+            3)  install_system || true ;;
+            4)  change_timezone || true ;;
+            5)  set_ip_priority || true ;;
+            6)  dns_fix || true ;;
+            7)  ssh_config_menu || true ;;
             8)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            9)  set_swap_menu ;;
-            10) install_acme ;;
-            11) install_snell ;;
-            12) install_mihomo ;;
-            13) install_hysteria ;;
-            14) configure_firewall ;;
-            15) install_warp ;;
+            9)  set_swap_menu || true ;;
+            10) install_acme || true ;;
+            11) install_snell || true ;;
+            12) install_mihomo || true ;;
+            13) install_hysteria || true ;;
+            14) configure_firewall || true ;;
+            15) install_warp || true ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
