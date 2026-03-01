@@ -51,8 +51,8 @@ get_sshd_option() {
     local config_file="${3:-$SSHD_CONFIG}"
     local line value
     
-    if grep -Ei "^[#[:space:]]*${option}[[:space:]]+(yes|no|[0-9]+)" "$config_file" >/dev/null 2>&1; then
-        line=$(grep -Ei "^[#[:space:]]*${option}[[:space:]]+" "$config_file" | tail -1) || true
+    if grep -Ei "^${option}[[:space:]]+(yes|no|[0-9]+)" "$config_file" >/dev/null 2>&1; then
+        line=$(grep -Ei "^${option}[[:space:]]+" "$config_file" | tail -1) || true
         value=$(echo "$line" | awk '{print tolower($2)}')
         echo "$value"
     else
@@ -258,7 +258,8 @@ linux_clean() {
     find /var/log -type f -name "*.1" -mtime +1 -exec rm -f {} \;
 
     echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
-    rm -rf /tmp/* /var/tmp/*
+    find /tmp -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+    find /var/tmp -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null || true
 
     echo -e "${YELLOW}正在清理用户缓存...${PLAIN}"
     if [ -d "$HOME/.cache" ]; then
@@ -755,9 +756,11 @@ change_timezone() {
 
 # ====== 同仓其他脚本 ======
 run_install_script() {
-    set +e
+    local old_opts
+    old_opts=$(set +o)
+    set +e +o pipefail
     bash <(curl -sL "$1")
-    set -e
+    eval "$old_opts"
 }
 
 install_acme()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/acme.sh"; }
@@ -865,7 +868,7 @@ dns_fix() {
                 bad+=("$dns")
             fi
         done
-        dns_list=("${ok[@]}")
+        dns_list=("${ok[@]:-}")
 
         if [[ ${#dns_list[@]} -eq 0 ]]; then
             echo -e "${RED}未检测到有效的DNS IP（请输入IPv4/IPv6地址）${PLAIN}"
@@ -1228,6 +1231,10 @@ configure_firewall() {
                         end_port=$port_range
                     else
                         echo -e "${RED}[!] 无效端口格式: $port_range${PLAIN}"
+                        continue
+                    fi
+                    if (( start_port < 1 || end_port > 65535 || start_port > end_port )); then
+                        echo -e "${RED}[!] 端口范围无效: $port_range (必须 1-65535 且起始≤结束)${PLAIN}"
                         continue
                     fi
                     if [[ "$action_choice" == "1" ]]; then
