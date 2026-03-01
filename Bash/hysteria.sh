@@ -127,7 +127,7 @@ get_latest_download_url() {
 # ======== 申请证书 ========
 cert_menu() {
     clear
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh) || true
+    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/acme.sh) || true
 }
 
 # ======== 证书选择 ========
