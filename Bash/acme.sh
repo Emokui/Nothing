@@ -21,7 +21,7 @@ mkdir -p "$CERT_PATH"
 
 # ====== 检测IPv4 ======
 has_ipv4() {
-    ip -4 addr show scope global | grep -q inet
+    ip -4 addr show scope global 2>/dev/null | grep -q inet
 }
 
 get_acme_download_url() {
@@ -252,12 +252,12 @@ check_80() {
         echo -e "${GREEN}防火墙已放行 80 端口${PLAIN}"
     fi
 
-    if [[ $(lsof -i:"80" | grep -i -c "listen") -eq 0 ]]; then
+    if [[ $(lsof -i:"80" 2>/dev/null | grep -i -c "listen") -eq 0 ]]; then
         echo -e "${GREEN}检测到目前 80 端口未被占用${PLAIN}"
         sleep 1
     else
         echo -e "${RED}检测到目前 80 端口被其他程序占用，以下为占用程序信息${PLAIN}"
-        lsof -i:"80"
+        lsof -i:"80" || true
         read -rp "如需结束占用进程请按 Y，按其他键则返回菜单 [Y/N]: " yn
         if [[ $yn =~ [Yy] ]]; then
             lsof -i:"80" | awk '{print $2}' | grep -v "PID" | xargs kill -9
