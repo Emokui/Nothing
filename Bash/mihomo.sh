@@ -60,11 +60,11 @@ get_latest_download_url() {
         api_url="https://api.nicycc.workers.dev/repos/MetaCubeX/mihomo/releases/latest"
     fi
 
-    latest_version=$(curl -s "$api_url" | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
+    latest_version=$(curl -s "$api_url" | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/') || true
     
     if [[ -z "$latest_version" ]]; then
         echo "ERROR|"
-        return 1
+        return 0
     fi
     
     if [[ "$arch" == "amd64" ]]; then
@@ -363,7 +363,7 @@ install_mihomo() {
     systemctl start "$SERVICE_NAME"
 
     echo -e "${GREEN}安装完成!${PLAIN}"
-    systemctl status --no-pager "$SERVICE_NAME"
+    systemctl status --no-pager "$SERVICE_NAME" || true
     pause_and_return
 }
 
@@ -383,7 +383,7 @@ manage_service() {
             1)
                 clear
                 echo -e "${BLUE}Mihomo 服务状态:${PLAIN}"
-                systemctl status --no-pager "$SERVICE_NAME"
+                systemctl status --no-pager "$SERVICE_NAME" || true
                 read -p "$(echo -e "${BLUE}按回车查看配置...${PLAIN}")"
                 clear
                 echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
@@ -392,15 +392,15 @@ manage_service() {
                 pause_and_return
                 ;;
             2)
-                modify_config
+                modify_config || true
                 ;;
             3)
-                systemctl stop "$SERVICE_NAME"
+                systemctl stop "$SERVICE_NAME" || true
                 echo -e "${GREEN}已停止${PLAIN}"
                 pause_and_return
                 ;;
             4)
-                systemctl restart "$SERVICE_NAME"
+                systemctl restart "$SERVICE_NAME" || true
                 echo -e "${GREEN}已重启${PLAIN}"
                 pause_and_return
                 ;;
@@ -416,10 +416,10 @@ modify_config() {
         local trojan_status="未启用"
         local hy2_status="未启用"
         local tuic_status="未启用"
-        grep -q "name: anytls-in" "$CONFIG_PATH" && anytls_status="已启用"
-        grep -q "name: trojan-in" "$CONFIG_PATH" && trojan_status="已启用"
-        grep -q "name: tuicv5-in" "$CONFIG_PATH" && tuic_status="已启用"
-        grep -q "name: hysteria2-in" "$CONFIG_PATH" && hy2_status="已启用"
+        grep -q "name: anytls-in" "$CONFIG_PATH" && anytls_status="已启用" || true
+        grep -q "name: trojan-in" "$CONFIG_PATH" && trojan_status="已启用" || true
+        grep -q "name: tuicv5-in" "$CONFIG_PATH" && tuic_status="已启用" || true
+        grep -q "name: hysteria2-in" "$CONFIG_PATH" && hy2_status="已启用" || true
         
         clear
         echo -e "${BLUE}✦ Modify_Conf ✦${PLAIN}"
@@ -431,10 +431,10 @@ modify_config() {
         read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
         
         case "$opt" in
-            1) toggle_or_modify_listener "anytls-in" "AnyTLS" "8443" ;;
-            2) toggle_or_modify_listener "trojan-in" "Trojan" "10819" ;;
-            3) toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" ;;
-            4) toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
+            1) toggle_or_modify_listener "anytls-in" "AnyTLS" "8443" || true ;;
+            2) toggle_or_modify_listener "trojan-in" "Trojan" "10819" || true ;;
+            3) toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" || true ;;
+            4) toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" || true ;;
             0) break ;;
         esac
     done
@@ -448,7 +448,7 @@ toggle_or_modify_listener() {
     
     while true; do
         local is_enabled="n"
-        grep -q "name: $name" "$CONFIG_PATH" && is_enabled="y"
+        grep -q "name: $name" "$CONFIG_PATH" && is_enabled="y" || true
         
         clear
         echo -e "${BLUE}✦ ${display_name}_Conf ✦${PLAIN}"
@@ -461,10 +461,10 @@ toggle_or_modify_listener() {
             read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
             
             case "$opt" in
-                1) modify_listener_port "$name" ;;
-                2) modify_listener_pass "$name" ;;
-                3) modify_listener_cert "$name" ;;
-                4) disable_listener "$name" "$display_name"; break ;;
+                1) modify_listener_port "$name" || true ;;
+                2) modify_listener_pass "$name" || true ;;
+                3) modify_listener_cert "$name" || true ;;
+                4) disable_listener "$name" "$display_name" || true; break ;;
                 0) break ;;
             esac
         else
@@ -602,7 +602,7 @@ LISTENER
     
     rm -f "$tmp_config"
     
-    systemctl restart "$SERVICE_NAME"
+    systemctl restart "$SERVICE_NAME" || true
     echo -e "${GREEN}${display_name} 已启用${PLAIN}"
     sleep 1
 }
@@ -626,7 +626,7 @@ disable_listener() {
             !skip {print}
         ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
         
-        systemctl restart "$SERVICE_NAME"
+        systemctl restart "$SERVICE_NAME" || true
         echo -e "${GREEN}${display_name} 已禁用${PLAIN}"
     fi
     sleep 1
@@ -642,7 +642,7 @@ modify_listener_port() {
             found && /^  port:/{$0="  port: "port; found=0}
             {print}
         ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
-        systemctl restart "$SERVICE_NAME"
+        systemctl restart "$SERVICE_NAME" || true
         echo -e "${GREEN}已更新${PLAIN}"
     fi
     sleep 1
@@ -689,7 +689,7 @@ modify_listener_pass() {
                 ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
                 ;;
         esac
-        systemctl restart "$SERVICE_NAME"
+        systemctl restart "$SERVICE_NAME" || true
         echo -e "${GREEN}已更新${PLAIN}"
     fi
     sleep 1
@@ -705,7 +705,7 @@ modify_listener_cert() {
         block && /private-key:/{$0="  private-key: "key; block=0}
         {print}
     ' "$CONFIG_PATH" > "${CONFIG_PATH}.tmp" && mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
-    systemctl restart "$SERVICE_NAME"
+    systemctl restart "$SERVICE_NAME" || true
     echo -e "${GREEN}已更新${PLAIN}"
     sleep 1
 }
@@ -720,7 +720,8 @@ update_mihomo() {
     fi
 
     local current_version ARCH result download_url latest_version
-    current_version=$($EXEC_PATH -v 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' || echo "未知")
+    current_version=$($EXEC_PATH -v 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+') || true
+    current_version=${current_version:-"未知"}
     
     ARCH=$(get_arch)
     result=$(get_latest_download_url "$ARCH")
@@ -742,7 +743,7 @@ update_mihomo() {
     fi
 
     echo -e "${BLUE}[*] 更新中...${PLAIN}"
-    systemctl stop "$SERVICE_NAME"
+    systemctl stop "$SERVICE_NAME" || true
 
     if wget -O "/tmp/mihomo.gz" "$download_url"; then
         gunzip -f "/tmp/mihomo.gz"
@@ -754,7 +755,7 @@ update_mihomo() {
         rm -f "/tmp/mihomo.gz"
     fi
     
-    systemctl start "$SERVICE_NAME"
+    systemctl start "$SERVICE_NAME" || true
     pause_and_return
 }
 
@@ -763,8 +764,8 @@ delete_mihomo() {
     clear
     read -p "$(echo -e "${RED}确定删除? [y/N]: ${PLAIN}")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-        systemctl stop "$SERVICE_NAME"
-        systemctl disable "$SERVICE_NAME"
+        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+        systemctl disable "$SERVICE_NAME" 2>/dev/null || true
         rm -f "$SERVICE_FILE" "$EXEC_PATH"
         rm -rf "$CONFIG_DIR"
         systemctl daemon-reload
@@ -785,17 +786,17 @@ while true; do
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
-        1) install_mihomo ;;
+        1) install_mihomo || true ;;
         2)
             if [[ ! -f "$EXEC_PATH" ]]; then
                 echo -e "${RED}未安装${PLAIN}"
                 pause_and_return
                 continue
             fi
-            manage_service
+            manage_service || true
             ;;
-        3) update_mihomo ;;
-        4) delete_mihomo ;;
+        3) update_mihomo || true ;;
+        4) delete_mihomo || true ;;
         0) exit 0 ;;
     esac
 done
