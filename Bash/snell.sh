@@ -668,10 +668,10 @@ modify_config() {
   generate_config_file "$config_file" "$port" "$psk" "$obfs" "$obfs_host" "$ipv6" "$tfo" "$dns"
 
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
-  systemctl restart "$service_name"
+  systemctl restart "$service_name" || true
   echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
   echo -e "${BLUE}------ 当前服务状态 ------${PLAIN}"
-  systemctl status "$service_name" --no-pager
+  systemctl status "$service_name" --no-pager || true
   pause_and_clear
 }
 
@@ -810,7 +810,7 @@ stop_or_restart_snell() {
       local cn
       cn=$(basename "$config_file" .conf)
       local service_name="snell@${cn}.service"
-      systemctl restart "$service_name"
+      systemctl restart "$service_name" || true
       echo -e "${GREEN}已重启服务: $service_name${PLAIN}"
     done
     echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
@@ -833,7 +833,7 @@ stop_or_restart_snell() {
     return 1
   fi
   
-  systemctl stop "$service_name"
+  systemctl stop "$service_name" || true
   echo -e "${YELLOW}已停止服务: $service_name${PLAIN}"
   pause_and_clear
 }
@@ -916,9 +916,9 @@ main() {
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
     case $main_choice in
       1) install_snell || true ;;
-      2) config_snell_menu ;;
-      3) delete_all_snell ;;
-      4) update_snell_menu ;;
+      2) config_snell_menu || true ;;
+      3) delete_all_snell || true ;;
+      4) update_snell_menu || true ;;
       0) exit 0 ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
