@@ -1120,12 +1120,41 @@ configure_firewall() {
         fi
     }
     
+    ensure_iptables_persistent() {
+        if command -v netfilter-persistent &>/dev/null; then
+            systemctl enable netfilter-persistent 2>/dev/null || true
+            return 0
+        fi
+        if systemctl list-unit-files iptables.service 2>/dev/null | grep -q iptables; then
+            systemctl enable iptables 2>/dev/null || true
+            systemctl enable ip6tables 2>/dev/null || true
+            return 0
+        fi
+        echo -e "${YELLOW}[*] 正在安装防火墙持久化工具...${PLAIN}"
+        if command -v apt &>/dev/null; then
+            DEBIAN_FRONTEND=noninteractive apt update && DEBIAN_FRONTEND=noninteractive apt install -y iptables-persistent || true
+            systemctl enable netfilter-persistent 2>/dev/null || true
+        elif command -v dnf &>/dev/null; then
+            dnf install -y iptables-services || true
+            systemctl enable iptables 2>/dev/null || true
+            systemctl enable ip6tables 2>/dev/null || true
+        elif command -v yum &>/dev/null; then
+            yum install -y iptables-services || true
+            systemctl enable iptables 2>/dev/null || true
+            systemctl enable ip6tables 2>/dev/null || true
+        fi
+    }
+
     save_rules() {
         if command -v netfilter-persistent &>/dev/null; then
             netfilter-persistent save 2>/dev/null || true
         elif command -v service &>/dev/null; then
              service iptables save 2>/dev/null || true
              service ip6tables save 2>/dev/null || true
+        else
+            mkdir -p /etc/iptables
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
         fi
     }
     
@@ -1160,6 +1189,8 @@ configure_firewall() {
              return 1
         fi
     fi
+    
+    ensure_iptables_persistent
     
     local check_cmd="iptables"
     if [[ "$has_iptables" == "false" ]]; then
