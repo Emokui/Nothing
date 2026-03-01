@@ -147,11 +147,11 @@ get_cert_list() {
 
 # ====== Acme 安装与卸载 ======
 install_acme_core() {
-    pkg_update
-    pkg_install curl wget socat openssl dnsutils cron
+    pkg_update || true
+    pkg_install curl wget socat openssl dnsutils cron || true
     
-    systemctl start cron
-    systemctl enable cron
+    systemctl start cron 2>/dev/null || systemctl start cronie 2>/dev/null || true
+    systemctl enable cron 2>/dev/null || systemctl enable cronie 2>/dev/null || true
 
     local automail
     automail=$(date +%s%N | md5sum | cut -c 1-16)
@@ -172,10 +172,10 @@ install_acme_core() {
         return 1
     fi
 
-    (cd acme.sh-master && ./acme.sh --install --accountemail "$email")
+    (cd acme.sh-master && ./acme.sh --install --accountemail "$email") || true
     rm -rf acme.sh-master master.tar.gz
-    bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
-    bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+    bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade || true
+    bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt || true
 
     if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
         echo -e "${GREEN}Acme 安装成功!${PLAIN}"
@@ -311,13 +311,13 @@ acme_standalone() {
     echo -e "${GREEN}已输入的域名：$domain${PLAIN}" && sleep 1
 
     if ! has_ipv4; then
-        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --listen-v6 --insecure
+        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --listen-v6 --insecure || true
     else
-        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --insecure
+        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --insecure || true
     fi
 
-    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
-    checktls "$domain"
+    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc || true
+    checktls "$domain" || true
     back2menu
 }
 
@@ -338,10 +338,10 @@ acme_cfapiTLD() {
         return
     fi
 
-    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${domain}" -k ec-256 --insecure
+    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${domain}" -k ec-256 --insecure || true
 
-    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
-    checktls "$domain"
+    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc || true
+    checktls "$domain" || true
     back2menu
 }
 
@@ -362,10 +362,10 @@ acme_cfapiNTLD() {
         return
     fi
 
-    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "*.${domain}" -d "${domain}" -k ec-256 --insecure
+    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "*.${domain}" -d "${domain}" -k ec-256 --insecure || true
 
-    bash ~/.acme.sh/acme.sh --install-cert -d "*.${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
-    checktls "$domain"
+    bash ~/.acme.sh/acme.sh --install-cert -d "*.${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc || true
+    checktls "$domain" || true
     back2menu
 }
 
@@ -418,8 +418,8 @@ revoke_cert() {
         return
     fi
     
-    bash ~/.acme.sh/acme.sh --revoke -d "${selected_domain}" --ecc
-    bash ~/.acme.sh/acme.sh --remove -d "${selected_domain}" --ecc
+    bash ~/.acme.sh/acme.sh --revoke -d "${selected_domain}" --ecc || true
+    bash ~/.acme.sh/acme.sh --remove -d "${selected_domain}" --ecc || true
     
     rm -rf ~/.acme.sh/"${selected_domain}"_ecc
     
@@ -434,7 +434,7 @@ revoke_cert() {
 renew_cert() {
     ensure_acme_installed || return
     
-    bash ~/.acme.sh/acme.sh --cron
+    bash ~/.acme.sh/acme.sh --cron || true
     back2menu
 }
 
@@ -447,9 +447,9 @@ select_provider_core() {
     local provider
     read -rp "请选择 [1-3]: " provider
     case $provider in
-        2) bash ~/.acme.sh/acme.sh --set-default-ca --server buypass && echo -e "${GREEN}切换证书颁发机构为 BuyPass.com 成功！${PLAIN}" ;;
-        3) bash ~/.acme.sh/acme.sh --set-default-ca --server zerossl && echo -e "${GREEN}切换证书颁发机构为 ZeroSSL.com 成功！${PLAIN}" ;;
-        *) bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt && echo -e "${GREEN}切换证书颁发机构为 Letsencrypt.org 成功！${PLAIN}" ;;
+        2) bash ~/.acme.sh/acme.sh --set-default-ca --server buypass && echo -e "${GREEN}切换证书颁发机构为 BuyPass.com 成功！${PLAIN}" || echo -e "${RED}切换失败${PLAIN}" ;;
+        3) bash ~/.acme.sh/acme.sh --set-default-ca --server zerossl && echo -e "${GREEN}切换证书颁发机构为 ZeroSSL.com 成功！${PLAIN}" || echo -e "${RED}切换失败${PLAIN}" ;;
+        *) bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt && echo -e "${GREEN}切换证书颁发机构为 Letsencrypt.org 成功！${PLAIN}" || echo -e "${RED}切换失败${PLAIN}" ;;
     esac
 }
 
@@ -474,9 +474,9 @@ generate_self_signed_cert() {
     local key_file="$CERT_PATH/${domain}.key"
     local crt_file="$CERT_PATH/${domain}.crt"
 
-    openssl ecparam -name prime256v1 -genkey -noout -out "$key_file"
+    openssl ecparam -name prime256v1 -genkey -noout -out "$key_file" || { echo -e "${RED}私钥生成失败${PLAIN}"; back2menu; return; }
     openssl req -new -x509 -key "$key_file" -out "$crt_file" -days "$days" \
-        -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain"
+        -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain" || { echo -e "${RED}证书生成失败${PLAIN}"; back2menu; return; }
     chmod 644 "$crt_file"
     chmod 600 "$key_file"
 
@@ -512,15 +512,15 @@ menu() {
         local menuInput
         read -rp "$(echo -e "${RED}请输入选项 [0-9]: ${PLAIN}")" menuInput
         case "$menuInput" in
-            1) inst_acme ;;
-            2) unst_acme ;;
-            3) acme_standalone ;;
-            4) acme_cfapiTLD ;;
-            5) acme_cfapiNTLD ;;
-            6) revoke_cert ;;
-            7) renew_cert ;;
-            8) switch_provider ;;
-            9) generate_self_signed_cert ;;
+            1) inst_acme || true ;;
+            2) unst_acme || true ;;
+            3) acme_standalone || true ;;
+            4) acme_cfapiTLD || true ;;
+            5) acme_cfapiNTLD || true ;;
+            6) revoke_cert || true ;;
+            7) renew_cert || true ;;
+            8) switch_provider || true ;;
+            9) generate_self_signed_cert || true ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 1 ;;
         esac
