@@ -387,7 +387,11 @@ manage_service() {
                 read -p "$(echo -e "${BLUE}按回车查看配置...${PLAIN}")"
                 clear
                 echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
-                cat "$CONFIG_PATH"
+                if [[ -f "$CONFIG_PATH" ]]; then
+                    cat "$CONFIG_PATH"
+                else
+                    echo -e "${RED}配置文件不存在${PLAIN}"
+                fi
                 echo -e "${BLUE}------------------------------------------------------${PLAIN}"
                 pause_and_return
                 ;;
@@ -405,6 +409,7 @@ manage_service() {
                 pause_and_return
                 ;;
             0) break ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
         esac
     done
 }
