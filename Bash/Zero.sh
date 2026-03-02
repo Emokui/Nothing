@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -u
 
 # ====== 颜色变量 ======
 GREEN="\033[0;32m"
@@ -52,7 +52,7 @@ get_sshd_option() {
     local line value
     
     if grep -Ei "^${option}[[:space:]]+(yes|no|[0-9]+)" "$config_file" >/dev/null 2>&1; then
-        line=$(grep -Ei "^${option}[[:space:]]+" "$config_file" | tail -1) || true
+        line=$(grep -Ei "^${option}[[:space:]]+" "$config_file" | tail -1)
         value=$(echo "$line" | awk '{print tolower($2)}')
         echo "$value"
     else
@@ -66,7 +66,7 @@ restart_sshd_safe() {
         press_any_key_to_continue
         return 1
     fi
-    systemctl restart sshd || true
+    systemctl restart sshd
     return 0
 }
 
@@ -125,7 +125,7 @@ pkg_clean() {
         apk)    apk cache clean ;;
         pacman)
             local orphans
-            orphans=$(pacman -Qtdq 2>/dev/null || true)
+            orphans=$(pacman -Qtdq 2>/dev/null)
             if [[ -n "$orphans" ]]; then
                 pacman -Rns $orphans --noconfirm
             fi
@@ -154,7 +154,7 @@ install_wget_if_missing
 # ====== GCP Debian 源修复 ======
 fix_gcp_debian_sources() {(
     local product_name
-    product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null) || true
+    product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
     [[ "$product_name" != *"Google"* ]] && return 0
 
     [ ! -f /etc/os-release ] && return 0
@@ -214,7 +214,7 @@ GCPEOF
     fi
 
     rm -rf /var/lib/apt/lists/*
-    apt clean 2>/dev/null || true
+    apt clean 2>/dev/null
     echo -e "${GREEN}GCP 源配置完成 (MIT + Berkeley)${PLAIN}"
 )}
 
@@ -292,7 +292,7 @@ linux_clean() {
             cached_kernels=$(ls /var/cache/pacman/pkg/linux-[0-9]* 2>/dev/null | grep -v "$(pacman -Q linux 2>/dev/null | awk '{print $2}')" || true)
             if [ -n "$cached_kernels" ]; then
                 echo -e "${YELLOW}清理旧内核缓存...${PLAIN}"
-                paccache -rk1 2>/dev/null || true
+                paccache -rk1 2>/dev/null
             else
                 echo -e "${GREEN}无旧内核缓存需要清理${PLAIN}"
             fi
@@ -314,21 +314,21 @@ linux_clean() {
 
     if command -v docker &>/dev/null; then
         echo -e "${YELLOW}清理Docker垃圾...${PLAIN}"
-        docker system prune -af || true
-        docker volume prune -f || true
+        docker system prune -af
+        docker volume prune -f
     fi
 
     echo -e "${YELLOW}正在清理系统日志...${PLAIN}"
     if command -v journalctl &>/dev/null; then
-        journalctl --vacuum-time=1d --vacuum-size=10M || true
+        journalctl --vacuum-time=1d --vacuum-size=10M
     fi
     find /var/log -type f -name "*.log" -mtime +1 -exec rm -f {} \;
     find /var/log -type f -name "*.gz" -mtime +1 -exec rm -f {} \;
     find /var/log -type f -name "*.1" -mtime +1 -exec rm -f {} \;
 
     echo -e "${YELLOW}正在清理临时目录...${PLAIN}"
-    find /tmp -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null || true
-    find /var/tmp -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+    find /tmp -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null
+    find /var/tmp -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null
 
     echo -e "${YELLOW}正在清理用户缓存...${PLAIN}"
     if [ -d "$HOME/.cache" ]; then
@@ -336,7 +336,7 @@ linux_clean() {
     fi
     
     for uhome in /home/*/; do
-        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"* || true
+        [ -d "$uhome/.cache" ] && rm -rf "$uhome/.cache/"*
     done
 
     echo -e "${GREEN}系统清理完成${PLAIN}"
@@ -384,22 +384,22 @@ set_swap_menu() {
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" opt
         case "$opt" in
             1)
-                set_swap "$recommend_swap" || true
+                set_swap "$recommend_swap"
                 ;;
             2)
                 read -rp "请输入 Swap 大小 (单位 MB,建议 >=128): " custom
                 if [[ "$custom" =~ ^[0-9]+$ ]] && (( custom >= 128 )); then
-                    set_swap "$custom" || true
+                    set_swap "$custom"
                 else
                     echo -e "${RED}输入无效！${PLAIN}"
                     sleep 2
                 fi
                 ;;
             3)
-                set_swappiness || true
+                set_swappiness
                 ;;
             4)
-                delete_swap || true
+                delete_swap
                 ;;
             0)
                 return
@@ -479,7 +479,7 @@ delete_swap() {
 
 set_swappiness() {
     local current_val
-    current_val=$(cat /proc/sys/vm/swappiness 2>/dev/null) || true
+    current_val=$(cat /proc/sys/vm/swappiness 2>/dev/null)
     echo -e "当前 Swappiness: ${GREEN}${current_val}${PLAIN}"
     echo -e "数值范围 0-100.数值越低,越倾向于使用物理内存;数值越高,越倾向于使用 Swap。"
   
@@ -514,10 +514,10 @@ ssh_config_menu() {
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
         case "$ssh_choice" in
-            1) enable_or_change_root_password || true ;;
-            2) enable_root_key_login || true ;;
-            3) change_ssh_port || true ;;
-            4) disable_ssh_login_menu || true ;;
+            1) enable_or_change_root_password ;;
+            2) enable_root_key_login ;;
+            3) change_ssh_port ;;
+            4) disable_ssh_login_menu ;;
             0) return ;;
             *) echo -e "${RED}无效选项，请重试${PLAIN}"; sleep 0.3 ;;
         esac
@@ -528,7 +528,7 @@ change_ssh_port() {
     while true; do
         clear
         local current_port
-        current_port=$(grep "^Port" "$SSHD_CONFIG" 2>/dev/null | head -n 1 | awk '{print $2}') || true
+        current_port=$(grep "^Port" "$SSHD_CONFIG" 2>/dev/null | head -n 1 | awk '{print $2}')
         echo -e "${YELLOW}当前SSH端口: ${GREEN}${current_port:-22}${PLAIN}\n"
         read -rp "$(echo -e "${BLUE}请输入新的SSH端口(输入0返回): ${PLAIN}")" new_port
         new_port=$(echo "$new_port" | xargs)
@@ -665,8 +665,8 @@ disable_ssh_login_menu() {
     pass_auth=$(get_sshd_option "PasswordAuthentication" "yes")
     pubkey_auth=$(get_sshd_option "PubkeyAuthentication" "yes")
 
-    [[ "$pass_auth" == "yes" ]] && has_password=1 || true
-    [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1 || true
+    [[ "$pass_auth" == "yes" ]] && has_password=1
+    [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1
 
     local enabled_count=$((has_password + has_pubkey))
 
@@ -720,16 +720,16 @@ change_timezone() {
     
     if ! command -v curl >/dev/null; then
         echo -e "${YELLOW}未检测到 curl,正在自动安装...${PLAIN}"
-        pkg_install curl || true
+        pkg_install curl
     fi
 
     echo -e "${YELLOW}正在检测当前网络推荐时区...${PLAIN}"
     local current_tz_web
-    current_tz_web=$(curl -s --connect-timeout 5 https://ipapi.co/timezone) || true
+    current_tz_web=$(curl -s --connect-timeout 5 https://ipapi.co/timezone)
 
     while true; do
         local sys_tz
-        sys_tz=$(timedatectl 2>/dev/null | grep -i 'time zone' | awk '{print $3}') || true
+        sys_tz=$(timedatectl 2>/dev/null | grep -i 'time zone' | awk '{print $3}')
         clear
         echo -e "${BLUE}========= 更改时区管理 ========${PLAIN}"
         echo -e "${YELLOW} 当前系统时区: ${GREEN}${sys_tz}${PLAIN}"
@@ -825,11 +825,7 @@ change_timezone() {
 
 # ====== 同仓其他脚本 ======
 run_install_script() {
-    local old_opts
-    old_opts=$(set +o)
-    set +e +o pipefail
     bash <(curl -sL "$1")
-    eval "$old_opts"
 }
 
 install_acme()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/acme.sh"; }
@@ -989,7 +985,7 @@ dns_fix() {
         fi
 
         for svc in nscd dnsmasq named; do
-            systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1 || true
+            systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1
         done
         return 0
     }
@@ -1144,7 +1140,7 @@ parse_firewall_table() {
     local cmd=$2
     if ! command -v "$cmd" &>/dev/null; then return; fi
     
-    ($cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target" || true) | while read -r line; do
+    ($cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target") | while read -r line; do
          echo "$ver $line"
     done
 }
@@ -1155,7 +1151,7 @@ list_firewall_rules() {
     echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
     
     local policy
-    policy=$($check_cmd -L INPUT -n 2>/dev/null | grep "Chain INPUT" | awk '{print $4}' | tr -d ')') || true
+    policy=$($check_cmd -L INPUT -n 2>/dev/null | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
     echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
     
     echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
@@ -1173,7 +1169,7 @@ configure_firewall() {
     get_ssh_port() {
         local port
         if [ -f "$SSHD_CONFIG" ]; then
-            port=$(grep "^Port" "$SSHD_CONFIG" | head -n 1 | awk '{print $2}') || true
+            port=$(grep "^Port" "$SSHD_CONFIG" | head -n 1 | awk '{print $2}')
         fi
         
         if [[ -z "$port" ]]; then
@@ -1467,21 +1463,21 @@ main_menu() {
         read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         case "$choice" in
-            1)  linux_update || true ;;
-            2)  linux_clean || true ;;
-            3)  install_system || true ;;
-            4)  change_timezone || true ;;
-            5)  set_ip_priority || true ;;
-            6)  dns_fix || true ;;
-            7)  ssh_config_menu || true ;;
+            1)  linux_update ;;
+            2)  linux_clean ;;
+            3)  install_system ;;
+            4)  change_timezone ;;
+            5)  set_ip_priority ;;
+            6)  dns_fix ;;
+            7)  ssh_config_menu ;;
             8)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            9)  set_swap_menu || true ;;
-            10) install_acme || true ;;
-            11) install_snell || true ;;
-            12) install_mihomo || true ;;
-            13) install_hysteria || true ;;
-            14) configure_firewall || true ;;
-            15) install_warp || true ;;
+            9)  set_swap_menu ;;
+            10) install_acme ;;
+            11) install_snell ;;
+            12) install_mihomo ;;
+            13) install_hysteria ;;
+            14) configure_firewall ;;
+            15) install_warp ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
