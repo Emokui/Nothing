@@ -177,6 +177,12 @@ fix_gcp_debian_sources() {(
             ;;
     esac
 
+    local source_file="/etc/apt/sources.list"
+    [ -f /etc/apt/sources.list.d/debian.sources ] && source_file="/etc/apt/sources.list.d/debian.sources"
+    if grep -q "mirrors.mit.edu" "$source_file" 2>/dev/null; then
+        return 0
+    fi
+
     echo -e "${YELLOW}检测到 GCP Debian ${VERSION_ID} (${codename}),正在配置教育网源...${PLAIN}"
 
     local format source_file
