@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -u
 
 # ====== 颜色变量 ======
 RED="\033[1;31m"
@@ -141,14 +141,14 @@ get_cf_credentials() {
 # ====== 获取证书列表 ======
 get_cert_list() {
     local output
-    output=$(~/.acme.sh/acme.sh --list 2>/dev/null | tail -n +2) || true
+    output=$(~/.acme.sh/acme.sh --list 2>/dev/null | tail -n +2)
     echo "$output"
 }
 
 # ====== Acme 安装与卸载 ======
 install_acme_core() {
-    pkg_update || true
-    pkg_install curl wget socat openssl dnsutils cron || true
+    pkg_update
+    pkg_install curl wget socat openssl dnsutils cron
     
     systemctl start cron 2>/dev/null || systemctl start cronie 2>/dev/null || true
     systemctl enable cron 2>/dev/null || systemctl enable cronie 2>/dev/null || true
@@ -172,10 +172,10 @@ install_acme_core() {
         return 1
     fi
 
-    (cd acme.sh-master && ./acme.sh --install --accountemail "$email") || true
+    (cd acme.sh-master && ./acme.sh --install --accountemail "$email")
     rm -rf acme.sh-master master.tar.gz
-    bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade || true
-    bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt || true
+    bash ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+    bash ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
 
     if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
         echo -e "${GREEN}Acme 安装成功!${PLAIN}"
@@ -257,7 +257,7 @@ check_80() {
         sleep 1
     else
         echo -e "${RED}检测到目前 80 端口被其他程序占用，以下为占用程序信息${PLAIN}"
-        lsof -i:"80" || true
+        lsof -i:"80"
         read -rp "如需结束占用进程请按 Y，按其他键则返回菜单 [Y/N]: " yn
         if [[ $yn =~ [Yy] ]]; then
             lsof -i:"80" | awk '{print $2}' | grep -v "PID" | xargs kill -9
@@ -311,13 +311,13 @@ acme_standalone() {
     echo -e "${GREEN}已输入的域名：$domain${PLAIN}" && sleep 1
 
     if ! has_ipv4; then
-        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --listen-v6 --insecure || true
+        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --listen-v6 --insecure
     else
-        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --insecure || true
+        bash ~/.acme.sh/acme.sh --issue -d "${domain}" --standalone -k ec-256 --insecure
     fi
 
-    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc || true
-    checktls "$domain" || true
+    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
+    checktls "$domain"
     back2menu
 }
 
@@ -338,10 +338,10 @@ acme_cfapiTLD() {
         return
     fi
 
-    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${domain}" -k ec-256 --insecure || true
+    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "${domain}" -k ec-256 --insecure
 
-    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc || true
-    checktls "$domain" || true
+    bash ~/.acme.sh/acme.sh --install-cert -d "${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
+    checktls "$domain"
     back2menu
 }
 
@@ -362,10 +362,10 @@ acme_cfapiNTLD() {
         return
     fi
 
-    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "*.${domain}" -d "${domain}" -k ec-256 --insecure || true
+    bash ~/.acme.sh/acme.sh --issue --dns dns_cf -d "*.${domain}" -d "${domain}" -k ec-256 --insecure
 
-    bash ~/.acme.sh/acme.sh --install-cert -d "*.${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc || true
-    checktls "$domain" || true
+    bash ~/.acme.sh/acme.sh --install-cert -d "*.${domain}" --key-file "$CERT_PATH/$domain.key" --fullchain-file "$CERT_PATH/$domain.crt" --ecc
+    checktls "$domain"
     back2menu
 }
 
@@ -434,7 +434,7 @@ revoke_cert() {
 renew_cert() {
     ensure_acme_installed || return
     
-    bash ~/.acme.sh/acme.sh --cron || true
+    bash ~/.acme.sh/acme.sh --cron
     back2menu
 }
 
@@ -512,15 +512,15 @@ menu() {
         local menuInput
         read -rp "$(echo -e "${RED}请输入选项 [0-9]: ${PLAIN}")" menuInput
         case "$menuInput" in
-            1) inst_acme || true ;;
-            2) unst_acme || true ;;
-            3) acme_standalone || true ;;
-            4) acme_cfapiTLD || true ;;
-            5) acme_cfapiNTLD || true ;;
-            6) revoke_cert || true ;;
-            7) renew_cert || true ;;
-            8) switch_provider || true ;;
-            9) generate_self_signed_cert || true ;;
+            1) inst_acme ;;
+            2) unst_acme ;;
+            3) acme_standalone ;;
+            4) acme_cfapiTLD ;;
+            5) acme_cfapiNTLD ;;
+            6) revoke_cert ;;
+            7) renew_cert ;;
+            8) switch_provider ;;
+            9) generate_self_signed_cert ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 1 ;;
         esac
