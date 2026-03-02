@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -u
 
 # ========== 颜色定义 ==========
 RED="\033[0;31m"
@@ -102,7 +102,7 @@ get_latest_snell_version() {
     fi
 
     local all_links
-    all_links=$(echo "$page" | grep -oE "https://dl.nssurge.com/snell/snell-server-v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*-linux-${arch}\.zip") || true
+    all_links=$(echo "$page" | grep -oE "https://dl.nssurge.com/snell/snell-server-v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*-linux-${arch}\.zip")
     
     if [[ -z "$all_links" ]]; then
         echo -e "${RED}未找到适用于 ${arch} 架构的版本${PLAIN}"
@@ -110,8 +110,8 @@ get_latest_snell_version() {
     fi
 
     local latest_stable latest_beta
-    latest_stable=$(echo "$all_links" | grep -vE 'b[0-9]+|beta' | sort -V | tail -n 1) || true
-    latest_beta=$(echo "$all_links" | grep -E 'b[0-9]+|beta' | sort -V | tail -n 1) || true
+    latest_stable=$(echo "$all_links" | grep -vE 'b[0-9]+|beta' | sort -V | tail -n 1)
+    latest_beta=$(echo "$all_links" | grep -E 'b[0-9]+|beta' | sort -V | tail -n 1)
 
     if ! has_ipv4; then
       latest_stable=$(echo "$latest_stable" | sed "s|dl.nssurge.com|snell-cdn.pages.dev|")
@@ -270,8 +270,8 @@ auto_enable_tcp_fastopen() {
     fi
   done
   
-  sysctl --system >/dev/null 2>&1 || true
-  [ -w /proc/sys/net/ipv4/tcp_fastopen ] && echo 3 > /proc/sys/net/ipv4/tcp_fastopen || true
+  sysctl --system >/dev/null 2>&1
+  [ -w /proc/sys/net/ipv4/tcp_fastopen ] && echo 3 > /proc/sys/net/ipv4/tcp_fastopen
 }
 
 # ========== 安装/更新/回滚函数 ==========
@@ -570,13 +570,13 @@ modify_config() {
   fi
 
   local current_port current_psk current_obfs current_obfs_host current_ipv6 current_tfo current_dns
-  current_port=$(grep "^listen[[:space:]]*=" "$config_file" | awk -F: '{print $NF}' | tr -d ' ') || true
-  current_psk=$(grep "^psk[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ') || true
-  current_obfs=$(grep "^obfs[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ') || true
-  current_obfs_host=$(grep "^obfs-host[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ') || true
-  current_ipv6=$(grep "^ipv6[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ') || true
-  current_tfo=$(grep "^tfo[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ') || true
-  current_dns=$(grep "^dns[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | sed 's/^ *//;s/ *$//') || true
+  current_port=$(grep "^listen[[:space:]]*=" "$config_file" | awk -F: '{print $NF}' | tr -d ' ')
+  current_psk=$(grep "^psk[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  current_obfs=$(grep "^obfs[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  current_obfs_host=$(grep "^obfs-host[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  current_ipv6=$(grep "^ipv6[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  current_tfo=$(grep "^tfo[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
+  current_dns=$(grep "^dns[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | sed 's/^ *//;s/ *$//')
 
   clear
   echo -e "${BLUE}当前配置内容:${PLAIN}"
@@ -589,7 +589,7 @@ modify_config() {
   echo -e "DNS: ${GREEN}${current_dns:-$DEFAULT_DNS}${PLAIN}"
 
   local status
-  status=$(systemctl is-active "$service_name" 2>/dev/null) || true
+  status=$(systemctl is-active "$service_name" 2>/dev/null)
   case "$status" in
     active)   echo -e "服务状态: ${GREEN}已启动(active)${PLAIN}" ;;
     inactive) echo -e "服务状态: ${YELLOW}已停止(inactive)${PLAIN}" ;;
@@ -668,10 +668,10 @@ modify_config() {
   generate_config_file "$config_file" "$port" "$psk" "$obfs" "$obfs_host" "$ipv6" "$tfo" "$dns"
 
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
-  systemctl restart "$service_name" || true
+  systemctl restart "$service_name"
   echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
   echo -e "${BLUE}------ 当前服务状态 ------${PLAIN}"
-  systemctl status "$service_name" --no-pager || true
+  systemctl status "$service_name" --no-pager
   pause_and_clear
 }
 
@@ -810,7 +810,7 @@ stop_or_restart_snell() {
       local cn
       cn=$(basename "$config_file" .conf)
       local service_name="snell@${cn}.service"
-      systemctl restart "$service_name" || true
+      systemctl restart "$service_name"
       echo -e "${GREEN}已重启服务: $service_name${PLAIN}"
     done
     echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
@@ -833,7 +833,7 @@ stop_or_restart_snell() {
     return 1
   fi
   
-  systemctl stop "$service_name" || true
+  systemctl stop "$service_name"
   echo -e "${YELLOW}已停止服务: $service_name${PLAIN}"
   pause_and_clear
 }
@@ -873,10 +873,10 @@ config_snell_menu() {
     show_sub_menu
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
     case $sub_choice in
-      1) generate_and_enable_config || true ;;
-      2) stop_or_restart_snell || true ;;
-      3) modify_config || true ;;
-      4) delete_config || true ;;
+      1) generate_and_enable_config ;;
+      2) stop_or_restart_snell ;;
+      3) modify_config ;;
+      4) delete_config ;;
       0) break ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
@@ -892,9 +892,9 @@ update_snell_menu() {
   echo -e "${GREEN}  0.${PLAIN}返回主页"
   read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
   case $update_choice in
-    1) update_snell_stable || true ;;
-    2) update_snell_beta || true ;;
-    3) rollback_snell_v4 || true ;;
+    1) update_snell_stable ;;
+    2) update_snell_beta ;;
+    3) rollback_snell_v4 ;;
     0) return ;;
     *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
   esac
@@ -915,10 +915,10 @@ main() {
     show_main_menu
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
     case $main_choice in
-      1) install_snell || true ;;
-      2) config_snell_menu || true ;;
-      3) delete_all_snell || true ;;
-      4) update_snell_menu || true ;;
+      1) install_snell ;;
+      2) config_snell_menu ;;
+      3) delete_all_snell ;;
+      4) update_snell_menu ;;
       0) exit 0 ;;
       *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
     esac
