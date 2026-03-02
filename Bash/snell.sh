@@ -14,7 +14,6 @@ readonly SNELL_BIN="/usr/local/bin/snell-server"
 readonly SNELL_ETC="/etc/snell"
 readonly SNELL_CONFIGS="${SNELL_ETC}/configs"
 readonly SNELL_VERSION_FILE="${SNELL_ETC}/version"
-readonly TFO_SYSCTL_CONF="/etc/sysctl.d/local.conf"
 
 # ========== 配置默认值 ==========
 readonly DEFAULT_PORT=5000
@@ -83,10 +82,6 @@ snell_config_exists() {
   [[ -d "$SNELL_CONFIGS" && ${#files[@]} -gt 0 ]]
 }
 
-tfo_enabled() {
-  [[ "$(sysctl -n net.ipv4.tcp_fastopen 2>/dev/null)" == "3" ]] \
-    && grep -Eq '^\s*net\.ipv4\.tcp_fastopen\s*=\s*3\s*$' "$TFO_SYSCTL_CONF" 2>/dev/null
-}
 
 # ========== 版本获取函数 ==========
 get_latest_snell_version() {
@@ -233,45 +228,6 @@ restart_all_snell_services() {
     echo -e "${GREEN}已重启服务: $svc_name${PLAIN}"
   done
   echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
-}
-
-# ========== sysctl 优化 ==========
-auto_enable_tcp_fastopen() {
-  local sysctl_conf="$TFO_SYSCTL_CONF"
-  mkdir -p "$(dirname "$sysctl_conf")"
-  
-  declare -A sysctl_params=(
-    ["net.core.netdev_max_backlog"]="4096"
-    ["net.core.somaxconn"]="4096"
-    ["net.ipv4.tcp_max_syn_backlog"]="4096"
-    ["net.ipv4.tcp_syncookies"]="1"
-    ["net.ipv4.tcp_tw_reuse"]="1"
-    ["net.ipv4.tcp_fin_timeout"]="30"
-    ["net.ipv4.ip_local_port_range"]="10000 65000"
-    ["net.ipv4.tcp_fastopen"]="3"
-    ["net.ipv4.tcp_mtu_probing"]="1"
-    ["net.core.default_qdisc"]="fq"
-    ["net.ipv4.tcp_congestion_control"]="bbr"
-    ["net.core.rmem_max"]="8388608"
-    ["net.core.wmem_max"]="8388608"
-    ["net.core.optmem_max"]="4194304"
-    ["net.ipv4.udp_rmem_min"]="8192"
-    ["net.ipv4.udp_wmem_min"]="8192"
-  )
-  
-  [[ ! -f "$sysctl_conf" ]] && touch "$sysctl_conf"
-  
-  for key in "${!sysctl_params[@]}"; do
-    local value="${sysctl_params[$key]}"
-    if grep -Eq "^\s*${key}\s*=" "$sysctl_conf" 2>/dev/null; then
-      sed -i "s|^\s*${key}\s*=.*|${key} = ${value}|" "$sysctl_conf"
-    else
-      echo "${key} = ${value}" >> "$sysctl_conf"
-    fi
-  done
-  
-  sysctl --system >/dev/null 2>&1
-  [ -w /proc/sys/net/ipv4/tcp_fastopen ] && echo 3 > /proc/sys/net/ipv4/tcp_fastopen
 }
 
 # ========== 安装/更新/回滚函数 ==========
@@ -926,5 +882,4 @@ main() {
 }
 
 install_unzip_if_missing
-auto_enable_tcp_fastopen
 main
