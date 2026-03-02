@@ -1,5 +1,4 @@
 #!/bin/bash
-# WARP 双栈管理脚本 v2.0
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -47,20 +46,6 @@ install_pkg() {
     esac
 }
 
-has_ipv4_connectivity() {
-    ip -4 addr show scope global 2>/dev/null | grep -q inet || return 1
-    ping -4 -c 1 -W 1 1.1.1.1 &>/dev/null && return 0
-    command -v curl &>/dev/null && curl -4 -s --max-time 2 http://1.1.1.1/cdn-cgi/trace &>/dev/null && return 0
-    return 1
-}
-
-has_ipv6_connectivity() {
-    ip -6 addr show scope global 2>/dev/null | grep -q inet6 || return 1
-    ping -6 -c 1 -W 1 2606:4700:4700::1111 &>/dev/null && return 0
-    command -v curl &>/dev/null && curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && return 0
-    return 1
-}
-
 is_valid_endpoint() {
     local ep="$1" host port
     if [[ "$ep" =~ ^\[[0-9a-fA-F:]+\]:([0-9]{1,5})$ ]]; then
@@ -94,8 +79,18 @@ detect_network() {
     HAS_V4=false; HAS_V6=false
     local tmp4="/tmp/.warp_v4_$$" tmp6="/tmp/.warp_v6_$$"
     rm -f "$tmp4" "$tmp6"
-    ( has_ipv4_connectivity && touch "$tmp4" ) &
-    ( has_ipv6_connectivity && touch "$tmp6" ) &
+    (
+        ip -4 addr show scope global 2>/dev/null | grep -q inet || exit 1
+        ping -4 -c 1 -W 1 1.1.1.1 &>/dev/null && exit 0
+        command -v curl &>/dev/null && curl -4 -s --max-time 2 http://1.1.1.1/cdn-cgi/trace &>/dev/null && exit 0
+        exit 1
+    ) && touch "$tmp4" &
+    (
+        ip -6 addr show scope global 2>/dev/null | grep -q inet6 || exit 1
+        ping -6 -c 1 -W 1 2606:4700:4700::1111 &>/dev/null && exit 0
+        command -v curl &>/dev/null && curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && exit 0
+        exit 1
+    ) && touch "$tmp6" &
     wait
     [[ -f "$tmp4" ]] && HAS_V4=true
     [[ -f "$tmp6" ]] && HAS_V6=true
@@ -277,8 +272,6 @@ show_result() {
     echo ""
 }
 
-# ======================== 1. 免费账户 ========================
-
 install_free() {
     echo ""; info "免费账户安装"; echo ""
 
@@ -334,8 +327,6 @@ install_free() {
     write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$pub" "$ENDPOINT" "$INSTALL_MODE" "free"
     enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
 }
-
-# ======================== 2. 团队账户 ========================
 
 install_team() {
     echo ""; info "团队账户安装"; echo ""
@@ -425,8 +416,6 @@ install_team() {
     enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
 }
 
-# ======================== 3. 修改配置 ========================
-
 modify_config() {
     echo ""; info "修改 WARP 配置"; echo ""
     [[ ! -f "$WG_CONF" ]] && { warn "未找到 ${WG_CONF}，请先安装"; return; }
@@ -481,8 +470,6 @@ restart_wg() {
     fi
 }
 
-# ======================== 查看 IP ========================
-
 show_ip() {
     echo ""; info "当前出口 IP"; echo ""
     local t4="/tmp/.warp_ip4_$$" t6="/tmp/.warp_ip6_$$"
@@ -496,8 +483,6 @@ show_ip() {
     echo -e "  IPv6: ${CYAN}${v6}${NC}"
     echo ""
 }
-
-# ======================== 4. 删除服务 ========================
 
 uninstall_warp() {
     echo ""; info "删除 WARP 服务"; echo ""
@@ -515,8 +500,6 @@ uninstall_warp() {
     echo -e "\n${GREEN}WARP 服务已完全删除${NC}\n"
 }
 
-# ======================== 主菜单 ========================
-
 show_menu() {
     clear
     echo -e "${BOLD}"
@@ -528,7 +511,7 @@ show_menu() {
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  5) 查看 IP    0) 退出\n"
+    echo -e "  5) 查看 IP    0) 退出脚本\n"
 }
 
 main() {
