@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
+set -u
 
 # ======== 全局变量 ========
 RED="\033[1;31m"
@@ -115,7 +115,7 @@ get_latest_download_url() {
         *) asset_name="hysteria-linux-$arch" ;;
     esac
 
-    download_url=$(curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4) || true
+    download_url=$(curl -s "$api_url" | grep "browser_download_url" | grep "$asset_name\"" | head -n 1 | cut -d '"' -f 4)
 
     if ! has_ipv4 && [ -n "$download_url" ]; then
         download_url=$(echo "$download_url" | sed 's#https://github.com/#https://hysteria-cdn2.pages.dev/#')
@@ -127,7 +127,7 @@ get_latest_download_url() {
 # ======== 申请证书 ========
 cert_menu() {
     clear
-    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/acme.sh) || true
+    bash <(curl -sL https://raw.githubusercontent.com/Emokui/Nothing/Zero/Shell/acme.sh) || true
 }
 
 # ======== 证书选择 ========
@@ -315,12 +315,12 @@ show_hysteria_config() {
         cat "$CONFIG_PATH"
         echo -e "${BLUE}-----------------------------------------------------${PLAIN}"
         local listen_port auth_password cert_file masquerade_domain subject sni_domain local_ip node_link
-        listen_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/://') || true
-        auth_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | awk '{print $2}') || true
-        cert_file=$(grep -E '^\s*cert:' "$CONFIG_PATH" | awk '{print $2}') || true
-        masquerade_domain=$(grep -E '^\s*url:' "$CONFIG_PATH" | awk -F[/:] '{print $4}') || true
-        subject=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null) || true
-        sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//') || true
+        listen_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/://')
+        auth_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | awk '{print $2}')
+        cert_file=$(grep -E '^\s*cert:' "$CONFIG_PATH" | awk '{print $2}')
+        masquerade_domain=$(grep -E '^\s*url:' "$CONFIG_PATH" | awk -F[/:] '{print $4}')
+        subject=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null)
+        sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
         [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
         local_ip=$(get_local_ip)
         listen_port=${listen_port:-443}
@@ -348,8 +348,8 @@ port_jump_set() {
     done
 
     local EXIST_RULE_V4 EXIST_RULE_V6
-    EXIST_RULE_V4=$(iptables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports') || true
-    EXIST_RULE_V6=$(ip6tables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports') || true
+    EXIST_RULE_V4=$(iptables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports')
+    EXIST_RULE_V6=$(ip6tables -t nat -S PREROUTING | grep -E 'REDIRECT --to-ports')
 
     if [[ -n "$EXIST_RULE_V4" ]] || [[ -n "$EXIST_RULE_V6" ]]; then
         echo -e "${GREEN}已检测到存在端口跳跃配置:${PLAIN}"
@@ -386,7 +386,7 @@ port_jump_set() {
 
     local default_port="" cfg_port
     if [[ -f "$CONFIG_PATH" ]]; then
-        cfg_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/^://') || true
+        cfg_port=$(grep -E '^listen:' "$CONFIG_PATH" | awk '{print $2}' | sed 's/^://')
         if [[ -n "$cfg_port" ]]; then
             default_port="$cfg_port"
         fi
@@ -485,9 +485,9 @@ port_jump_modify() {
 port_jump_view() {
     clear
     echo -e "${BLUE}当前 iptables (IPv4) 端口跳跃规则: ${PLAIN}"
-    iptables -t nat -L -n --line-numbers | grep REDIRECT || true
+    iptables -t nat -L -n --line-numbers | grep REDIRECT
     echo -e "${BLUE}当前 ip6tables (IPv6) 端口跳跃规则: ${PLAIN}"
-    ip6tables -t nat -L -n --line-numbers | grep REDIRECT || true
+    ip6tables -t nat -L -n --line-numbers | grep REDIRECT
     echo -e "${BLUE}当前 systemd port-jump.service 配置: ${PLAIN}"
     if [ -f "$PORT_JUMP_SERVICE" ]; then
         cat "$PORT_JUMP_SERVICE"
@@ -540,7 +540,7 @@ port_jump_menu() {
         fi
         
         case "$pjopt" in
-            1) port_jump_set || true ;;
+            1) port_jump_set ;;
             2) 
                 if [[ $has_config -eq 0 ]]; then
                     echo -e "${YELLOW}未配置端口跳跃,请先设置${PLAIN}"
@@ -630,8 +630,8 @@ print_node_link() {
 
     local local_ip subject sni_domain node_link
     local_ip=$(get_local_ip)
-    subject=$(openssl x509 -in "$used_cert" -noout -subject 2>/dev/null) || true
-    sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//') || true
+    subject=$(openssl x509 -in "$used_cert" -noout -subject 2>/dev/null)
+    sni_domain=$(echo "$subject" | grep -oE 'CN[ =]*[a-zA-Z0-9\.\-]+' | head -n1 | sed 's/CN[ =]*//')
     [ -z "$sni_domain" ] && sni_domain="$masquerade_domain"
     listen_port=${listen_port:-443}
     node_link="hysteria2://${auth_password}@${local_ip}:${listen_port}?insecure=1&sni=${sni_domain}&fastopen=1#Hysteria"
@@ -781,18 +781,18 @@ modify_hysteria() {
     fi
 
     local old_listen old_cert old_key old_password old_url old_url_domain
-    old_listen=$(grep -E '^listen:' "$CONFIG_PATH" | head -n1 | awk '{print $2}' | sed 's/://') || true
-    old_cert=$(grep -E '^\s*cert:' "$CONFIG_PATH" | head -n1 | awk '{print $2}') || true
-    old_key=$(grep -E '^\s*key:' "$CONFIG_PATH" | head -n1 | awk '{print $2}') || true
-    old_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | head -n1 | awk '{print $2}') || true
-    old_url=$(grep -E '^\s*url:' "$CONFIG_PATH" | head -n1 | awk '{print $2}') || true
+    old_listen=$(grep -E '^listen:' "$CONFIG_PATH" | head -n1 | awk '{print $2}' | sed 's/://')
+    old_cert=$(grep -E '^\s*cert:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
+    old_key=$(grep -E '^\s*key:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
+    old_password=$(grep -E '^\s*password:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
+    old_url=$(grep -E '^\s*url:' "$CONFIG_PATH" | head -n1 | awk '{print $2}')
     old_url_domain=$(echo "$old_url" | sed -E 's#https?://([^/]+).*#\1#')
 
     local old_socks5_addr old_socks5_port old_socks5_username old_socks5_password default_outbounds
-    old_socks5_addr=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'addr:' | awk '{print $2}' | head -n1 | cut -d: -f1) || true
-    old_socks5_port=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'addr:' | awk '{print $2}' | head -n1 | cut -d: -f2) || true
-    old_socks5_username=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'username:' | awk '{print $2}' | head -n1) || true
-    old_socks5_password=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'password:' | awk '{print $2}' | head -n1) || true
+    old_socks5_addr=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'addr:' | awk '{print $2}' | head -n1 | cut -d: -f1)
+    old_socks5_port=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'addr:' | awk '{print $2}' | head -n1 | cut -d: -f2)
+    old_socks5_username=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'username:' | awk '{print $2}' | head -n1)
+    old_socks5_password=$(grep -A5 'outbounds:' "$CONFIG_PATH" | grep 'password:' | awk '{print $2}' | head -n1)
 
     if [[ -n "$old_socks5_addr" ]]; then
         default_outbounds="y"
@@ -873,8 +873,8 @@ EOF
 
     clear
     echo -e "${GREEN}新配置已保存,将重启 Hysteria 服务...${PLAIN}"
-    systemctl restart "$SERVICE_NAME" || true
-    systemctl status --no-pager "$SERVICE_NAME" || true
+    systemctl restart "$SERVICE_NAME"
+    systemctl status --no-pager "$SERVICE_NAME"
     pause_and_return
 }
 
@@ -883,7 +883,7 @@ update_hysteria() {
     clear
     echo -e "${BLUE}正在更新 Hysteria 内核...${PLAIN}"
     echo -e "${BLUE}先停止 Hysteria 服务...${PLAIN}"
-    systemctl stop "$SERVICE_NAME" || true
+    systemctl stop "$SERVICE_NAME"
 
     local ARCH DOWNLOAD_URL
     ARCH=$(get_arch)
@@ -971,7 +971,7 @@ manage_hysteria() {
             1)
                 clear
                 echo -e "${BLUE}Hysteria 服务当前状态: ${PLAIN}"
-                systemctl status --no-pager hysteria || true
+                systemctl status --no-pager hysteria
                 read -p "$(echo -e "${BLUE}按回车查看配置...${PLAIN}")"
                 clear
                 show_hysteria_config
@@ -979,27 +979,27 @@ manage_hysteria() {
             2)
                 clear
                 echo -e "${BLUE}正在停止 Hysteria 服务...${PLAIN}"
-                systemctl stop "$SERVICE_NAME" || true
+                systemctl stop "$SERVICE_NAME"
                 echo -e "${GREEN}已停止${PLAIN}"
-                systemctl status --no-pager "$SERVICE_NAME" || true
+                systemctl status --no-pager "$SERVICE_NAME"
                 pause_and_return
                 ;;
             3)
                 clear
                 echo -e "${BLUE}正在重启 Hysteria 服务...${PLAIN}"
-                systemctl restart "$SERVICE_NAME" || true
+                systemctl restart "$SERVICE_NAME"
                 echo -e "${GREEN}已重启${PLAIN}"
-                systemctl status --no-pager "$SERVICE_NAME" || true
+                systemctl status --no-pager "$SERVICE_NAME"
                 pause_and_return
                 ;;
             4)
-                modify_hysteria || true
+                modify_hysteria
                 ;;
             5)
-                update_hysteria || true
+                update_hysteria
                 ;;
             6)
-                delete_hysteria || true
+                delete_hysteria
                 break
                 ;;
             0)
@@ -1026,10 +1026,10 @@ while true; do
     read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
 
     case "$option" in
-        1) cert_menu || true ;;
-        2) install_hysteria || true ;;
-        3) manage_hysteria || true ;;
-        4) port_jump_menu || true ;;
+        1) cert_menu ;;
+        2) install_hysteria ;;
+        3) manage_hysteria ;;
+        4) port_jump_menu ;;
         0) exit 0 ;;
         *) echo -e "${RED}无效输入,重新输入${PLAIN}"; pause_and_return ;;
     esac
