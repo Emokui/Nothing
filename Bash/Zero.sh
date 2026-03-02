@@ -66,7 +66,11 @@ restart_sshd_safe() {
         press_any_key_to_continue
         return 1
     fi
-    systemctl restart sshd
+    if systemctl list-unit-files sshd.service 2>/dev/null | grep -q sshd; then
+        systemctl restart sshd
+    else
+        systemctl restart ssh
+    fi
     return 0
 }
 
