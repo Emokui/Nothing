@@ -1,5 +1,5 @@
 #!/bin/bash
-# WARP 双栈管理脚本 v2.0
+# WARP 一键双栈管理脚本 v2.0
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -481,6 +481,22 @@ restart_wg() {
     fi
 }
 
+# ======================== 查看 IP ========================
+
+show_ip() {
+    echo ""; info "当前出口 IP"; echo ""
+    local t4="/tmp/.warp_ip4_$$" t6="/tmp/.warp_ip6_$$"
+    curl -s -4 --max-time 5 ip.gs > "$t4" 2>/dev/null &
+    curl -s -6 --max-time 5 ip.gs > "$t6" 2>/dev/null &
+    wait
+    local v4; v4=$(cat "$t4" 2>/dev/null); [[ -z "$v4" ]] && v4="无"
+    local v6; v6=$(cat "$t6" 2>/dev/null); [[ -z "$v6" ]] && v6="无"
+    rm -f "$t4" "$t6"
+    echo -e "  IPv4: ${CYAN}${v4}${NC}"
+    echo -e "  IPv6: ${CYAN}${v6}${NC}"
+    echo ""
+}
+
 # ======================== 4. 删除服务 ========================
 
 uninstall_warp() {
@@ -512,17 +528,18 @@ show_menu() {
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  0) 退出\n"
+    echo -e "  5) 查看 IP    0) 退出\n"
 }
 
 main() {
     check_root
     while true; do
         show_menu
-        read -rp "  请输入选项 [0-4]: " choice
+        read -rp "  请输入选项 [0-5]: " choice
         case "$choice" in
             1) install_free ;; 2) install_team ;;
             3) modify_config ;; 4) uninstall_warp ;;
+            5) show_ip ;;
             0) echo ""; info "再见！"; exit 0 ;;
             *) warn "无效选项" ;;
         esac
