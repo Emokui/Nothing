@@ -161,7 +161,7 @@ install_wget_if_missing() {
 
 install_wget_if_missing
 
-# ====== GCP Debian源 ======
+# ====== GCP Debian 源修复 ======
 fix_gcp_debian_sources() {(
     local product_name
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
@@ -552,8 +552,7 @@ change_ssh_port() {
             return
         fi
         if [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )); then
-            sed -i '/^[#[:space:]]*Port[[:space:]]\+[0-9]\+/Id' "$SSHD_CONFIG"
-            echo "Port $new_port" >> "$SSHD_CONFIG"
+            update_sshd_option "Port" "$new_port"
             
             if restart_sshd_safe; then
                 echo -e "${YELLOW}[✓]SSH端口已修改为 $new_port${PLAIN}"
