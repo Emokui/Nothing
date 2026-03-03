@@ -40,8 +40,6 @@ update_sshd_option() {
     local option="$1"
     local value="$2"
     local config_file="${3:-$SSHD_CONFIG}"
-    
-    # 清理 sshd_config.d 目录下的 drop-in 文件中的同名选项（Debian 12+/Ubuntu 22.04+）
     local dropin_dir="/etc/ssh/sshd_config.d"
     if [[ -d "$dropin_dir" ]]; then
         for f in "$dropin_dir"/*.conf; do
@@ -163,7 +161,7 @@ install_wget_if_missing() {
 
 install_wget_if_missing
 
-# ====== GCP Debian 源修复 ======
+# ====== GCP Debian源 ======
 fix_gcp_debian_sources() {(
     local product_name
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
