@@ -41,7 +41,15 @@ update_sshd_option() {
     local value="$2"
     local config_file="${3:-$SSHD_CONFIG}"
     
-    sed -i "/^[#[:space:]]*${option}[[:space:]]\+\w\+/Id" "$config_file"
+    # 清理 sshd_config.d 目录下的 drop-in 文件中的同名选项（Debian 12+/Ubuntu 22.04+）
+    local dropin_dir="/etc/ssh/sshd_config.d"
+    if [[ -d "$dropin_dir" ]]; then
+        for f in "$dropin_dir"/*.conf; do
+            [[ -f "$f" ]] && sed -i "/^[#[:space:]]*${option}[[:space:]]/Id" "$f"
+        done
+    fi
+    
+    sed -i "/^[#[:space:]]*${option}[[:space:]]/Id" "$config_file"
     echo "${option} ${value}" >> "$config_file"
 }
 
@@ -562,15 +570,8 @@ change_ssh_port() {
 }
 
 enable_or_change_root_password() {
-    local pass_auth
-    pass_auth=$(get_sshd_option "PasswordAuthentication" "no")
-
     clear
-    if [[ "$pass_auth" == "yes" ]]; then
-        echo -e "${YELLOW}当前状态: ${GREEN}密码登录已启用${PLAIN}"
-    else
-        echo -e "${YELLOW}当前状态: ${RED}密码登录未启用${PLAIN}(设置后将自动启用)"
-    fi
+    echo -e "${YELLOW}设置 Root 密码并启用密码登录${PLAIN}"
     echo
     read -rp "$(echo -e "${BLUE}按回车继续,输入0返回:${PLAIN}")" input
     input=$(echo "$input" | xargs)
@@ -579,15 +580,12 @@ enable_or_change_root_password() {
     fi
 
     passwd root || { echo -e "${RED}密码设置失败${PLAIN}"; press_any_key_to_continue; return; }
-    if [[ "$pass_auth" != "yes" ]]; then
-        update_sshd_option "PermitRootLogin" "yes"
-        update_sshd_option "PasswordAuthentication" "yes"
-        
-        if restart_sshd_safe; then
-            echo -e "${GREEN}[✓]Root密码登陆已启用${PLAIN}"
-        fi
-    else
-        echo -e "${GREEN}[✓]Root密码已修改${PLAIN}"
+    
+    update_sshd_option "PermitRootLogin" "yes"
+    update_sshd_option "PasswordAuthentication" "yes"
+    
+    if restart_sshd_safe; then
+        echo -e "${GREEN}[✓]Root密码已设置,密码登录已启用${PLAIN}"
     fi
     press_any_key_to_continue
 }
