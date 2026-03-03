@@ -2,20 +2,17 @@
 
 set -u
 
-# ====== 颜色变量 ======
 GREEN="\033[0;32m"
 YELLOW="\033[0;33m"
 BLUE="\033[0;34m"
 RED="\033[0;31m"
 PLAIN="\033[0m"
 
-# ====== Root权限 ======
 if [[ $EUID -ne 0 ]]; then
   echo -e "${RED}请用 root 用户运行本脚本${PLAIN}"
   exit 1
 fi
 
-# ====== 动态获取路径 ======
 get_root_home() {
     getent passwd root | cut -d: -f6
 }
@@ -23,7 +20,20 @@ get_root_home() {
 ROOT_HOME="$(get_root_home)"
 SSHD_CONFIG="/etc/ssh/sshd_config"
 
-# ====== 通用函数 ======
+get_sshd_effective_option() {
+    local option="$1"
+    local key value
+    key=$(printf '%s' "$option" | tr '[:upper:]' '[:lower:]')
+
+    if ! command -v sshd >/dev/null 2>&1; then
+        return 1
+    fi
+
+    value=$(sshd -T -f "$SSHD_CONFIG" 2>/dev/null | awk -v key="$key" '$1 == key {print $2; exit}')
+    [[ -n "$value" ]] || return 1
+    echo "$value"
+}
+
 press_any_key_to_continue() {
     if [ -t 0 ]; then
         local msg="${1:-按任意键返回菜单...}"
@@ -35,7 +45,6 @@ press_any_key_to_continue() {
     fi
 }
 
-# ====== SSH配置通用函数 ======
 update_sshd_option() {
     local option="$1"
     local value="$2"
@@ -55,10 +64,15 @@ get_sshd_option() {
     local option="$1"
     local default="${2:-}"
     local config_file="${3:-$SSHD_CONFIG}"
-    local line value
-    
-    if grep -Ei "^${option}[[:space:]]+(yes|no|[0-9]+)" "$config_file" >/dev/null 2>&1; then
-        line=$(grep -Ei "^${option}[[:space:]]+" "$config_file" | tail -1)
+    local line value effective
+
+    if effective=$(get_sshd_effective_option "$option"); then
+        echo "$effective"
+        return
+    fi
+
+    line=$(grep -Ei "^[[:space:]]*${option}[[:space:]]+" "$config_file" 2>/dev/null | tail -1 || true)
+    if [[ -n "$line" ]]; then
         value=$(echo "$line" | awk '{print tolower($2)}')
         echo "$value"
     else
@@ -72,15 +86,28 @@ restart_sshd_safe() {
         press_any_key_to_continue
         return 1
     fi
-    if systemctl list-unit-files sshd.service 2>/dev/null | grep -q sshd; then
-        systemctl restart sshd
+
+    if command -v systemctl >/dev/null 2>&1; then
+        if ! systemctl restart sshd 2>/dev/null && ! systemctl restart ssh 2>/dev/null; then
+            echo -e "${RED}sshd 服务重启失败,请手动检查服务状态${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
+    elif command -v service >/dev/null 2>&1; then
+        if ! service sshd restart >/dev/null 2>&1 && ! service ssh restart >/dev/null 2>&1; then
+            echo -e "${RED}sshd 服务重启失败,请手动检查服务状态${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
     else
-        systemctl restart ssh
+        echo -e "${RED}未找到 systemctl/service,无法自动重启 sshd${PLAIN}"
+        press_any_key_to_continue
+        return 1
     fi
+
     return 0
 }
 
-# ====== 包管理器通用函数 ======
 detect_pkg_manager() {
     if command -v apt &>/dev/null; then echo "apt"
     elif command -v dnf &>/dev/null; then echo "dnf"
@@ -105,6 +132,7 @@ pkg_install() {
         apk)    apk add "$pkg" ;;
         pacman) pacman -Sy --noconfirm "$pkg" ;;
         zypper) zypper --non-interactive install "$pkg" ;;
+        emerge) emerge --ask=n "$pkg" ;;
         *)      return 1 ;;
     esac
 }
@@ -120,6 +148,7 @@ pkg_update() {
         apk)    apk update && apk upgrade ;;
         pacman) pacman -Syu --noconfirm ;;
         zypper) zypper refresh && zypper update -y ;;
+        emerge) emerge --sync && emerge --ask=n --update --deep --newuse @world ;;
         *)      return 1 ;;
     esac
 }
@@ -161,7 +190,6 @@ install_wget_if_missing() {
 
 install_wget_if_missing
 
-# ====== GCP Debian 源修复 ======
 fix_gcp_debian_sources() {(
     local product_name
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
@@ -195,7 +223,7 @@ fix_gcp_debian_sources() {(
 
     echo -e "${YELLOW}检测到 GCP Debian ${VERSION_ID} (${codename}),正在配置教育网源...${PLAIN}"
 
-    local format source_file
+    local format
     if [ -f /etc/apt/sources.list.d/debian.sources ] || [ "$codename" = "trixie" ]; then
         format="deb822"
         source_file="/etc/apt/sources.list.d/debian.sources"
@@ -234,7 +262,6 @@ GCPEOF
     echo -e "${GREEN}GCP 源配置完成 (MIT + Berkeley)${PLAIN}"
 )}
 
-# ====== 系统管理 ======
 linux_update() {
     clear
     echo -e "${YELLOW}正在更新系统...${PLAIN}"
@@ -359,7 +386,6 @@ linux_clean() {
     press_any_key_to_continue
 }
 
-# ====== Swap管理 ======
 swapfile_path="/swapfile"
 
 get_recommended_swap() {
@@ -430,7 +456,7 @@ set_swap_menu() {
 
 set_swap() {
     local size_mb="$1"
-    local avail_kb avail_mb
+    local avail_kb avail_mb root_fstype
 
     echo -e "${YELLOW}正在检查环境...${PLAIN}"
     avail_kb=$(df --output=avail / | tail -1)
@@ -447,31 +473,70 @@ set_swap() {
         swapoff "$swapfile_path" 2>/dev/null || true
     fi
     rm -f "$swapfile_path"
-    
-    sed -i "\|${swapfile_path}|d" /etc/fstab
+
+    if ! sed -i "\|${swapfile_path}|d" /etc/fstab; then
+        echo -e "${RED}清理 /etc/fstab 旧 Swap 条目失败${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
 
     echo -e "${BLUE}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
 
-    local root_fstype
     root_fstype=$(df --output=fstype / | tail -1 | xargs)
 
     if [[ "$root_fstype" == "btrfs" || "$root_fstype" == "xfs" ]]; then
         echo -e "${YELLOW}检测到 ${root_fstype} 文件系统,使用 dd 创建 (请耐心等待)...${PLAIN}"
-        dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+        if ! dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress; then
+            echo -e "${RED}Swap 文件创建失败${PLAIN}"
+            rm -f "$swapfile_path"
+            press_any_key_to_continue
+            return 1
+        fi
     elif command -v fallocate >/dev/null 2>&1; then
         if ! fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
              echo -e "${YELLOW}fallocate 创建失败,尝试使用 dd 写零 (速度较慢,请耐心等待)...${PLAIN}"
-             dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+             if ! dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress; then
+                 echo -e "${RED}Swap 文件创建失败${PLAIN}"
+                 rm -f "$swapfile_path"
+                 press_any_key_to_continue
+                 return 1
+             fi
         fi
     else
-        dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress
+        if ! dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress; then
+            echo -e "${RED}Swap 文件创建失败${PLAIN}"
+            rm -f "$swapfile_path"
+            press_any_key_to_continue
+            return 1
+        fi
     fi
 
-    chmod 600 "$swapfile_path"
-    mkswap "$swapfile_path"
-    swapon "$swapfile_path"
+    if ! chmod 600 "$swapfile_path"; then
+        echo -e "${RED}设置 Swap 文件权限失败${PLAIN}"
+        rm -f "$swapfile_path"
+        press_any_key_to_continue
+        return 1
+    fi
 
-    echo "$swapfile_path none swap sw 0 0" | tee -a /etc/fstab >/dev/null
+    if ! mkswap "$swapfile_path" >/dev/null; then
+        echo -e "${RED}mkswap 失败,未启用 Swap${PLAIN}"
+        rm -f "$swapfile_path"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    if ! swapon "$swapfile_path"; then
+        echo -e "${RED}swapon 失败,未启用 Swap${PLAIN}"
+        rm -f "$swapfile_path"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    if ! echo "$swapfile_path none swap sw 0 0" >> /etc/fstab; then
+        echo -e "${YELLOW}Swap 已启用,但写入 /etc/fstab 失败,重启后不会自动挂载${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
 
     echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
@@ -516,7 +581,6 @@ set_swappiness() {
     press_any_key_to_continue
 }
 
-# ====== SSH管理 ======
 ssh_config_menu() {
     while true; do
         clear
@@ -544,7 +608,8 @@ change_ssh_port() {
     while true; do
         clear
         local current_port
-        current_port=$(grep "^Port" "$SSHD_CONFIG" 2>/dev/null | head -n 1 | awk '{print $2}')
+        current_port=$(get_sshd_option "Port" "22")
+        [[ "$current_port" =~ ^[0-9]+$ ]] || current_port=22
         echo -e "${YELLOW}当前SSH端口: ${GREEN}${current_port:-22}${PLAIN}\n"
         read -rp "$(echo -e "${BLUE}请输入新的SSH端口(输入0返回): ${PLAIN}")" new_port
         new_port=$(echo "$new_port" | xargs)
@@ -715,7 +780,6 @@ disable_ssh_login_menu() {
     esac
 }
 
-# ====== 时区管理 ======
 change_timezone() {
     if ! command -v timedatectl >/dev/null; then
         echo -e "${RED}未安装 timedatectl,无法自动设置时区${PLAIN}"
@@ -828,7 +892,6 @@ change_timezone() {
     done
 }
 
-# ====== 同仓其他脚本 ======
 run_install_script() {
     bash <(curl -sL "$1")
 }
@@ -840,7 +903,6 @@ install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emok
 install_system()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
 
-# ====== DNS配置 ======
 dns_fix() {
     local RESOLV_CONF="/etc/resolv.conf"
     local RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
@@ -938,7 +1000,7 @@ dns_fix() {
                 bad+=("$dns")
             fi
         done
-        dns_list=("${ok[@]:-}")
+        dns_list=("${ok[@]}")
 
         if [[ ${#dns_list[@]} -eq 0 ]]; then
             echo -e "${RED}未检测到有效的DNS IP（请输入IPv4/IPv6地址）${PLAIN}"
@@ -989,9 +1051,11 @@ dns_fix() {
             } > "$RESOLV_CONF" 2>/dev/null || true
         fi
 
-        for svc in nscd dnsmasq named; do
-            systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1
-        done
+        if command -v systemctl >/dev/null 2>&1; then
+            for svc in nscd dnsmasq named; do
+                systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1
+            done
+        fi
         return 0
     }
 
@@ -1046,13 +1110,11 @@ dns_fix() {
     done
 }
 
-# ====== VPS重启 ======
 reboot_vps() {
     echo "即将重启系统..."
     reboot
 }
 
-# ====== 防火墙配置 ======
 generate_firewall_awk_script() {
     cat << 'AWKSCRIPT'
 BEGIN {
@@ -1173,13 +1235,8 @@ list_firewall_rules() {
 configure_firewall() {
     get_ssh_port() {
         local port
-        if [ -f "$SSHD_CONFIG" ]; then
-            port=$(grep "^Port" "$SSHD_CONFIG" | head -n 1 | awk '{print $2}')
-        fi
-        
-        if [[ -z "$port" ]]; then
-            port=22
-        fi
+        port=$(get_sshd_option "Port" "22")
+        [[ "$port" =~ ^[0-9]+$ ]] || port=22
         echo "$port"
     }
     
@@ -1374,7 +1431,6 @@ configure_firewall() {
     done
 }
 
-# ====== IPv4/IPv6优先级 ======
 set_ip_priority() {
     local GAI_CONF="/etc/gai.conf"
     local IPV4_RULE="precedence ::ffff:0:0/96  100"
@@ -1467,6 +1523,9 @@ main_menu() {
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
         read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
+        if [[ "$choice" =~ ^[0-9]+$ ]]; then
+            choice=$((10#$choice))
+        fi
         case "$choice" in
             1)  linux_update ;;
             2)  linux_clean ;;
