@@ -308,8 +308,14 @@ installnet_main() {
           [[ "$isDigital" == '9' ]] && DIST='stretch';
           [[ "$isDigital" == '10' ]] && DIST='buster';
           [[ "$isDigital" == '11' ]] && DIST='bullseye';
+          [[ "$isDigital" == '12' ]] && DIST='bookworm';
+          [[ "$isDigital" == '13' ]] && DIST='trixie';
         }
       }
+      if [[ "$DIST" == 'trixie' ]] && [[ "$VER" == 'i386' ]]; then
+        echo -ne '\nError! Debian 13 (trixie) no longer provides a regular i386 installer. Please use 64-bit (amd64).\n\n'
+        exit 1;
+      fi
       LinuxMirror=$(selectMirror "$Relese" "$DIST" "$VER" "$tmpMirror")
     fi
     if [[ "$Relese" == 'Ubuntu' ]]; then
@@ -703,7 +709,8 @@ EOF
   fi
 }
 
-reinstall_debian11() {
+reinstall_debian() {
+    local debian_version="$1"
     read -r -s -p " 请设置 root 密码: " pw
     echo
     if [[ -z "$pw" ]]; then
@@ -717,8 +724,20 @@ reinstall_debian11() {
         return
     fi
 
-    echo -e "${Tip} 将使用 Debian 11 执行重装。"
-    installnet_main -d 11 -v 64 -a -p "${pw}"
+    echo -e "${Tip} 将使用 Debian ${debian_version} 执行重装。"
+    installnet_main -d "${debian_version}" -v 64 -a -p "${pw}"
+}
+
+reinstall_debian11() {
+    reinstall_debian 11
+}
+
+reinstall_debian12() {
+    reinstall_debian 12
+}
+
+reinstall_debian13() {
+    reinstall_debian 13
 }
 
 # ====== 主菜单输出 ======
@@ -728,6 +747,8 @@ start_menu() {
     echo
     echo -e "————————————重装系统————————————"
     echo -e " ${Green_font_prefix}1.${Font_color_suffix} 重装 Debian 11"
+    echo -e " ${Green_font_prefix}2.${Font_color_suffix} 重装 Debian 12"
+    echo -e " ${Green_font_prefix}3.${Font_color_suffix} 重装 Debian 13"
     echo -e " ${Green_font_prefix}0.${Font_color_suffix} 退出脚本"
     echo
 }
@@ -736,17 +757,19 @@ start_menu() {
 main_loop() {
     while true; do
         start_menu
-        read -p " 请输入数字 [0-1]: " num
+        read -p " 请输入数字 [0-3]: " num
         num=$(echo "$num" | grep -oE '^[0-9]+$')
         case "$num" in
             1) reinstall_debian11 ;;
+            2) reinstall_debian12 ;;
+            3) reinstall_debian13 ;;
             0)
                 echo -e "${Info} 脚本已退出。"
                 break
                 ;;
             *)
                 clear
-                echo -e "${Error}:请输入正确数字 [0-1]"
+                echo -e "${Error}:请输入正确数字 [0-3]"
                 sleep 2s
                 ;;
         esac
