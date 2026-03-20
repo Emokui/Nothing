@@ -1,6 +1,7 @@
 #!name= 𝗦𝗽𝗼𝘁𝗶𝗳𝘆
 #!desc= 𝗨𝗻𝗹𝗼𝗰𝗸 𝗣𝗿𝗲𝗺𝗶𝘂𝗺
 
+[Header Rewrite]
 http-request ^https:\/\/(spclient\.wg\.spotify\.com|.*-spclient\.spotify\.com(:443)?)\/user-customization-service\/v1\/customize$ header-del if-none-match
 
 [MITM]
