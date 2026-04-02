@@ -6,6 +6,7 @@ DOMAIN-SUFFIX,bitgetapp.com
 DOMAIN-SUFFIX,bitgetapps.com
 DOMAIN-SUFFIX,abcdstable.com
 # N26
+DOMAIN-KEYWORD,n26
 DOMAIN-SUFFIX,n26.com
 DOMAIN-SUFFIX,tech26.de
 DOMAIN,cdn.number26.de
