@@ -5,6 +5,13 @@ DOMAIN-SUFFIX,bitgetimg.com
 DOMAIN-SUFFIX,bitgetapp.com
 DOMAIN-SUFFIX,bitgetapps.com
 DOMAIN-SUFFIX,abcdstable.com
+# LemFi
+DOMAIN-SUFFIX,branch.io
+DOMAIN,cdp-eu.customer.io
+DOMAIN-SUFFIX,de.sentry.io
+DOMAIN-SUFFIX,lemonade.finance
+DOMAIN,consumer.inapp.customer.io
+DOMAIN,mobile-collector.newrelic.com
 # Krak
 DOMAIN,u.expo.dev
 DOMAIN-SUFFIX,kraken.com
