@@ -43,11 +43,12 @@ DOMAIN-SUFFIX,bsc.getblock.io
 DOMAIN-SUFFIX,bscscan.com
 DOMAIN-SUFFIX,bnappweb.academy
 # Bitget
+DOMAIN-SUFFIX,bitget.fit
 DOMAIN-SUFFIX,bitget.com
+DOMAIN-SUFFIX,bitgetimg.com
 DOMAIN-SUFFIX,bitgetapp.com
 DOMAIN-SUFFIX,bitgetapps.com
-DOMAIN-SUFFIX,bitgetimg.com
-DOMAIN-SUFFIX,bitget.fit
+DOMAIN-SUFFIX,abcdstable.com
 # Bybit
 DOMAIN,bybit-exchange.github.io
 DOMAIN,bybit.ada.support
