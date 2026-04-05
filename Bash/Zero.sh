@@ -190,6 +190,26 @@ install_wget_if_missing() {
 
 install_wget_if_missing
 
+enable_bbr_if_needed() {
+    local current_cc
+    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    if [[ "$current_cc" == "bbr" ]]; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}正在开启 BBR 拥塞控制...${PLAIN}"
+    sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1
+    sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1
+
+    grep -qxF 'net.core.default_qdisc=fq' /etc/sysctl.conf || echo 'net.core.default_qdisc=fq' >> /etc/sysctl.conf
+    grep -qxF 'net.ipv4.tcp_congestion_control=bbr' /etc/sysctl.conf || echo 'net.ipv4.tcp_congestion_control=bbr' >> /etc/sysctl.conf
+
+    sysctl -p >/dev/null 2>&1
+    echo -e "${GREEN}✓ BBR 已开启${PLAIN}"
+}
+
+enable_bbr_if_needed
+
 fix_gcp_debian_sources() {(
     local product_name
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
@@ -901,6 +921,7 @@ install_snell()     { run_install_script "https://raw.githubusercontent.com/Emok
 install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh"; }
 install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/hysteria.sh"; }
 install_system()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
+install_shoes()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/shoes.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
 
 dns_fix() {
@@ -1516,10 +1537,11 @@ main_menu() {
         echo -e "${GREEN}  09.${PLAIN}配置SWAP"
         echo -e "${GREEN}  10.${PLAIN}配置ACME"
         echo -e "${GREEN}  11.${PLAIN}配置Snell"
-        echo -e "${GREEN}  12.${PLAIN}配置Mihomo"
-        echo -e "${GREEN}  13.${PLAIN}配置Hysteria"
-        echo -e "${GREEN}  14.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  15.${PLAIN}配置WarpStack"
+        echo -e "${GREEN}  12.${PLAIN}配置Shoes"
+        echo -e "${GREEN}  13.${PLAIN}配置Mihomo"
+        echo -e "${GREEN}  14.${PLAIN}配置Hysteria"
+        echo -e "${GREEN}  15.${PLAIN}配置FireWall"
+        echo -e "${GREEN}  16.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
         read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -1538,10 +1560,11 @@ main_menu() {
             9)  set_swap_menu ;;
             10) install_acme ;;
             11) install_snell ;;
-            12) install_mihomo ;;
-            13) install_hysteria ;;
-            14) configure_firewall ;;
-            15) install_warp ;;
+            12) install_shoes ;;
+            13) install_mihomo ;;
+            14) install_hysteria ;;
+            15) configure_firewall ;;
+            16) install_warp ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
