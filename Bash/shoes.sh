@@ -12,7 +12,6 @@ PLAIN="\033[0m"
 EXEC_PATH="/usr/local/bin/shoes"
 CONFIG_DIR="/etc/shoes"
 CONFIG_PATH="${CONFIG_DIR}/config.yaml"
-STATE_PATH="${CONFIG_DIR}/deploy.env"
 SERVICE_NAME="shoes"
 SERVICE_FILE="/etc/systemd/system/shoes.service"
 RELEASE_REPO="sukurain/shoes"
@@ -33,6 +32,7 @@ check_supported_os() {
         exit 1
     fi
 
+    # shellcheck disable=SC1091
     source /etc/os-release
     os_id="${ID:-}"
     os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
@@ -96,7 +96,7 @@ print_err() {
 require_commands() {
     local missing=()
     local cmd
-    for cmd in curl tar systemctl ldd; do
+    for cmd in curl tar systemctl; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
@@ -109,8 +109,6 @@ require_commands() {
 }
 
 load_defaults() {
-    INSTALLED_VERSION=""
-
     ENABLE_SS="n"
     SS_ADDRESS="[::]:8388"
     SS_CIPHER="aes-256-gcm"
@@ -118,8 +116,7 @@ load_defaults() {
     SS_UDP_ENABLED="true"
 
     ENABLE_TROJAN="n"
-    TROJAN_ADDRESS="[::]:4443"
-    TROJAN_SNI=""
+    TROJAN_ADDRESS="[::]:10819"
     TROJAN_WS_PATH="/"
     TROJAN_PASSWORD=""
     TROJAN_CERT=""
@@ -141,77 +138,79 @@ load_defaults() {
 
     ENABLE_ANYTLS="n"
     ANYTLS_ADDRESS="[::]:443"
-    ANYTLS_SNI=""
-    ANYTLS_USERNAME="user1"
     ANYTLS_PASSWORD=""
     ANYTLS_CERT=""
     ANYTLS_KEY=""
     ANYTLS_UDP_ENABLED="true"
 }
 
-load_state() {
+extract_protocol_block() {
+    local protocol_type="$1"
+    [[ -f "$CONFIG_PATH" ]] || return 0
+    awk -v RS='' -v protocol_type="$protocol_type" '
+        $0 ~ ("type:[[:space:]]*" protocol_type "([[:space:]]|$)") { print; exit }
+    ' "$CONFIG_PATH"
+}
+
+extract_scalar_from_block() {
+    local block="$1"
+    local field="$2"
+    printf '%s\n' "$block" | sed -nE "s/^[[:space:]-]*${field}:[[:space:]]*\"?([^\"]*)\"?$/\1/p" | head -n1
+}
+
+load_current_config() {
+    local block
+
     load_defaults
-    if [[ -f "$STATE_PATH" ]]; then
-        # shellcheck disable=SC1090
-        source "$STATE_PATH"
+
+    block="$(extract_protocol_block "shadowsocks")"
+    if [[ -n "$block" ]]; then
+        ENABLE_SS="y"
+        SS_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        SS_CIPHER="$(extract_scalar_from_block "$block" "cipher")"
+        SS_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        SS_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
     fi
 
-    if [[ -z "$TROJAN_SNI" && -n "$TROJAN_CERT" ]]; then
-        TROJAN_SNI="$(derive_name_from_cert_path "$TROJAN_CERT")"
+    block="$(extract_protocol_block "trojan")"
+    if [[ -n "$block" ]]; then
+        ENABLE_TROJAN="y"
+        TROJAN_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        TROJAN_WS_PATH="$(extract_scalar_from_block "$block" "matching_path")"
+        TROJAN_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        TROJAN_CERT="$(extract_scalar_from_block "$block" "cert")"
+        TROJAN_KEY="$(extract_scalar_from_block "$block" "key")"
     fi
 
-    if [[ -z "$ANYTLS_SNI" && -n "$ANYTLS_CERT" ]]; then
-        ANYTLS_SNI="$(derive_name_from_cert_path "$ANYTLS_CERT")"
+    block="$(extract_protocol_block "hysteria2")"
+    if [[ -n "$block" ]]; then
+        ENABLE_HY2="y"
+        HY2_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        HY2_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        HY2_CERT="$(extract_scalar_from_block "$block" "cert")"
+        HY2_KEY="$(extract_scalar_from_block "$block" "key")"
+        HY2_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
     fi
-}
 
-save_kv() {
-    local name="$1"
-    local value="$2"
-    printf '%s=%q\n' "$name" "$value" >> "$STATE_PATH"
-}
+    block="$(extract_protocol_block "tuic")"
+    if [[ -n "$block" ]]; then
+        ENABLE_TUIC="y"
+        TUIC_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        TUIC_UUID="$(extract_scalar_from_block "$block" "uuid")"
+        TUIC_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        TUIC_CERT="$(extract_scalar_from_block "$block" "cert")"
+        TUIC_KEY="$(extract_scalar_from_block "$block" "key")"
+    fi
 
-save_state() {
-    mkdir -p "$CONFIG_DIR"
-    : > "$STATE_PATH"
-
-    save_kv "ENABLE_SS" "$ENABLE_SS"
-    save_kv "INSTALLED_VERSION" "$INSTALLED_VERSION"
-    save_kv "SS_ADDRESS" "$SS_ADDRESS"
-    save_kv "SS_CIPHER" "$SS_CIPHER"
-    save_kv "SS_PASSWORD" "$SS_PASSWORD"
-    save_kv "SS_UDP_ENABLED" "$SS_UDP_ENABLED"
-
-    save_kv "ENABLE_TROJAN" "$ENABLE_TROJAN"
-    save_kv "TROJAN_ADDRESS" "$TROJAN_ADDRESS"
-    save_kv "TROJAN_SNI" "$TROJAN_SNI"
-    save_kv "TROJAN_WS_PATH" "$TROJAN_WS_PATH"
-    save_kv "TROJAN_PASSWORD" "$TROJAN_PASSWORD"
-    save_kv "TROJAN_CERT" "$TROJAN_CERT"
-    save_kv "TROJAN_KEY" "$TROJAN_KEY"
-
-    save_kv "ENABLE_HY2" "$ENABLE_HY2"
-    save_kv "HY2_ADDRESS" "$HY2_ADDRESS"
-    save_kv "HY2_PASSWORD" "$HY2_PASSWORD"
-    save_kv "HY2_CERT" "$HY2_CERT"
-    save_kv "HY2_KEY" "$HY2_KEY"
-    save_kv "HY2_UDP_ENABLED" "$HY2_UDP_ENABLED"
-
-    save_kv "ENABLE_TUIC" "$ENABLE_TUIC"
-    save_kv "TUIC_ADDRESS" "$TUIC_ADDRESS"
-    save_kv "TUIC_UUID" "$TUIC_UUID"
-    save_kv "TUIC_PASSWORD" "$TUIC_PASSWORD"
-    save_kv "TUIC_CERT" "$TUIC_CERT"
-    save_kv "TUIC_KEY" "$TUIC_KEY"
-
-    save_kv "ENABLE_ANYTLS" "$ENABLE_ANYTLS"
-    save_kv "ANYTLS_ADDRESS" "$ANYTLS_ADDRESS"
-    save_kv "ANYTLS_SNI" "$ANYTLS_SNI"
-    save_kv "ANYTLS_USERNAME" "$ANYTLS_USERNAME"
-    save_kv "ANYTLS_PASSWORD" "$ANYTLS_PASSWORD"
-    save_kv "ANYTLS_CERT" "$ANYTLS_CERT"
-    save_kv "ANYTLS_KEY" "$ANYTLS_KEY"
-    save_kv "ANYTLS_UDP_ENABLED" "$ANYTLS_UDP_ENABLED"
+    block="$(extract_protocol_block "anytls")"
+    if [[ -n "$block" ]]; then
+        ENABLE_ANYTLS="y"
+        ANYTLS_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        ANYTLS_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        ANYTLS_CERT="$(extract_scalar_from_block "$block" "cert")"
+        ANYTLS_KEY="$(extract_scalar_from_block "$block" "key")"
+        ANYTLS_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
+    fi
 }
 
 read_value() {
@@ -409,7 +408,6 @@ configure_trojan() {
     select_cert "$TROJAN_CERT" "$TROJAN_KEY"
     TROJAN_CERT="$cert_path"
     TROJAN_KEY="$key_path"
-    TROJAN_SNI="$(derive_name_from_cert_path "$TROJAN_CERT")"
 }
 
 configure_hysteria2() {
@@ -456,12 +454,10 @@ configure_anytls() {
         ANYTLS_PASSWORD="$(random_pass)"
         print_ok "密码: ${ANYTLS_PASSWORD}"
     fi
-    ANYTLS_USERNAME="${ANYTLS_USERNAME:-user1}"
     ANYTLS_UDP_ENABLED="true"
     select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
     ANYTLS_CERT="$cert_path"
     ANYTLS_KEY="$key_path"
-    ANYTLS_SNI="$(derive_name_from_cert_path "$ANYTLS_CERT")"
     print_ok "UDP: 已默认开启"
 }
 
@@ -554,12 +550,14 @@ EOF
 
 append_trojan() {
     local out="$1"
+    local trojan_sni
+    trojan_sni="$(derive_name_from_cert_path "$TROJAN_CERT")"
     cat >> "$out" <<EOF
 - address: $(yaml_quote "$TROJAN_ADDRESS")
   protocol:
     type: tls
     tls_targets:
-      $(yaml_quote "$TROJAN_SNI"):
+      $(yaml_quote "$trojan_sni"):
         cert: $(yaml_quote "$TROJAN_CERT")
         key: $(yaml_quote "$TROJAN_KEY")
         protocol:
@@ -611,18 +609,20 @@ EOF
 
 append_anytls() {
     local out="$1"
+    local anytls_sni
+    anytls_sni="$(derive_name_from_cert_path "$ANYTLS_CERT")"
     cat >> "$out" <<EOF
 - address: $(yaml_quote "$ANYTLS_ADDRESS")
   protocol:
     type: tls
     tls_targets:
-      $(yaml_quote "$ANYTLS_SNI"):
+      $(yaml_quote "$anytls_sni"):
         cert: $(yaml_quote "$ANYTLS_CERT")
         key: $(yaml_quote "$ANYTLS_KEY")
         protocol:
           type: anytls
           users:
-            - name: $(yaml_quote "$ANYTLS_USERNAME")
+            - name: "user1"
               password: $(yaml_quote "$ANYTLS_PASSWORD")
           udp_enabled: ${ANYTLS_UDP_ENABLED}
           padding_scheme:
@@ -738,6 +738,9 @@ apply_configuration() {
 }
 
 show_summary() {
+    local trojan_sni anytls_sni
+    trojan_sni="$(derive_name_from_cert_path "$TROJAN_CERT")"
+    anytls_sni="$(derive_name_from_cert_path "$ANYTLS_CERT")"
     clear
     echo -e "${BLUE}部署信息${PLAIN}"
 
@@ -746,7 +749,7 @@ show_summary() {
     fi
 
     if [[ "$ENABLE_TROJAN" == "y" ]]; then
-        echo -e "${GREEN}Trojan+WS${PLAIN}   地址: ${TROJAN_ADDRESS}  SNI: ${TROJAN_SNI}  Path: ${TROJAN_WS_PATH}  密码: ${TROJAN_PASSWORD}"
+        echo -e "${GREEN}Trojan+WS${PLAIN}   地址: ${TROJAN_ADDRESS}  SNI: ${trojan_sni}  Path: ${TROJAN_WS_PATH}  密码: ${TROJAN_PASSWORD}"
     fi
 
     if [[ "$ENABLE_HY2" == "y" ]]; then
@@ -758,30 +761,12 @@ show_summary() {
     fi
 
     if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-        echo -e "${GREEN}AnyTLS${PLAIN}     地址: ${ANYTLS_ADDRESS}  SNI: ${ANYTLS_SNI}  用户: ${ANYTLS_USERNAME}  密码: ${ANYTLS_PASSWORD}"
+        echo -e "${GREEN}AnyTLS${PLAIN}     地址: ${ANYTLS_ADDRESS}  SNI: ${anytls_sni}  密码: ${ANYTLS_PASSWORD}"
     fi
 
     echo
     systemctl --no-pager --full status "$SERVICE_NAME" || true
     pause_and_return
-}
-
-get_arch_target() {
-    case "$(uname -m)" in
-        x86_64|amd64) echo "x86_64" ;;
-        aarch64|arm64) echo "aarch64" ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-get_libc_target() {
-    if ldd --version 2>&1 | grep -qi musl; then
-        echo "unknown-linux-musl"
-    else
-        echo "unknown-linux-gnu"
-    fi
 }
 
 get_release_json() {
@@ -846,25 +831,6 @@ get_current_installed_version() {
         return 0
     fi
 
-    if command -v strings >/dev/null 2>&1; then
-        output="$(strings "$EXEC_PATH" 2>/dev/null | grep -E '^shoes v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?$' | head -n1 || true)"
-        if version="$(extract_version_from_text "$output")"; then
-            printf '%s\n' "$version"
-            return 0
-        fi
-    fi
-
-    output="$(grep -aEo 'shoes v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?' "$EXEC_PATH" 2>/dev/null | head -n1 || true)"
-    if version="$(extract_version_from_text "$output")"; then
-        printf '%s\n' "$version"
-        return 0
-    fi
-
-    if [[ -n "${INSTALLED_VERSION:-}" ]]; then
-        printf '%s\n' "$INSTALLED_VERSION"
-        return 0
-    fi
-
     return 1
 }
 
@@ -912,7 +878,6 @@ install_binary_from_release() {
     fi
 
     install -m 755 "$bin_path" "$EXEC_PATH"
-    INSTALLED_VERSION="$(normalize_version "$latest_tag")"
     rm -rf "$temp_dir"
     return 0
 }
@@ -921,13 +886,13 @@ install_shoes() {
     clear
     require_commands
 
-    if [[ -f "$EXEC_PATH" && -f "$STATE_PATH" ]]; then
+    if [[ -x "$EXEC_PATH" ]]; then
         print_warn "已安装，请使用管理服务功能"
         pause_and_return
         return
     fi
 
-    load_state
+    load_current_config
     mkdir -p "$CONFIG_DIR"
     if ! install_binary_from_release; then
         pause_and_return
@@ -940,7 +905,6 @@ install_shoes() {
         pause_and_return
         return
     fi
-    save_state
 
     print_ok "安装完成"
     show_summary
@@ -956,13 +920,12 @@ protocol_status() {
 
 commit_changes() {
     if apply_configuration; then
-        save_state
         print_ok "配置已更新"
         sleep 1
         return 0
     fi
 
-    load_state
+    load_current_config
     print_warn "未应用新配置，已恢复到上次有效配置"
     pause_here
     return 1
@@ -1081,8 +1044,7 @@ modify_anytls() {
                     select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
                     ANYTLS_CERT="$cert_path"
                     ANYTLS_KEY="$key_path"
-                    ANYTLS_SNI="$(derive_name_from_cert_path "$ANYTLS_CERT")"
-                    print_ok "域名/SNI 已同步为: ${ANYTLS_SNI}"
+                    print_ok "域名/SNI 已同步为: $(derive_name_from_cert_path "$ANYTLS_CERT")"
                     commit_changes
                     ;;
                 4)
@@ -1146,8 +1108,7 @@ modify_trojan() {
                     select_cert "$TROJAN_CERT" "$TROJAN_KEY"
                     TROJAN_CERT="$cert_path"
                     TROJAN_KEY="$key_path"
-                    TROJAN_SNI="$(derive_name_from_cert_path "$TROJAN_CERT")"
-                    print_ok "域名/SNI 已同步为: ${TROJAN_SNI}"
+                    print_ok "域名/SNI 已同步为: $(derive_name_from_cert_path "$TROJAN_CERT")"
                     commit_changes
                     ;;
                 5)
@@ -1287,7 +1248,7 @@ modify_hysteria() {
 }
 
 modify_config() {
-    load_state
+    load_current_config
 
     while true; do
         clear
@@ -1314,7 +1275,7 @@ modify_config() {
 
 manage_service() {
     while true; do
-        load_state
+        load_current_config
         clear
         echo -e "${BLUE}✦ Shoes_Menu ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}查看服务"
@@ -1352,11 +1313,11 @@ manage_service() {
 }
 
 update_shoes() {
-    local current_version latest_tag latest_version release_json
+    local current_version latest_tag latest_version release_json backup_path
 
     clear
     require_commands
-    load_state
+    load_current_config
 
     if [[ ! -x "$EXEC_PATH" ]]; then
         print_err "未安装 shoes"
@@ -1388,16 +1349,36 @@ update_shoes() {
         return
     fi
 
+    backup_path="$(mktemp "${TMPDIR:-/tmp}/shoes-backup.XXXXXX")" || {
+        print_err "创建旧版本备份失败"
+        pause_and_return
+        return
+    }
+    if ! cp -f "$EXEC_PATH" "$backup_path"; then
+        rm -f "$backup_path"
+        print_err "备份当前 shoes 内核失败"
+        pause_and_return
+        return
+    fi
+
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     if install_binary_from_release; then
         if systemctl start "$SERVICE_NAME"; then
-            save_state
+            rm -f "$backup_path"
             print_ok "更新完成"
         else
-            print_err "更新后启动失败"
-            systemctl --no-pager --full status "$SERVICE_NAME" || true
+            print_err "更新后启动失败，正在回滚旧版本"
+            if install -m 755 "$backup_path" "$EXEC_PATH" && systemctl start "$SERVICE_NAME"; then
+                print_warn "已回滚到旧版本"
+            else
+                print_err "回滚失败"
+                systemctl --no-pager --full status "$SERVICE_NAME" || true
+            fi
+            rm -f "$backup_path"
         fi
     else
+        install -m 755 "$backup_path" "$EXEC_PATH" >/dev/null 2>&1 || true
+        rm -f "$backup_path"
         systemctl start "$SERVICE_NAME" 2>/dev/null || true
         print_err "更新失败"
     fi
