@@ -17,6 +17,7 @@ SERVICE_NAME="shoes"
 SERVICE_FILE="/etc/systemd/system/shoes.service"
 RELEASE_REPO="sukurain/shoes"
 LATEST_API_URL="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
+RELEASE_ASSET_NAME="shoes-bbr.tar.gz"
 
 if [[ ${EUID} -ne 0 ]]; then
     echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
@@ -849,13 +850,13 @@ get_current_installed_version() {
 }
 
 install_binary_from_release() {
-    local arch_target libc_target asset_name release_json download_url temp_dir bin_path latest_tag
-    arch_target="$(get_arch_target)" || {
-        print_err "当前架构 $(uname -m) 没有预编译 shoes 二进制"
+    local asset_name release_json download_url temp_dir bin_path latest_tag
+
+    if [[ "$(uname -m)" != "x86_64" && "$(uname -m)" != "amd64" ]]; then
+        print_err "当前架构 $(uname -m) 不支持此预编译 shoes 二进制"
         return 1
-    }
-    libc_target="$(get_libc_target)"
-    asset_name="shoes-${arch_target}-${libc_target}.tar.gz"
+    fi
+    asset_name="$RELEASE_ASSET_NAME"
 
     print_info "[*] 获取 shoes 最新版本..."
     release_json="$(get_release_json)" || {
