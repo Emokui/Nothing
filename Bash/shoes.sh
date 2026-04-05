@@ -33,7 +33,6 @@ check_supported_os() {
         exit 1
     fi
 
-    # shellcheck disable=SC1091
     source /etc/os-release
     os_id="${ID:-}"
     os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
