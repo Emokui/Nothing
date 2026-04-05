@@ -116,7 +116,7 @@ load_defaults() {
     SS_UDP_ENABLED="true"
 
     ENABLE_TROJAN="n"
-    TROJAN_ADDRESS="[::]:10819"
+    TROJAN_ADDRESS="[::]:4443"
     TROJAN_WS_PATH="/"
     TROJAN_PASSWORD=""
     TROJAN_CERT=""
@@ -783,7 +783,7 @@ select_release_asset_name() {
         version_id="${VERSION_ID:-}"
         major_version="${version_id%%.*}"
 
-        if [[ "$os_id" == "debian" && "$major_version" =~ ^[0-9]+$ && "$major_version" -le 11 ]]; then
+        if [[ "$os_id" == "debian" && "$major_version" =~ ^[0-9]+$ && "$major_version" -le 13 ]]; then
             printf '%s\n' "$RELEASE_ASSET_NAME_MUSL"
             return 0
         fi
