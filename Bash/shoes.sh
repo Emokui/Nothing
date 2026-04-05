@@ -70,7 +70,7 @@ print_err() {
 require_commands() {
     local missing=()
     local cmd
-    for cmd in curl tar systemctl; do
+    for cmd in curl tar systemctl ldd; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
@@ -90,9 +90,9 @@ load_defaults() {
     SS_UDP_ENABLED="true"
 
     ENABLE_TROJAN="n"
-    TROJAN_ADDRESS="[::]:443"
+    TROJAN_ADDRESS="[::]:4443"
     TROJAN_SNI=""
-    TROJAN_WS_PATH="/trojan"
+    TROJAN_WS_PATH="/"
     TROJAN_PASSWORD=""
     TROJAN_CERT=""
     TROJAN_KEY=""
@@ -105,7 +105,7 @@ load_defaults() {
     HY2_UDP_ENABLED="true"
 
     ENABLE_TUIC="n"
-    TUIC_ADDRESS="[::]:5000-6000"
+    TUIC_ADDRESS="[::]:9443"
     TUIC_UUID=""
     TUIC_PASSWORD=""
     TUIC_CERT=""
@@ -113,7 +113,7 @@ load_defaults() {
     TUIC_ZERO_RTT="false"
 
     ENABLE_ANYTLS="n"
-    ANYTLS_ADDRESS="[::]:9443"
+    ANYTLS_ADDRESS="[::]:443"
     ANYTLS_SNI=""
     ANYTLS_USERNAME="user1"
     ANYTLS_PASSWORD=""
@@ -342,7 +342,6 @@ derive_name_from_cert_path() {
 configure_shadowsocks() {
     clear
     echo -e "${BLUE}===== Shadowsocks 配置 =====${PLAIN}"
-    echo -e "${YELLOW}监听地址可填完整地址，也可只填端口/范围/多端口，例如: 8388 或 5000-6000 或 8388,9388${PLAIN}"
     read_address_value "SS_ADDRESS" "监听地址(默认:${SS_ADDRESS}): " "$SS_ADDRESS"
     read_value "SS_CIPHER" "加密方式(默认:${SS_CIPHER}): " "$SS_CIPHER"
     read_value "SS_PASSWORD" "密码(回车随机): " "$SS_PASSWORD"
@@ -357,7 +356,6 @@ configure_shadowsocks() {
 configure_trojan() {
     clear
     echo -e "${BLUE}===== Trojan over WebSocket 配置 =====${PLAIN}"
-    echo -e "${YELLOW}监听地址可填完整地址，也可只填端口，例如: 443${PLAIN}"
     read_address_value "TROJAN_ADDRESS" "监听地址(默认:${TROJAN_ADDRESS}): " "$TROJAN_ADDRESS"
     read_value "TROJAN_WS_PATH" "WebSocket 路径(默认:${TROJAN_WS_PATH}): " "$TROJAN_WS_PATH"
     read_value "TROJAN_PASSWORD" "密码(回车随机): " "$TROJAN_PASSWORD"
@@ -375,7 +373,6 @@ configure_trojan() {
 configure_hysteria2() {
     clear
     echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
-    echo -e "${YELLOW}监听地址可填完整地址，也可只填端口，例如: 8443${PLAIN}"
     read_address_value "HY2_ADDRESS" "监听地址(默认:${HY2_ADDRESS}): " "$HY2_ADDRESS"
     read_value "HY2_PASSWORD" "密码(回车随机): " "$HY2_PASSWORD"
     if [[ -z "$HY2_PASSWORD" ]]; then
@@ -392,7 +389,6 @@ configure_hysteria2() {
 configure_tuic() {
     clear
     echo -e "${BLUE}===== TUIC v5 配置 =====${PLAIN}"
-    echo -e "${YELLOW}地址支持单端口/范围/多端口，例如: 28443 或 5000-6000 或 443,8443,5000-6000${PLAIN}"
     read_address_value "TUIC_ADDRESS" "监听地址(默认:${TUIC_ADDRESS}): " "$TUIC_ADDRESS"
     read_value "TUIC_UUID" "UUID(回车随机): " "$TUIC_UUID"
     if [[ -z "$TUIC_UUID" ]]; then
@@ -417,8 +413,6 @@ configure_tuic() {
 configure_anytls() {
     clear
     echo -e "${BLUE}===== AnyTLS 配置 =====${PLAIN}"
-    echo -e "${YELLOW}将使用 shoes 示例里的 custom padding scheme${PLAIN}"
-    echo -e "${YELLOW}监听地址可填完整地址，也可只填端口，例如: 443${PLAIN}"
     read_address_value "ANYTLS_ADDRESS" "监听地址(默认:${ANYTLS_ADDRESS}): " "$ANYTLS_ADDRESS"
     read_value "ANYTLS_PASSWORD" "密码(回车随机): " "$ANYTLS_PASSWORD"
     if [[ -z "$ANYTLS_PASSWORD" ]]; then
@@ -678,9 +672,19 @@ apply_configuration() {
 
     mv "$tmp_config" "$CONFIG_PATH"
     create_systemd_service
-    systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
-    systemctl restart "$SERVICE_NAME"
+    if ! systemctl daemon-reload; then
+        print_err "systemd daemon-reload 失败"
+        return 1
+    fi
+    if ! systemctl enable "$SERVICE_NAME" >/dev/null 2>&1; then
+        print_err "启用 shoes 服务失败"
+        return 1
+    fi
+    if ! systemctl restart "$SERVICE_NAME"; then
+        print_err "重启 shoes 服务失败"
+        systemctl --no-pager --full status "$SERVICE_NAME" || true
+        return 1
+    fi
     return 0
 }
 
@@ -882,10 +886,10 @@ modify_shadowsocks() {
         echo -e "${BLUE}✦ Shadowsocks_Conf ✦${PLAIN}"
 
         if [[ "$ENABLE_SS" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改监听地址"
-            echo -e "${GREEN}  2.${PLAIN}修改加密方式"
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改加密"
             echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}切换 UDP"
+            echo -e "${GREEN}  4.${PLAIN}切换UDP"
             echo -e "${GREEN}  5.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
@@ -941,12 +945,12 @@ modify_anytls() {
         echo -e "${BLUE}✦ AnyTLS_Conf ✦${PLAIN}"
 
         if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改监听地址"
-            echo -e "${GREEN}  2.${PLAIN}修改域名/SNI"
-            echo -e "${GREEN}  3.${PLAIN}修改用户名"
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改域名"
+            echo -e "${GREEN}  3.${PLAIN}修改用户"
             echo -e "${GREEN}  4.${PLAIN}修改密码"
             echo -e "${GREEN}  5.${PLAIN}修改证书"
-            echo -e "${GREEN}  6.${PLAIN}切换 UDP"
+            echo -e "${GREEN}  6.${PLAIN}切换UDP"
             echo -e "${GREEN}  7.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
@@ -1014,9 +1018,9 @@ modify_trojan() {
         echo -e "${BLUE}✦ Trojan_Conf ✦${PLAIN}"
 
         if [[ "$ENABLE_TROJAN" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改监听地址"
-            echo -e "${GREEN}  2.${PLAIN}修改域名/SNI"
-            echo -e "${GREEN}  3.${PLAIN}修改 WS 路径"
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改域名"
+            echo -e "${GREEN}  3.${PLAIN}修改路径"
             echo -e "${GREEN}  4.${PLAIN}修改密码"
             echo -e "${GREEN}  5.${PLAIN}修改证书"
             echo -e "${GREEN}  6.${PLAIN}禁用服务"
@@ -1078,11 +1082,11 @@ modify_tuic() {
         echo -e "${BLUE}✦ TUIC_Conf ✦${PLAIN}"
 
         if [[ "$ENABLE_TUIC" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改监听地址"
-            echo -e "${GREEN}  2.${PLAIN}修改 UUID"
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改UUID"
             echo -e "${GREEN}  3.${PLAIN}修改密码"
             echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}切换 0-RTT"
+            echo -e "${GREEN}  5.${PLAIN}切换0-RTT"
             echo -e "${GREEN}  6.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
@@ -1144,10 +1148,10 @@ modify_hysteria() {
         echo -e "${BLUE}✦ Hysteria2_Conf ✦${PLAIN}"
 
         if [[ "$ENABLE_HY2" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改监听地址"
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
             echo -e "${GREEN}  2.${PLAIN}修改密码"
             echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}切换 UDP"
+            echo -e "${GREEN}  4.${PLAIN}切换UDP"
             echo -e "${GREEN}  5.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
