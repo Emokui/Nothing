@@ -112,7 +112,6 @@ load_defaults() {
     TUIC_PASSWORD=""
     TUIC_CERT=""
     TUIC_KEY=""
-    TUIC_ZERO_RTT="false"
 
     ENABLE_ANYTLS="n"
     ANYTLS_ADDRESS="[::]:443"
@@ -178,7 +177,6 @@ save_state() {
     save_kv "TUIC_PASSWORD" "$TUIC_PASSWORD"
     save_kv "TUIC_CERT" "$TUIC_CERT"
     save_kv "TUIC_KEY" "$TUIC_KEY"
-    save_kv "TUIC_ZERO_RTT" "$TUIC_ZERO_RTT"
 
     save_kv "ENABLE_ANYTLS" "$ENABLE_ANYTLS"
     save_kv "ANYTLS_ADDRESS" "$ANYTLS_ADDRESS"
@@ -287,14 +285,6 @@ ask_yes_no() {
             *) print_warn "请输入 y 或 n" ;;
         esac
     done
-}
-
-bool_to_yn() {
-    if [[ "$1" == "true" ]]; then
-        echo "y"
-    else
-        echo "n"
-    fi
 }
 
 select_cert() {
@@ -425,11 +415,6 @@ configure_tuic() {
     if [[ -z "$TUIC_PASSWORD" ]]; then
         TUIC_PASSWORD="$(random_pass)"
         print_ok "密码: ${TUIC_PASSWORD}"
-    fi
-    if ask_yes_no "启用 0-RTT" "$(bool_to_yn "$TUIC_ZERO_RTT")"; then
-        TUIC_ZERO_RTT="true"
-    else
-        TUIC_ZERO_RTT="false"
     fi
     select_cert "$TUIC_CERT" "$TUIC_KEY"
     TUIC_CERT="$cert_path"
@@ -594,7 +579,6 @@ append_tuic() {
     type: tuic
     uuid: $(yaml_quote "$TUIC_UUID")
     password: $(yaml_quote "$TUIC_PASSWORD")
-    zero_rtt_handshake: ${TUIC_ZERO_RTT}
 
 EOF
 }
@@ -1153,8 +1137,7 @@ modify_tuic() {
             echo -e "${GREEN}  2.${PLAIN}修改UUID"
             echo -e "${GREEN}  3.${PLAIN}修改密码"
             echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}切换0-RTT"
-            echo -e "${GREEN}  6.${PLAIN}禁用服务"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
@@ -1178,14 +1161,6 @@ modify_tuic() {
                     commit_changes
                     ;;
                 5)
-                    if [[ "$TUIC_ZERO_RTT" == "true" ]]; then
-                        TUIC_ZERO_RTT="false"
-                    else
-                        TUIC_ZERO_RTT="true"
-                    fi
-                    commit_changes
-                    ;;
-                6)
                     if ask_yes_no "确定禁用 TUIC v5" "n" && disable_protocol "ENABLE_TUIC"; then
                         commit_changes
                         break
