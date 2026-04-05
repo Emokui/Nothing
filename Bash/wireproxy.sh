@@ -409,20 +409,27 @@ show_proxy_status() {
 }
 
 show_proxy_trace() {
-    local trace proxy_url curl_args=()
+    local trace attempt
     load_socks_settings
 
     [[ -f "$WIREPROXY_CONF" ]] || { warn "未找到配置文件"; return; }
 
-    proxy_url="socks5h://${SOCKS_BIND}"
-    curl_args=(--proxy "$proxy_url" --max-time 10 -s)
-    if [[ -n "$SOCKS_USER" ]]; then
-        curl_args+=(--proxy-user "${SOCKS_USER}:${SOCKS_PASS}")
+    for attempt in 1 2 3 4 5; do
+        trace="$(fetch_trace_via_proxy "socks5h" || true)"
+        [[ -n "$trace" ]] && break
+        sleep 1
+    done
+
+    if [[ -z "$trace" ]]; then
+        for attempt in 1 2 3; do
+            trace="$(fetch_trace_via_proxy "socks5" || true)"
+            [[ -n "$trace" ]] && break
+            sleep 1
+        done
     fi
 
-    trace="$(curl "${curl_args[@]}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
     if [[ -z "$trace" ]]; then
-        warn "无法通过 SOCKS 代理获取 WARP 出口信息"
+        warn "无法通过 SOCKS 代理获取 WARP 出口信息，可稍等几秒后再试一次"
         return
     fi
 
@@ -430,6 +437,22 @@ show_proxy_trace() {
     echo -e "  Loc:  ${CYAN}$(printf '%s\n' "$trace" | awk -F= '/^loc=/{print $2}')${NC}"
     echo -e "  Warp: ${YELLOW}$(printf '%s\n' "$trace" | awk -F= '/^warp=/{print $2}')${NC}"
     echo ""
+}
+
+fetch_trace_via_proxy() {
+    local scheme="$1" proxy_url
+    local curl_args=()
+    local trace=""
+
+    proxy_url="${scheme}://${SOCKS_BIND}"
+    curl_args=(--proxy "$proxy_url" --max-time 10 -s)
+    if [[ -n "$SOCKS_USER" ]]; then
+        curl_args+=(--proxy-user "${SOCKS_USER}:${SOCKS_PASS}")
+    fi
+
+    trace="$(curl "${curl_args[@]}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
+    printf '%s\n' "$trace"
 }
 
 install_free() {
@@ -689,7 +712,7 @@ show_menu() {
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  5) 查看出口    0) 退出脚本"
+    echo -e "  5) 查看出口   0) 退出脚本"
     echo ""
 }
 
