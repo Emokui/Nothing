@@ -15,12 +15,37 @@ CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 STATE_PATH="${CONFIG_DIR}/deploy.env"
 SERVICE_NAME="shoes"
 SERVICE_FILE="/etc/systemd/system/shoes.service"
-LATEST_API_URL="https://api.github.com/repos/cfal/shoes/releases/latest"
+RELEASE_REPO="sukurain/shoes"
+LATEST_API_URL="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
 
 if [[ ${EUID} -ne 0 ]]; then
     echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
     exit 1
 fi
+
+check_supported_os() {
+    local os_id os_name
+
+    if [[ ! -r /etc/os-release ]]; then
+        print_err "无法识别系统类型，仅支持 Debian 和 Ubuntu"
+        exit 1
+    fi
+
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    os_id="${ID:-}"
+    os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
+
+    case "$os_id" in
+        debian|ubuntu)
+            return 0
+            ;;
+        *)
+            print_err "当前系统为 ${os_name}，此脚本仅支持 Debian 和 Ubuntu"
+            exit 1
+            ;;
+    esac
+}
 
 pause_and_return() {
     read -rp "$(echo -e "${BLUE}按回车返回...${PLAIN}")"
@@ -1404,4 +1429,5 @@ main_menu() {
     done
 }
 
+check_supported_os
 main_menu
