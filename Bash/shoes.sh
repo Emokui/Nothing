@@ -91,7 +91,7 @@ load_defaults() {
 
     ENABLE_TROJAN="n"
     TROJAN_ADDRESS="[::]:443"
-    TROJAN_SNI="ws.example.com"
+    TROJAN_SNI=""
     TROJAN_WS_PATH="/trojan"
     TROJAN_PASSWORD=""
     TROJAN_CERT=""
@@ -114,7 +114,7 @@ load_defaults() {
 
     ENABLE_ANYTLS="n"
     ANYTLS_ADDRESS="[::]:9443"
-    ANYTLS_SNI="anytls.example.com"
+    ANYTLS_SNI=""
     ANYTLS_USERNAME="user1"
     ANYTLS_PASSWORD=""
     ANYTLS_CERT=""
@@ -127,6 +127,14 @@ load_state() {
     if [[ -f "$STATE_PATH" ]]; then
         # shellcheck disable=SC1090
         source "$STATE_PATH"
+    fi
+
+    if [[ -z "$TROJAN_SNI" && -n "$TROJAN_CERT" ]]; then
+        TROJAN_SNI="$(derive_name_from_cert_path "$TROJAN_CERT")"
+    fi
+
+    if [[ -z "$ANYTLS_SNI" && -n "$ANYTLS_CERT" ]]; then
+        ANYTLS_SNI="$(derive_name_from_cert_path "$ANYTLS_CERT")"
     fi
 }
 
@@ -966,6 +974,8 @@ modify_anytls() {
                     select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
                     ANYTLS_CERT="$cert_path"
                     ANYTLS_KEY="$key_path"
+                    ANYTLS_SNI="$(derive_name_from_cert_path "$ANYTLS_CERT")"
+                    print_ok "域名/SNI 已同步为: ${ANYTLS_SNI}"
                     commit_changes
                     ;;
                 6)
@@ -1036,6 +1046,8 @@ modify_trojan() {
                     select_cert "$TROJAN_CERT" "$TROJAN_KEY"
                     TROJAN_CERT="$cert_path"
                     TROJAN_KEY="$key_path"
+                    TROJAN_SNI="$(derive_name_from_cert_path "$TROJAN_CERT")"
+                    print_ok "域名/SNI 已同步为: ${TROJAN_SNI}"
                     commit_changes
                     ;;
                 6)
