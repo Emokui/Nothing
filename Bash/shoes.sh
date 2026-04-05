@@ -17,7 +17,8 @@ SERVICE_NAME="shoes"
 SERVICE_FILE="/etc/systemd/system/shoes.service"
 RELEASE_REPO="sukurain/shoes"
 LATEST_API_URL="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
-RELEASE_ASSET_NAME="shoes-bbr.tar.gz"
+RELEASE_ASSET_NAME_GNU="shoes-bbr.tar.gz"
+RELEASE_ASSET_NAME_MUSL="shoes-bbr-musl.tar.gz"
 
 if [[ ${EUID} -ne 0 ]]; then
     echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
@@ -788,6 +789,25 @@ get_release_json() {
     curl -fsSL "$LATEST_API_URL"
 }
 
+select_release_asset_name() {
+    local os_id version_id major_version
+
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        os_id="${ID:-}"
+        version_id="${VERSION_ID:-}"
+        major_version="${version_id%%.*}"
+
+        if [[ "$os_id" == "debian" && "$major_version" =~ ^[0-9]+$ && "$major_version" -le 11 ]]; then
+            printf '%s\n' "$RELEASE_ASSET_NAME_MUSL"
+            return 0
+        fi
+    fi
+
+    printf '%s\n' "$RELEASE_ASSET_NAME_GNU"
+}
+
 extract_tag_name() {
     awk -F '"' '/"tag_name":/ {print $4; exit}'
 }
@@ -856,7 +876,7 @@ install_binary_from_release() {
         print_err "当前架构 $(uname -m) 不支持此预编译 shoes 二进制"
         return 1
     fi
-    asset_name="$RELEASE_ASSET_NAME"
+    asset_name="$(select_release_asset_name)"
 
     print_info "[*] 获取 shoes 最新版本..."
     release_json="$(get_release_json)" || {
