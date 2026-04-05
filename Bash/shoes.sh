@@ -1283,13 +1283,21 @@ manage_service() {
             1) show_service_and_config ;;
             2) modify_config ;;
             3)
-                systemctl stop "$SERVICE_NAME"
-                print_ok "已停止"
+                if systemctl stop "$SERVICE_NAME"; then
+                    print_ok "已停止"
+                else
+                    print_err "停止失败"
+                    systemctl --no-pager --full status "$SERVICE_NAME" || true
+                fi
                 pause_and_return
                 ;;
             4)
-                systemctl restart "$SERVICE_NAME"
-                print_ok "已重启"
+                if systemctl restart "$SERVICE_NAME"; then
+                    print_ok "已重启"
+                else
+                    print_err "重启失败"
+                    systemctl --no-pager --full status "$SERVICE_NAME" || true
+                fi
                 pause_and_return
                 ;;
             0) break ;;
@@ -1337,9 +1345,13 @@ update_shoes() {
 
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     if install_binary_from_release; then
-        systemctl start "$SERVICE_NAME" 2>/dev/null || true
-        save_state
-        print_ok "更新完成"
+        if systemctl start "$SERVICE_NAME"; then
+            save_state
+            print_ok "更新完成"
+        else
+            print_err "更新后启动失败"
+            systemctl --no-pager --full status "$SERVICE_NAME" || true
+        fi
     else
         systemctl start "$SERVICE_NAME" 2>/dev/null || true
         print_err "更新失败"
