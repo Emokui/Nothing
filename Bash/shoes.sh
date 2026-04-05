@@ -83,6 +83,8 @@ require_commands() {
 }
 
 load_defaults() {
+    INSTALLED_VERSION=""
+
     ENABLE_SS="n"
     SS_ADDRESS="[::]:8388"
     SS_CIPHER="aes-256-gcm"
@@ -149,6 +151,7 @@ save_state() {
     : > "$STATE_PATH"
 
     save_kv "ENABLE_SS" "$ENABLE_SS"
+    save_kv "INSTALLED_VERSION" "$INSTALLED_VERSION"
     save_kv "SS_ADDRESS" "$SS_ADDRESS"
     save_kv "SS_CIPHER" "$SS_CIPHER"
     save_kv "SS_PASSWORD" "$SS_PASSWORD"
@@ -234,6 +237,30 @@ read_address_value() {
     read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
     input="${input:-$default_value}"
     input="$(normalize_bind_address "$input")"
+    printf -v "$__var" '%s' "$input"
+}
+
+read_password_or_random() {
+    local __var="$1"
+    local prompt="$2"
+    local input=""
+    read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
+    if [[ -z "$input" ]]; then
+        input="$(random_pass)"
+        print_ok "密码: ${input}"
+    fi
+    printf -v "$__var" '%s' "$input"
+}
+
+read_uuid_or_random() {
+    local __var="$1"
+    local prompt="$2"
+    local input=""
+    read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
+    if [[ -z "$input" ]]; then
+        input="$(random_uuid)"
+        print_ok "UUID: ${input}"
+    fi
     printf -v "$__var" '%s' "$input"
 }
 
@@ -367,7 +394,6 @@ configure_trojan() {
     TROJAN_CERT="$cert_path"
     TROJAN_KEY="$key_path"
     TROJAN_SNI="$(derive_name_from_cert_path "$TROJAN_CERT")"
-    print_ok "域名/SNI: ${TROJAN_SNI}"
 }
 
 configure_hysteria2() {
@@ -425,8 +451,6 @@ configure_anytls() {
     ANYTLS_CERT="$cert_path"
     ANYTLS_KEY="$key_path"
     ANYTLS_SNI="$(derive_name_from_cert_path "$ANYTLS_CERT")"
-    print_ok "域名/SNI: ${ANYTLS_SNI}"
-    print_ok "用户名: ${ANYTLS_USERNAME}"
     print_ok "UDP: 已默认开启"
 }
 
@@ -445,42 +469,57 @@ run_configuration_wizard() {
         clear
         echo -e "${BLUE}选择要启用的协议${PLAIN}"
 
-        if ask_yes_no "启用 Shadowsocks" "$ENABLE_SS"; then
-            ENABLE_SS="y"
-            configure_shadowsocks
-        else
-            ENABLE_SS="n"
-        fi
-
-        if ask_yes_no "启用 Trojan over WebSocket" "$ENABLE_TROJAN"; then
-            ENABLE_TROJAN="y"
-            configure_trojan
-        else
-            ENABLE_TROJAN="n"
-        fi
-
-        if ask_yes_no "启用 Hysteria2" "$ENABLE_HY2"; then
-            ENABLE_HY2="y"
-            configure_hysteria2
-        else
-            ENABLE_HY2="n"
-        fi
-
-        if ask_yes_no "启用 TUIC v5" "$ENABLE_TUIC"; then
-            ENABLE_TUIC="y"
-            configure_tuic
-        else
-            ENABLE_TUIC="n"
-        fi
-
         if ask_yes_no "启用 AnyTLS" "$ENABLE_ANYTLS"; then
             ENABLE_ANYTLS="y"
-            configure_anytls
         else
             ENABLE_ANYTLS="n"
         fi
 
+        if ask_yes_no "启用 Trojan" "$ENABLE_TROJAN"; then
+            ENABLE_TROJAN="y"
+        else
+            ENABLE_TROJAN="n"
+        fi
+
+        if ask_yes_no "启用 Tuicv5" "$ENABLE_TUIC"; then
+            ENABLE_TUIC="y"
+        else
+            ENABLE_TUIC="n"
+        fi
+
+        if ask_yes_no "启用 Hysteria" "$ENABLE_HY2"; then
+            ENABLE_HY2="y"
+        else
+            ENABLE_HY2="n"
+        fi
+
+        if ask_yes_no "启用 Shadowsocks" "$ENABLE_SS"; then
+            ENABLE_SS="y"
+        else
+            ENABLE_SS="n"
+        fi
+
         if [[ "$(protocol_count)" -gt 0 ]]; then
+            if [[ "$ENABLE_ANYTLS" == "y" ]]; then
+                configure_anytls
+            fi
+
+            if [[ "$ENABLE_TROJAN" == "y" ]]; then
+                configure_trojan
+            fi
+
+            if [[ "$ENABLE_TUIC" == "y" ]]; then
+                configure_tuic
+            fi
+
+            if [[ "$ENABLE_HY2" == "y" ]]; then
+                configure_hysteria2
+            fi
+
+            if [[ "$ENABLE_SS" == "y" ]]; then
+                configure_shadowsocks
+            fi
+
             break
         fi
 
@@ -752,8 +791,56 @@ normalize_version() {
     echo "${1#v}"
 }
 
+extract_version_from_text() {
+    local text="$1"
+    local version=""
+    version="$(printf '%s\n' "$text" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?' | head -n1)"
+    if [[ -n "$version" ]]; then
+        normalize_version "$version"
+        return 0
+    fi
+    return 1
+}
+
+get_current_installed_version() {
+    local output version
+
+    output="$("$EXEC_PATH" --version 2>&1 || true)"
+    if version="$(extract_version_from_text "$output")"; then
+        printf '%s\n' "$version"
+        return 0
+    fi
+
+    output="$("$EXEC_PATH" -V 2>&1 || true)"
+    if version="$(extract_version_from_text "$output")"; then
+        printf '%s\n' "$version"
+        return 0
+    fi
+
+    if command -v strings >/dev/null 2>&1; then
+        output="$(strings "$EXEC_PATH" 2>/dev/null | grep -E '^shoes v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?$' | head -n1 || true)"
+        if version="$(extract_version_from_text "$output")"; then
+            printf '%s\n' "$version"
+            return 0
+        fi
+    fi
+
+    output="$(grep -aEo 'shoes v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?' "$EXEC_PATH" 2>/dev/null | head -n1 || true)"
+    if version="$(extract_version_from_text "$output")"; then
+        printf '%s\n' "$version"
+        return 0
+    fi
+
+    if [[ -n "${INSTALLED_VERSION:-}" ]]; then
+        printf '%s\n' "$INSTALLED_VERSION"
+        return 0
+    fi
+
+    return 1
+}
+
 install_binary_from_release() {
-    local arch_target libc_target asset_name release_json download_url temp_dir bin_path
+    local arch_target libc_target asset_name release_json download_url temp_dir bin_path latest_tag
     arch_target="$(get_arch_target)" || {
         print_err "当前架构 $(uname -m) 没有预编译 shoes 二进制"
         return 1
@@ -766,6 +853,7 @@ install_binary_from_release() {
         print_err "获取 release 信息失败"
         return 1
     }
+    latest_tag="$(printf '%s\n' "$release_json" | extract_tag_name)"
 
     download_url="$(printf '%s\n' "$release_json" | extract_download_url "$asset_name")"
     if [[ -z "$download_url" ]]; then
@@ -795,6 +883,7 @@ install_binary_from_release() {
     fi
 
     install -m 755 "$bin_path" "$EXEC_PATH"
+    INSTALLED_VERSION="$(normalize_version "$latest_tag")"
     rm -rf "$temp_dir"
     return 0
 }
@@ -809,14 +898,13 @@ install_shoes() {
         return
     fi
 
+    load_state
     mkdir -p "$CONFIG_DIR"
     if ! install_binary_from_release; then
         pause_and_return
         return
     fi
     print_ok "shoes 内核安装完成"
-
-    load_state
     run_configuration_wizard
 
     if ! apply_configuration; then
@@ -904,10 +992,8 @@ modify_shadowsocks() {
                     commit_changes
                     ;;
                 3)
-                    read_value "SS_PASSWORD" "新密码: " "$SS_PASSWORD"
-                    if [[ -n "$SS_PASSWORD" ]]; then
-                        commit_changes
-                    fi
+                    read_password_or_random "SS_PASSWORD" "新密码(回车随机): "
+                    commit_changes
                     ;;
                 4)
                     if [[ "$SS_UDP_ENABLED" == "true" ]]; then
@@ -946,12 +1032,10 @@ modify_anytls() {
 
         if [[ "$ENABLE_ANYTLS" == "y" ]]; then
             echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改域名"
-            echo -e "${GREEN}  3.${PLAIN}修改用户"
-            echo -e "${GREEN}  4.${PLAIN}修改密码"
-            echo -e "${GREEN}  5.${PLAIN}修改证书"
-            echo -e "${GREEN}  6.${PLAIN}切换UDP"
-            echo -e "${GREEN}  7.${PLAIN}禁用服务"
+            echo -e "${GREEN}  2.${PLAIN}修改密码"
+            echo -e "${GREEN}  3.${PLAIN}修改证书"
+            echo -e "${GREEN}  4.${PLAIN}切换UDP"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
@@ -961,20 +1045,10 @@ modify_anytls() {
                     commit_changes
                     ;;
                 2)
-                    read_value "ANYTLS_SNI" "新域名/SNI(当前:${ANYTLS_SNI}): " "$ANYTLS_SNI"
+                    read_password_or_random "ANYTLS_PASSWORD" "新密码(回车随机): "
                     commit_changes
                     ;;
                 3)
-                    read_value "ANYTLS_USERNAME" "新用户名(当前:${ANYTLS_USERNAME}): " "$ANYTLS_USERNAME"
-                    commit_changes
-                    ;;
-                4)
-                    read_value "ANYTLS_PASSWORD" "新密码: " "$ANYTLS_PASSWORD"
-                    if [[ -n "$ANYTLS_PASSWORD" ]]; then
-                        commit_changes
-                    fi
-                    ;;
-                5)
                     select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
                     ANYTLS_CERT="$cert_path"
                     ANYTLS_KEY="$key_path"
@@ -982,7 +1056,7 @@ modify_anytls() {
                     print_ok "域名/SNI 已同步为: ${ANYTLS_SNI}"
                     commit_changes
                     ;;
-                6)
+                4)
                     if [[ "$ANYTLS_UDP_ENABLED" == "true" ]]; then
                         ANYTLS_UDP_ENABLED="false"
                     else
@@ -990,7 +1064,7 @@ modify_anytls() {
                     fi
                     commit_changes
                     ;;
-                7)
+                5)
                     if ask_yes_no "确定禁用 AnyTLS" "n" && disable_protocol "ENABLE_ANYTLS"; then
                         commit_changes
                         break
@@ -1019,11 +1093,10 @@ modify_trojan() {
 
         if [[ "$ENABLE_TROJAN" == "y" ]]; then
             echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改域名"
-            echo -e "${GREEN}  3.${PLAIN}修改路径"
-            echo -e "${GREEN}  4.${PLAIN}修改密码"
-            echo -e "${GREEN}  5.${PLAIN}修改证书"
-            echo -e "${GREEN}  6.${PLAIN}禁用服务"
+            echo -e "${GREEN}  2.${PLAIN}修改路径"
+            echo -e "${GREEN}  3.${PLAIN}修改密码"
+            echo -e "${GREEN}  4.${PLAIN}修改证书"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
@@ -1033,20 +1106,14 @@ modify_trojan() {
                     commit_changes
                     ;;
                 2)
-                    read_value "TROJAN_SNI" "新域名/SNI(当前:${TROJAN_SNI}): " "$TROJAN_SNI"
-                    commit_changes
-                    ;;
-                3)
                     read_value "TROJAN_WS_PATH" "新 WS 路径(当前:${TROJAN_WS_PATH}): " "$TROJAN_WS_PATH"
                     commit_changes
                     ;;
-                4)
-                    read_value "TROJAN_PASSWORD" "新密码: " "$TROJAN_PASSWORD"
-                    if [[ -n "$TROJAN_PASSWORD" ]]; then
-                        commit_changes
-                    fi
+                3)
+                    read_password_or_random "TROJAN_PASSWORD" "新密码(回车随机): "
+                    commit_changes
                     ;;
-                5)
+                4)
                     select_cert "$TROJAN_CERT" "$TROJAN_KEY"
                     TROJAN_CERT="$cert_path"
                     TROJAN_KEY="$key_path"
@@ -1054,7 +1121,7 @@ modify_trojan() {
                     print_ok "域名/SNI 已同步为: ${TROJAN_SNI}"
                     commit_changes
                     ;;
-                6)
+                5)
                     if ask_yes_no "确定禁用 Trojan" "n" && disable_protocol "ENABLE_TROJAN"; then
                         commit_changes
                         break
@@ -1097,14 +1164,12 @@ modify_tuic() {
                     commit_changes
                     ;;
                 2)
-                    read_value "TUIC_UUID" "新 UUID(当前:${TUIC_UUID}): " "$TUIC_UUID"
+                    read_uuid_or_random "TUIC_UUID" "新 UUID(回车随机): "
                     commit_changes
                     ;;
                 3)
-                    read_value "TUIC_PASSWORD" "新密码: " "$TUIC_PASSWORD"
-                    if [[ -n "$TUIC_PASSWORD" ]]; then
-                        commit_changes
-                    fi
+                    read_password_or_random "TUIC_PASSWORD" "新密码(回车随机): "
+                    commit_changes
                     ;;
                 4)
                     select_cert "$TUIC_CERT" "$TUIC_KEY"
@@ -1162,10 +1227,8 @@ modify_hysteria() {
                     commit_changes
                     ;;
                 2)
-                    read_value "HY2_PASSWORD" "新密码: " "$HY2_PASSWORD"
-                    if [[ -n "$HY2_PASSWORD" ]]; then
-                        commit_changes
-                    fi
+                    read_password_or_random "HY2_PASSWORD" "新密码(回车随机): "
+                    commit_changes
                     ;;
                 3)
                     select_cert "$HY2_CERT" "$HY2_KEY"
@@ -1265,6 +1328,7 @@ update_shoes() {
 
     clear
     require_commands
+    load_state
 
     if [[ ! -x "$EXEC_PATH" ]]; then
         print_err "未安装 shoes"
@@ -1272,7 +1336,7 @@ update_shoes() {
         return
     fi
 
-    current_version="$("$EXEC_PATH" --version 2>/dev/null | awk '{print $2; exit}')"
+    current_version="$(get_current_installed_version || true)"
     current_version="${current_version:-未知}"
 
     release_json="$(get_release_json)" || {
@@ -1299,6 +1363,7 @@ update_shoes() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     if install_binary_from_release; then
         systemctl start "$SERVICE_NAME" 2>/dev/null || true
+        save_state
         print_ok "更新完成"
     else
         systemctl start "$SERVICE_NAME" 2>/dev/null || true
