@@ -923,6 +923,8 @@ install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emok
 install_system()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
 install_shoes()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/shoes.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
+install_wireproxy() { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/wireproxy.sh"; }
+
 
 dns_fix() {
     local RESOLV_CONF="/etc/resolv.conf"
@@ -1541,7 +1543,8 @@ main_menu() {
         echo -e "${GREEN}  13.${PLAIN}配置Mihomo"
         echo -e "${GREEN}  14.${PLAIN}配置Hysteria"
         echo -e "${GREEN}  15.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  16.${PLAIN}配置WarpStack"
+        echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
+        echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
         read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -1564,7 +1567,8 @@ main_menu() {
             13) install_mihomo ;;
             14) install_hysteria ;;
             15) configure_firewall ;;
-            16) install_warp ;;
+            16) install_wireproxy ;;
+            17) install_warp ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
