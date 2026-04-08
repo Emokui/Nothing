@@ -7,6 +7,7 @@ DOMAIN,client-api.arkoselabs.com
 DOMAIN,openai-api.arkoselabs.com
 DOMAIN,api.segment.io
 DOMAIN,gateway.ai.cloudflare.com
+DOMAIN,a.nel.cloudflare.com
 DOMAIN,openrouter.ai
 DOMAIN,api.jetbrains.ai
 DOMAIN-SUFFIX,ai.com
