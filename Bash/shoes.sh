@@ -18,6 +18,8 @@ RELEASE_REPO="sukurain/shoes"
 LATEST_API_URL="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
 RELEASE_ASSET_NAME_GNU="shoes-bbr.tar.gz"
 RELEASE_ASSET_NAME_MUSL="shoes-bbr-musl.tar.gz"
+CURRENT_DEBIAN_STABLE_MAJOR="13"
+CURRENT_UBUNTU_RELEASE_VERSION="25.10"
 
 if [[ ${EUID} -ne 0 ]]; then
     echo -e "${RED}错误: 请使用 root 用户运行此脚本${PLAIN}"
@@ -32,7 +34,6 @@ check_supported_os() {
         exit 1
     fi
 
-    # shellcheck disable=SC1091
     source /etc/os-release
     os_id="${ID:-}"
     os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
@@ -783,8 +784,21 @@ select_release_asset_name() {
         version_id="${VERSION_ID:-}"
         major_version="${version_id%%.*}"
 
-        if [[ "$os_id" == "debian" && "$major_version" =~ ^[0-9]+$ && "$major_version" -le 13 ]]; then
-            printf '%s\n' "$RELEASE_ASSET_NAME_MUSL"
+        if [[ "$os_id" == "debian" ]]; then
+            if [[ "$major_version" == "$CURRENT_DEBIAN_STABLE_MAJOR" ]]; then
+                printf '%s\n' "$RELEASE_ASSET_NAME_GNU"
+            else
+                printf '%s\n' "$RELEASE_ASSET_NAME_MUSL"
+            fi
+            return 0
+        fi
+
+        if [[ "$os_id" == "ubuntu" ]]; then
+            if [[ "$version_id" == "$CURRENT_UBUNTU_RELEASE_VERSION" ]]; then
+                printf '%s\n' "$RELEASE_ASSET_NAME_GNU"
+            else
+                printf '%s\n' "$RELEASE_ASSET_NAME_MUSL"
+            fi
             return 0
         fi
     fi
