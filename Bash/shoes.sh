@@ -34,6 +34,7 @@ check_supported_os() {
         exit 1
     fi
 
+    # shellcheck disable=SC1091
     source /etc/os-release
     os_id="${ID:-}"
     os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
@@ -110,44 +111,32 @@ require_commands() {
 }
 
 load_defaults() {
-    ENABLE_SS="n"
-    SS_ADDRESS="[::]:8388"
-    SS_CIPHER="aes-256-gcm"
-    SS_PASSWORD=""
-    SS_UDP_ENABLED="true"
+    local protocol_key reset_fn
+    while IFS= read -r protocol_key; do
+        reset_fn="$(protocol_meta_value "$protocol_key" "reset_fn")"
+        "$reset_fn"
+    done < <(protocol_keys)
+}
 
-    ENABLE_TROJAN="n"
-    TROJAN_ADDRESS="[::]:4443"
-    TROJAN_WS_PATH="/"
-    TROJAN_PASSWORD=""
-    TROJAN_CERT=""
-    TROJAN_KEY=""
-
-    ENABLE_HY2="n"
-    HY2_ADDRESS="[::]:8443"
-    HY2_PASSWORD=""
-    HY2_CERT=""
-    HY2_KEY=""
-    HY2_UDP_ENABLED="true"
-
-    ENABLE_TUIC="n"
-    TUIC_ADDRESS="[::]:9443"
-    TUIC_UUID=""
-    TUIC_PASSWORD=""
-    TUIC_CERT=""
-    TUIC_KEY=""
-
-    ENABLE_ANYTLS="n"
-    ANYTLS_ADDRESS="[::]:443"
-    ANYTLS_PASSWORD=""
-    ANYTLS_CERT=""
-    ANYTLS_KEY=""
-    ANYTLS_UDP_ENABLED="true"
+protocol_marker() {
+    printf '# shoes-managed: protocol=%s' "$1"
 }
 
 extract_protocol_block() {
     local protocol_type="$1"
+    local marker block
     [[ -f "$CONFIG_PATH" ]] || return 0
+
+    marker="$(protocol_marker "$protocol_type")"
+    block="$(awk -v RS='' -v marker="$marker" '
+        index($0, marker) > 0 { print; exit }
+    ' "$CONFIG_PATH")"
+
+    if [[ -n "$block" ]]; then
+        printf '%s\n' "$block"
+        return 0
+    fi
+
     awk -v RS='' -v protocol_type="$protocol_type" '
         $0 ~ ("type:[[:space:]]*" protocol_type "([[:space:]]|$)") { print; exit }
     ' "$CONFIG_PATH"
@@ -160,58 +149,12 @@ extract_scalar_from_block() {
 }
 
 load_current_config() {
-    local block
-
     load_defaults
-
-    block="$(extract_protocol_block "shadowsocks")"
-    if [[ -n "$block" ]]; then
-        ENABLE_SS="y"
-        SS_ADDRESS="$(extract_scalar_from_block "$block" "address")"
-        SS_CIPHER="$(extract_scalar_from_block "$block" "cipher")"
-        SS_PASSWORD="$(extract_scalar_from_block "$block" "password")"
-        SS_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
-    fi
-
-    block="$(extract_protocol_block "trojan")"
-    if [[ -n "$block" ]]; then
-        ENABLE_TROJAN="y"
-        TROJAN_ADDRESS="$(extract_scalar_from_block "$block" "address")"
-        TROJAN_WS_PATH="$(extract_scalar_from_block "$block" "matching_path")"
-        TROJAN_PASSWORD="$(extract_scalar_from_block "$block" "password")"
-        TROJAN_CERT="$(extract_scalar_from_block "$block" "cert")"
-        TROJAN_KEY="$(extract_scalar_from_block "$block" "key")"
-    fi
-
-    block="$(extract_protocol_block "hysteria2")"
-    if [[ -n "$block" ]]; then
-        ENABLE_HY2="y"
-        HY2_ADDRESS="$(extract_scalar_from_block "$block" "address")"
-        HY2_PASSWORD="$(extract_scalar_from_block "$block" "password")"
-        HY2_CERT="$(extract_scalar_from_block "$block" "cert")"
-        HY2_KEY="$(extract_scalar_from_block "$block" "key")"
-        HY2_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
-    fi
-
-    block="$(extract_protocol_block "tuic")"
-    if [[ -n "$block" ]]; then
-        ENABLE_TUIC="y"
-        TUIC_ADDRESS="$(extract_scalar_from_block "$block" "address")"
-        TUIC_UUID="$(extract_scalar_from_block "$block" "uuid")"
-        TUIC_PASSWORD="$(extract_scalar_from_block "$block" "password")"
-        TUIC_CERT="$(extract_scalar_from_block "$block" "cert")"
-        TUIC_KEY="$(extract_scalar_from_block "$block" "key")"
-    fi
-
-    block="$(extract_protocol_block "anytls")"
-    if [[ -n "$block" ]]; then
-        ENABLE_ANYTLS="y"
-        ANYTLS_ADDRESS="$(extract_scalar_from_block "$block" "address")"
-        ANYTLS_PASSWORD="$(extract_scalar_from_block "$block" "password")"
-        ANYTLS_CERT="$(extract_scalar_from_block "$block" "cert")"
-        ANYTLS_KEY="$(extract_scalar_from_block "$block" "key")"
-        ANYTLS_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
-    fi
+    local protocol_key load_fn
+    while IFS= read -r protocol_key; do
+        load_fn="$(protocol_meta_value "$protocol_key" "load_fn")"
+        "$load_fn"
+    done < <(protocol_keys)
 }
 
 read_value() {
@@ -382,6 +325,80 @@ derive_name_from_cert_path() {
     printf '%s' "$base_name"
 }
 
+protocol_metadata() {
+    cat <<'EOF'
+anytls|ENABLE_ANYTLS|reset_anytls_state|load_anytls_config|configure_anytls|append_anytls|modify_anytls|print_anytls_summary|AnyTLS|Anytls
+trojan|ENABLE_TROJAN|reset_trojan_state|load_trojan_config|configure_trojan|append_trojan|modify_trojan|print_trojan_summary|Trojan|Trojan
+tuic|ENABLE_TUIC|reset_tuic_state|load_tuic_config|configure_tuic|append_tuic|modify_tuic|print_tuic_summary|Tuicv5|Tuicv5
+hy2|ENABLE_HY2|reset_hysteria2_state|load_hysteria2_config|configure_hysteria2|append_hysteria2|modify_hysteria|print_hysteria2_summary|Hysteria|Hysteria
+shadowsocks|ENABLE_SS|reset_shadowsocks_state|load_shadowsocks_config|configure_shadowsocks|append_shadowsocks|modify_shadowsocks|print_shadowsocks_summary|Shadowsocks|Shadowsocks
+EOF
+}
+
+protocol_keys() {
+    protocol_metadata | awk -F'|' '{print $1}'
+}
+
+protocol_meta_value() {
+    local protocol_key="$1"
+    local field="$2"
+    local field_index
+
+    case "$field" in
+        enable_var) field_index=2 ;;
+        reset_fn) field_index=3 ;;
+        load_fn) field_index=4 ;;
+        configure_fn) field_index=5 ;;
+        append_fn) field_index=6 ;;
+        modify_fn) field_index=7 ;;
+        summary_fn) field_index=8 ;;
+        prompt_label) field_index=9 ;;
+        menu_label) field_index=10 ;;
+        *) return 1 ;;
+    esac
+
+    protocol_metadata | awk -F'|' -v key="$protocol_key" -v field_index="$field_index" '
+        $1 == key { print $field_index; exit }
+    '
+}
+
+protocol_enabled() {
+    local var_name
+    var_name="$(protocol_meta_value "$1" "enable_var")"
+    [[ -n "$var_name" && "${!var_name}" == "y" ]]
+}
+
+set_protocol_enabled() {
+    local protocol_key="$1"
+    local value="$2"
+    local var_name
+    var_name="$(protocol_meta_value "$protocol_key" "enable_var")"
+    if [[ -n "$var_name" ]]; then
+        printf -v "$var_name" '%s' "$value"
+    fi
+}
+
+# Protocol: Shadowsocks
+reset_shadowsocks_state() {
+    ENABLE_SS="n"
+    SS_ADDRESS="[::]:8388"
+    SS_CIPHER="aes-256-gcm"
+    SS_PASSWORD=""
+    SS_UDP_ENABLED="true"
+}
+
+load_shadowsocks_config() {
+    local block
+    block="$(extract_protocol_block "shadowsocks")"
+    if [[ -n "$block" ]]; then
+        ENABLE_SS="y"
+        SS_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        SS_CIPHER="$(extract_scalar_from_block "$block" "cipher")"
+        SS_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        SS_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
+    fi
+}
+
 configure_shadowsocks() {
     clear
     echo -e "${BLUE}===== Shadowsocks 配置 =====${PLAIN}"
@@ -394,6 +411,83 @@ configure_shadowsocks() {
     fi
     SS_UDP_ENABLED="true"
     print_ok "UDP: 已默认开启"
+}
+
+append_shadowsocks() {
+    local out="$1"
+    cat >> "$out" <<EOF
+# shoes-managed: protocol=shadowsocks
+- address: $(yaml_quote "$SS_ADDRESS")
+  protocol:
+    type: shadowsocks
+    cipher: $(yaml_quote "$SS_CIPHER")
+    password: $(yaml_quote "$SS_PASSWORD")
+    udp_enabled: ${SS_UDP_ENABLED}
+
+EOF
+}
+
+modify_shadowsocks() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Shadowsocks_Conf ✦${PLAIN}"
+
+        if [[ "$ENABLE_SS" == "y" ]]; then
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改加密"
+            echo -e "${GREEN}  3.${PLAIN}修改密码"
+            echo -e "${GREEN}  4.${PLAIN}切换UDP"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  0.${PLAIN}返回上级"
+            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+
+            case "$opt" in
+                1) apply_address_update "SS_ADDRESS" ;;
+                2) apply_value_update "SS_CIPHER" "新加密方式" ;;
+                3) apply_password_update "SS_PASSWORD" ;;
+                4) apply_boolean_toggle "SS_UDP_ENABLED" ;;
+                5)
+                    if disable_protocol_with_confirmation "ENABLE_SS" "Shadowsocks"; then
+                        break
+                    fi
+                    ;;
+                0) break ;;
+                *) print_warn "无效选项"; sleep 1 ;;
+            esac
+        else
+            echo -e "${YELLOW}  当前未启用${PLAIN}"
+            if ! prompt_enable_protocol "ENABLE_SS" "configure_shadowsocks"; then
+                break
+            fi
+        fi
+    done
+}
+
+print_shadowsocks_summary() {
+    echo -e "${GREEN}Shadowsocks${PLAIN}  地址: ${SS_ADDRESS}  密码: ${SS_PASSWORD}  cipher: ${SS_CIPHER}"
+}
+
+# Protocol: Trojan over WebSocket
+reset_trojan_state() {
+    ENABLE_TROJAN="n"
+    TROJAN_ADDRESS="[::]:4443"
+    TROJAN_WS_PATH="/"
+    TROJAN_PASSWORD=""
+    TROJAN_CERT=""
+    TROJAN_KEY=""
+}
+
+load_trojan_config() {
+    local block
+    block="$(extract_protocol_block "trojan")"
+    if [[ -n "$block" ]]; then
+        ENABLE_TROJAN="y"
+        TROJAN_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        TROJAN_WS_PATH="$(extract_scalar_from_block "$block" "matching_path")"
+        TROJAN_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        TROJAN_CERT="$(extract_scalar_from_block "$block" "cert")"
+        TROJAN_KEY="$(extract_scalar_from_block "$block" "key")"
+    fi
 }
 
 configure_trojan() {
@@ -411,6 +505,95 @@ configure_trojan() {
     TROJAN_KEY="$key_path"
 }
 
+append_trojan() {
+    local out="$1"
+    local trojan_sni
+    trojan_sni="$(derive_name_from_cert_path "$TROJAN_CERT")"
+    cat >> "$out" <<EOF
+# shoes-managed: protocol=trojan
+- address: $(yaml_quote "$TROJAN_ADDRESS")
+  protocol:
+    type: tls
+    tls_targets:
+      $(yaml_quote "$trojan_sni"):
+        cert: $(yaml_quote "$TROJAN_CERT")
+        key: $(yaml_quote "$TROJAN_KEY")
+        protocol:
+          type: websocket
+          targets:
+            - matching_path: $(yaml_quote "$TROJAN_WS_PATH")
+              protocol:
+                type: trojan
+                password: $(yaml_quote "$TROJAN_PASSWORD")
+
+EOF
+}
+
+modify_trojan() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Trojan_Conf ✦${PLAIN}"
+
+        if [[ "$ENABLE_TROJAN" == "y" ]]; then
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改路径"
+            echo -e "${GREEN}  3.${PLAIN}修改密码"
+            echo -e "${GREEN}  4.${PLAIN}修改证书"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  0.${PLAIN}返回上级"
+            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+
+            case "$opt" in
+                1) apply_address_update "TROJAN_ADDRESS" ;;
+                2) apply_value_update "TROJAN_WS_PATH" "新 WS 路径" ;;
+                3) apply_password_update "TROJAN_PASSWORD" ;;
+                4) apply_cert_update "TROJAN_CERT" "TROJAN_KEY" "y" ;;
+                5)
+                    if disable_protocol_with_confirmation "ENABLE_TROJAN" "Trojan"; then
+                        break
+                    fi
+                    ;;
+                0) break ;;
+                *) print_warn "无效选项"; sleep 1 ;;
+            esac
+        else
+            echo -e "${YELLOW}  当前未启用${PLAIN}"
+            if ! prompt_enable_protocol "ENABLE_TROJAN" "configure_trojan"; then
+                break
+            fi
+        fi
+    done
+}
+
+print_trojan_summary() {
+    local trojan_sni
+    trojan_sni="$(derive_name_from_cert_path "$TROJAN_CERT")"
+    echo -e "${GREEN}Trojan+WS${PLAIN}   地址: ${TROJAN_ADDRESS}  SNI: ${trojan_sni}  Path: ${TROJAN_WS_PATH}  密码: ${TROJAN_PASSWORD}"
+}
+
+# Protocol: Hysteria2
+reset_hysteria2_state() {
+    ENABLE_HY2="n"
+    HY2_ADDRESS="[::]:8443"
+    HY2_PASSWORD=""
+    HY2_CERT=""
+    HY2_KEY=""
+    HY2_UDP_ENABLED="true"
+}
+
+load_hysteria2_config() {
+    local block
+    block="$(extract_protocol_block "hysteria2")"
+    if [[ -n "$block" ]]; then
+        ENABLE_HY2="y"
+        HY2_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        HY2_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        HY2_CERT="$(extract_scalar_from_block "$block" "cert")"
+        HY2_KEY="$(extract_scalar_from_block "$block" "key")"
+        HY2_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
+    fi
+}
+
 configure_hysteria2() {
     clear
     echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
@@ -425,6 +608,88 @@ configure_hysteria2() {
     select_cert "$HY2_CERT" "$HY2_KEY"
     HY2_CERT="$cert_path"
     HY2_KEY="$key_path"
+}
+
+append_hysteria2() {
+    local out="$1"
+    cat >> "$out" <<EOF
+# shoes-managed: protocol=hysteria2
+- address: $(yaml_quote "$HY2_ADDRESS")
+  transport: quic
+  quic_settings:
+    cert: $(yaml_quote "$HY2_CERT")
+    key: $(yaml_quote "$HY2_KEY")
+    alpn_protocols:
+      - "h3"
+  protocol:
+    type: hysteria2
+    password: $(yaml_quote "$HY2_PASSWORD")
+    udp_enabled: ${HY2_UDP_ENABLED}
+
+EOF
+}
+
+modify_hysteria() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Hysteria2_Conf ✦${PLAIN}"
+
+        if [[ "$ENABLE_HY2" == "y" ]]; then
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改密码"
+            echo -e "${GREEN}  3.${PLAIN}修改证书"
+            echo -e "${GREEN}  4.${PLAIN}切换UDP"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  0.${PLAIN}返回上级"
+            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+
+            case "$opt" in
+                1) apply_address_update "HY2_ADDRESS" ;;
+                2) apply_password_update "HY2_PASSWORD" ;;
+                3) apply_cert_update "HY2_CERT" "HY2_KEY" ;;
+                4) apply_boolean_toggle "HY2_UDP_ENABLED" ;;
+                5)
+                    if disable_protocol_with_confirmation "ENABLE_HY2" "Hysteria2"; then
+                        break
+                    fi
+                    ;;
+                0) break ;;
+                *) print_warn "无效选项"; sleep 1 ;;
+            esac
+        else
+            echo -e "${YELLOW}  当前未启用${PLAIN}"
+            if ! prompt_enable_protocol "ENABLE_HY2" "configure_hysteria2"; then
+                break
+            fi
+        fi
+    done
+}
+
+print_hysteria2_summary() {
+    echo -e "${GREEN}Hysteria2${PLAIN}  地址: ${HY2_ADDRESS}  密码: ${HY2_PASSWORD}"
+}
+
+# Protocol: TUIC v5
+reset_tuic_state() {
+    ENABLE_TUIC="n"
+    TUIC_ADDRESS="[::]:9443"
+    TUIC_UUID=""
+    TUIC_PASSWORD=""
+    TUIC_CERT=""
+    TUIC_KEY=""
+}
+
+load_tuic_config() {
+    local block
+    block="$(extract_protocol_block "tuic")"
+    if [[ -n "$block" ]]; then
+        ENABLE_TUIC="y"
+        TUIC_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        TUIC_UUID="$(extract_scalar_from_block "$block" "uuid")"
+        TUIC_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        TUIC_CERT="$(extract_scalar_from_block "$block" "cert")"
+        TUIC_KEY="$(extract_scalar_from_block "$block" "key")"
+    fi
 }
 
 configure_tuic() {
@@ -446,6 +711,88 @@ configure_tuic() {
     TUIC_KEY="$key_path"
 }
 
+append_tuic() {
+    local out="$1"
+    cat >> "$out" <<EOF
+# shoes-managed: protocol=tuic
+- address: $(yaml_quote "$TUIC_ADDRESS")
+  transport: quic
+  quic_settings:
+    cert: $(yaml_quote "$TUIC_CERT")
+    key: $(yaml_quote "$TUIC_KEY")
+    alpn_protocols:
+      - "h3"
+  protocol:
+    type: tuic
+    uuid: $(yaml_quote "$TUIC_UUID")
+    password: $(yaml_quote "$TUIC_PASSWORD")
+
+EOF
+}
+
+modify_tuic() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ TUIC_Conf ✦${PLAIN}"
+
+        if [[ "$ENABLE_TUIC" == "y" ]]; then
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改UUID"
+            echo -e "${GREEN}  3.${PLAIN}修改密码"
+            echo -e "${GREEN}  4.${PLAIN}修改证书"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  0.${PLAIN}返回上级"
+            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+
+            case "$opt" in
+                1) apply_address_update "TUIC_ADDRESS" ;;
+                2) apply_uuid_update "TUIC_UUID" ;;
+                3) apply_password_update "TUIC_PASSWORD" ;;
+                4) apply_cert_update "TUIC_CERT" "TUIC_KEY" ;;
+                5)
+                    if disable_protocol_with_confirmation "ENABLE_TUIC" "TUIC v5"; then
+                        break
+                    fi
+                    ;;
+                0) break ;;
+                *) print_warn "无效选项"; sleep 1 ;;
+            esac
+        else
+            echo -e "${YELLOW}  当前未启用${PLAIN}"
+            if ! prompt_enable_protocol "ENABLE_TUIC" "configure_tuic"; then
+                break
+            fi
+        fi
+    done
+}
+
+print_tuic_summary() {
+    echo -e "${GREEN}TUIC v5${PLAIN}    地址: ${TUIC_ADDRESS}  UUID: ${TUIC_UUID}  密码: ${TUIC_PASSWORD}"
+}
+
+# Protocol: AnyTLS
+reset_anytls_state() {
+    ENABLE_ANYTLS="n"
+    ANYTLS_ADDRESS="[::]:443"
+    ANYTLS_PASSWORD=""
+    ANYTLS_CERT=""
+    ANYTLS_KEY=""
+    ANYTLS_UDP_ENABLED="true"
+}
+
+load_anytls_config() {
+    local block
+    block="$(extract_protocol_block "anytls")"
+    if [[ -n "$block" ]]; then
+        ENABLE_ANYTLS="y"
+        ANYTLS_ADDRESS="$(extract_scalar_from_block "$block" "address")"
+        ANYTLS_PASSWORD="$(extract_scalar_from_block "$block" "password")"
+        ANYTLS_CERT="$(extract_scalar_from_block "$block" "cert")"
+        ANYTLS_KEY="$(extract_scalar_from_block "$block" "key")"
+        ANYTLS_UDP_ENABLED="$(extract_scalar_from_block "$block" "udp_enabled")"
+    fi
+}
+
 configure_anytls() {
     clear
     echo -e "${BLUE}===== AnyTLS 配置 =====${PLAIN}"
@@ -462,157 +809,12 @@ configure_anytls() {
     print_ok "UDP: 已默认开启"
 }
 
-protocol_count() {
-    local count=0
-    [[ "$ENABLE_SS" == "y" ]] && ((count++))
-    [[ "$ENABLE_TROJAN" == "y" ]] && ((count++))
-    [[ "$ENABLE_HY2" == "y" ]] && ((count++))
-    [[ "$ENABLE_TUIC" == "y" ]] && ((count++))
-    [[ "$ENABLE_ANYTLS" == "y" ]] && ((count++))
-    echo "$count"
-}
-
-run_configuration_wizard() {
-    while true; do
-        clear
-        echo -e "${BLUE}选择要启用的协议${PLAIN}"
-
-        if ask_yes_no "启用 AnyTLS" "$ENABLE_ANYTLS"; then
-            ENABLE_ANYTLS="y"
-        else
-            ENABLE_ANYTLS="n"
-        fi
-
-        if ask_yes_no "启用 Trojan" "$ENABLE_TROJAN"; then
-            ENABLE_TROJAN="y"
-        else
-            ENABLE_TROJAN="n"
-        fi
-
-        if ask_yes_no "启用 Tuicv5" "$ENABLE_TUIC"; then
-            ENABLE_TUIC="y"
-        else
-            ENABLE_TUIC="n"
-        fi
-
-        if ask_yes_no "启用 Hysteria" "$ENABLE_HY2"; then
-            ENABLE_HY2="y"
-        else
-            ENABLE_HY2="n"
-        fi
-
-        if ask_yes_no "启用 Shadowsocks" "$ENABLE_SS"; then
-            ENABLE_SS="y"
-        else
-            ENABLE_SS="n"
-        fi
-
-        if [[ "$(protocol_count)" -gt 0 ]]; then
-            if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-                configure_anytls
-            fi
-
-            if [[ "$ENABLE_TROJAN" == "y" ]]; then
-                configure_trojan
-            fi
-
-            if [[ "$ENABLE_TUIC" == "y" ]]; then
-                configure_tuic
-            fi
-
-            if [[ "$ENABLE_HY2" == "y" ]]; then
-                configure_hysteria2
-            fi
-
-            if [[ "$ENABLE_SS" == "y" ]]; then
-                configure_shadowsocks
-            fi
-
-            break
-        fi
-
-        print_err "至少需要启用一个协议"
-        sleep 1
-    done
-}
-
-append_shadowsocks() {
-    local out="$1"
-    cat >> "$out" <<EOF
-- address: $(yaml_quote "$SS_ADDRESS")
-  protocol:
-    type: shadowsocks
-    cipher: $(yaml_quote "$SS_CIPHER")
-    password: $(yaml_quote "$SS_PASSWORD")
-    udp_enabled: ${SS_UDP_ENABLED}
-
-EOF
-}
-
-append_trojan() {
-    local out="$1"
-    local trojan_sni
-    trojan_sni="$(derive_name_from_cert_path "$TROJAN_CERT")"
-    cat >> "$out" <<EOF
-- address: $(yaml_quote "$TROJAN_ADDRESS")
-  protocol:
-    type: tls
-    tls_targets:
-      $(yaml_quote "$trojan_sni"):
-        cert: $(yaml_quote "$TROJAN_CERT")
-        key: $(yaml_quote "$TROJAN_KEY")
-        protocol:
-          type: websocket
-          targets:
-            - matching_path: $(yaml_quote "$TROJAN_WS_PATH")
-              protocol:
-                type: trojan
-                password: $(yaml_quote "$TROJAN_PASSWORD")
-
-EOF
-}
-
-append_hysteria2() {
-    local out="$1"
-    cat >> "$out" <<EOF
-- address: $(yaml_quote "$HY2_ADDRESS")
-  transport: quic
-  quic_settings:
-    cert: $(yaml_quote "$HY2_CERT")
-    key: $(yaml_quote "$HY2_KEY")
-    alpn_protocols:
-      - "h3"
-  protocol:
-    type: hysteria2
-    password: $(yaml_quote "$HY2_PASSWORD")
-    udp_enabled: ${HY2_UDP_ENABLED}
-
-EOF
-}
-
-append_tuic() {
-    local out="$1"
-    cat >> "$out" <<EOF
-- address: $(yaml_quote "$TUIC_ADDRESS")
-  transport: quic
-  quic_settings:
-    cert: $(yaml_quote "$TUIC_CERT")
-    key: $(yaml_quote "$TUIC_KEY")
-    alpn_protocols:
-      - "h3"
-  protocol:
-    type: tuic
-    uuid: $(yaml_quote "$TUIC_UUID")
-    password: $(yaml_quote "$TUIC_PASSWORD")
-
-EOF
-}
-
 append_anytls() {
     local out="$1"
     local anytls_sni
     anytls_sni="$(derive_name_from_cert_path "$ANYTLS_CERT")"
     cat >> "$out" <<EOF
+# shoes-managed: protocol=anytls
 - address: $(yaml_quote "$ANYTLS_ADDRESS")
   protocol:
     type: tls
@@ -640,8 +842,96 @@ append_anytls() {
 EOF
 }
 
-generate_config_file() {
+modify_anytls() {
+    while true; do
+        clear
+        echo -e "${BLUE}✦ AnyTLS_Conf ✦${PLAIN}"
+
+        if [[ "$ENABLE_ANYTLS" == "y" ]]; then
+            echo -e "${GREEN}  1.${PLAIN}修改端口"
+            echo -e "${GREEN}  2.${PLAIN}修改密码"
+            echo -e "${GREEN}  3.${PLAIN}修改证书"
+            echo -e "${GREEN}  4.${PLAIN}切换UDP"
+            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  0.${PLAIN}返回上级"
+            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+
+            case "$opt" in
+                1) apply_address_update "ANYTLS_ADDRESS" ;;
+                2) apply_password_update "ANYTLS_PASSWORD" ;;
+                3) apply_cert_update "ANYTLS_CERT" "ANYTLS_KEY" "y" ;;
+                4) apply_boolean_toggle "ANYTLS_UDP_ENABLED" ;;
+                5)
+                    if disable_protocol_with_confirmation "ENABLE_ANYTLS" "AnyTLS"; then
+                        break
+                    fi
+                    ;;
+                0) break ;;
+                *) print_warn "无效选项"; sleep 1 ;;
+            esac
+        else
+            echo -e "${YELLOW}  当前未启用${PLAIN}"
+            if ! prompt_enable_protocol "ENABLE_ANYTLS" "configure_anytls"; then
+                break
+            fi
+        fi
+    done
+}
+
+print_anytls_summary() {
+    local anytls_sni
+    anytls_sni="$(derive_name_from_cert_path "$ANYTLS_CERT")"
+    echo -e "${GREEN}AnyTLS${PLAIN}     地址: ${ANYTLS_ADDRESS}  SNI: ${anytls_sni}  密码: ${ANYTLS_PASSWORD}"
+}
+
+protocol_count() {
+    local count=0
+    local protocol_key
+    while IFS= read -r protocol_key; do
+        if protocol_enabled "$protocol_key"; then
+            ((count++))
+        fi
+    done < <(protocol_keys)
+    echo "$count"
+}
+
+run_configuration_wizard() {
+    local protocol_key enable_var configure_fn
+    local protocol_keys_list=()
+    mapfile -t protocol_keys_list < <(protocol_keys)
+
+    while true; do
+        clear
+        echo -e "${BLUE}选择要启用的协议${PLAIN}"
+
+        for protocol_key in "${protocol_keys_list[@]}"; do
+            enable_var="$(protocol_meta_value "$protocol_key" "enable_var")"
+            if ask_yes_no "启用 $(protocol_meta_value "$protocol_key" "prompt_label")" "${!enable_var}"; then
+                set_protocol_enabled "$protocol_key" "y"
+            else
+                set_protocol_enabled "$protocol_key" "n"
+            fi
+        done
+
+        if [[ "$(protocol_count)" -gt 0 ]]; then
+            for protocol_key in "${protocol_keys_list[@]}"; do
+                if protocol_enabled "$protocol_key"; then
+                    configure_fn="$(protocol_meta_value "$protocol_key" "configure_fn")"
+                    "$configure_fn"
+                fi
+            done
+
+            break
+        fi
+
+        print_err "至少需要启用一个协议"
+        sleep 1
+    done
+}
+
+render_config_file() {
     local out="$1"
+    local protocol_key append_fn
     : > "$out"
 
     cat >> "$out" <<EOF
@@ -650,25 +940,12 @@ generate_config_file() {
 
 EOF
 
-    if [[ "$ENABLE_SS" == "y" ]]; then
-        append_shadowsocks "$out"
-    fi
-
-    if [[ "$ENABLE_TROJAN" == "y" ]]; then
-        append_trojan "$out"
-    fi
-
-    if [[ "$ENABLE_HY2" == "y" ]]; then
-        append_hysteria2 "$out"
-    fi
-
-    if [[ "$ENABLE_TUIC" == "y" ]]; then
-        append_tuic "$out"
-    fi
-
-    if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-        append_anytls "$out"
-    fi
+    while IFS= read -r protocol_key; do
+        if protocol_enabled "$protocol_key"; then
+            append_fn="$(protocol_meta_value "$protocol_key" "append_fn")"
+            "$append_fn" "$out"
+        fi
+    done < <(protocol_keys)
 
     if [[ "$(protocol_count)" -eq 0 ]]; then
         return 1
@@ -698,29 +975,19 @@ EOF
     chmod 644 "$SERVICE_FILE"
 }
 
-apply_configuration() {
-    local tmp_config
-    tmp_config="$(mktemp)"
+validate_config_file() {
+    local config_file="$1"
+    local dry_run_log="$2"
+    "$EXEC_PATH" --dry-run "$config_file" > "$dry_run_log" 2>&1
+}
 
-    if ! generate_config_file "$tmp_config"; then
-        rm -f "$tmp_config"
-        print_err "未生成任何协议配置"
-        return 1
-    fi
+install_config_file() {
+    local staged_config="$1"
+    mkdir -p "$CONFIG_DIR" || return 1
+    mv "$staged_config" "$CONFIG_PATH" || return 1
+}
 
-    mkdir -p "$CONFIG_DIR"
-
-    if ! "$EXEC_PATH" --dry-run "$tmp_config" >/tmp/shoes-dry-run.log 2>&1; then
-        print_err "配置校验失败"
-        echo -e "${YELLOW}---------------- 生成的配置 ----------------${PLAIN}"
-        cat "$tmp_config"
-        echo -e "${YELLOW}--------------------------------------------${PLAIN}"
-        cat /tmp/shoes-dry-run.log
-        rm -f "$tmp_config"
-        return 1
-    fi
-
-    mv "$tmp_config" "$CONFIG_PATH"
+reload_service_unit() {
     create_systemd_service
     if ! systemctl daemon-reload; then
         print_err "systemd daemon-reload 失败"
@@ -730,40 +997,67 @@ apply_configuration() {
         print_err "启用 shoes 服务失败"
         return 1
     fi
-    if ! systemctl restart "$SERVICE_NAME"; then
-        print_err "重启 shoes 服务失败"
+    return 0
+}
+
+run_service_action_checked() {
+    local action="$1"
+    local fail_message="$2"
+
+    if ! systemctl "$action" "$SERVICE_NAME"; then
+        print_err "$fail_message"
         systemctl --no-pager --full status "$SERVICE_NAME" || true
         return 1
     fi
     return 0
 }
 
+apply_configuration() {
+    local tmp_config dry_run_log
+    tmp_config="$(mktemp)"
+    dry_run_log="$(mktemp)"
+
+    if ! render_config_file "$tmp_config"; then
+        rm -f "$tmp_config" "$dry_run_log"
+        print_err "未生成任何协议配置"
+        return 1
+    fi
+
+    if ! validate_config_file "$tmp_config" "$dry_run_log"; then
+        print_err "配置校验失败"
+        echo -e "${YELLOW}---------------- 生成的配置 ----------------${PLAIN}"
+        cat "$tmp_config"
+        echo -e "${YELLOW}--------------------------------------------${PLAIN}"
+        cat "$dry_run_log"
+        rm -f "$tmp_config" "$dry_run_log"
+        return 1
+    fi
+
+    if ! install_config_file "$tmp_config"; then
+        print_err "写入配置文件失败"
+        rm -f "$tmp_config" "$dry_run_log"
+        return 1
+    fi
+    rm -f "$dry_run_log"
+
+    if ! reload_service_unit; then
+        return 1
+    fi
+
+    run_service_action_checked "restart" "重启 shoes 服务失败"
+}
+
 show_summary() {
-    local trojan_sni anytls_sni
-    trojan_sni="$(derive_name_from_cert_path "$TROJAN_CERT")"
-    anytls_sni="$(derive_name_from_cert_path "$ANYTLS_CERT")"
+    local protocol_key summary_fn
     clear
     echo -e "${BLUE}部署信息${PLAIN}"
 
-    if [[ "$ENABLE_SS" == "y" ]]; then
-        echo -e "${GREEN}Shadowsocks${PLAIN}  地址: ${SS_ADDRESS}  密码: ${SS_PASSWORD}  cipher: ${SS_CIPHER}"
-    fi
-
-    if [[ "$ENABLE_TROJAN" == "y" ]]; then
-        echo -e "${GREEN}Trojan+WS${PLAIN}   地址: ${TROJAN_ADDRESS}  SNI: ${trojan_sni}  Path: ${TROJAN_WS_PATH}  密码: ${TROJAN_PASSWORD}"
-    fi
-
-    if [[ "$ENABLE_HY2" == "y" ]]; then
-        echo -e "${GREEN}Hysteria2${PLAIN}  地址: ${HY2_ADDRESS}  密码: ${HY2_PASSWORD}"
-    fi
-
-    if [[ "$ENABLE_TUIC" == "y" ]]; then
-        echo -e "${GREEN}TUIC v5${PLAIN}    地址: ${TUIC_ADDRESS}  UUID: ${TUIC_UUID}  密码: ${TUIC_PASSWORD}"
-    fi
-
-    if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-        echo -e "${GREEN}AnyTLS${PLAIN}     地址: ${ANYTLS_ADDRESS}  SNI: ${anytls_sni}  密码: ${ANYTLS_PASSWORD}"
-    fi
+    while IFS= read -r protocol_key; do
+        if protocol_enabled "$protocol_key"; then
+            summary_fn="$(protocol_meta_value "$protocol_key" "summary_fn")"
+            "$summary_fn"
+        fi
+    done < <(protocol_keys)
 
     echo
     systemctl --no-pager --full status "$SERVICE_NAME" || true
@@ -932,6 +1226,14 @@ protocol_status() {
     fi
 }
 
+print_modify_protocol_entry() {
+    local index="$1"
+    local protocol_key="$2"
+    local enable_var
+    enable_var="$(protocol_meta_value "$protocol_key" "enable_var")"
+    echo -e "${GREEN}  ${index}.${PLAIN}$(printf '%-12s' "$(protocol_meta_value "$protocol_key" "menu_label")") [${YELLOW}$(protocol_status "${!enable_var}")${PLAIN}]"
+}
+
 commit_changes() {
     if apply_configuration; then
         print_ok "配置已更新"
@@ -940,7 +1242,7 @@ commit_changes() {
     fi
 
     load_current_config
-    print_warn "未应用新配置，已恢复到上次有效配置"
+    print_warn "未完成配置应用，已重新从当前配置文件加载状态"
     pause_here
     return 1
 }
@@ -956,6 +1258,87 @@ disable_protocol() {
 
     printf -v "$__var" '%s' "n"
     return 0
+}
+
+apply_address_update() {
+    local var_name="$1"
+    local current_value="${!var_name}"
+    read_address_value "$var_name" "新监听地址(当前:${current_value}): " "$current_value"
+    commit_changes
+}
+
+apply_value_update() {
+    local var_name="$1"
+    local label="$2"
+    local current_value="${!var_name}"
+    read_value "$var_name" "${label}(当前:${current_value}): " "$current_value"
+    commit_changes
+}
+
+apply_password_update() {
+    local var_name="$1"
+    read_password_or_random "$var_name" "新密码(回车随机): "
+    commit_changes
+}
+
+apply_uuid_update() {
+    local var_name="$1"
+    read_uuid_or_random "$var_name" "新 UUID(回车随机): "
+    commit_changes
+}
+
+apply_cert_update() {
+    local cert_var="$1"
+    local key_var="$2"
+    local show_sni_sync="${3:-n}"
+
+    select_cert "${!cert_var}" "${!key_var}"
+    printf -v "$cert_var" '%s' "$cert_path"
+    printf -v "$key_var" '%s' "$key_path"
+
+    if [[ "$show_sni_sync" == "y" ]]; then
+        print_ok "域名/SNI 已同步为: $(derive_name_from_cert_path "${!cert_var}")"
+    fi
+
+    commit_changes
+}
+
+apply_boolean_toggle() {
+    local var_name="$1"
+
+    if [[ "${!var_name}" == "true" ]]; then
+        printf -v "$var_name" '%s' "false"
+    else
+        printf -v "$var_name" '%s' "true"
+    fi
+
+    commit_changes
+}
+
+disable_protocol_with_confirmation() {
+    local enable_var="$1"
+    local label="$2"
+
+    if ask_yes_no "确定禁用 ${label}" "n" && disable_protocol "$enable_var"; then
+        commit_changes
+        return 0
+    fi
+
+    return 1
+}
+
+prompt_enable_protocol() {
+    local enable_var="$1"
+    local configure_fn="$2"
+
+    if ask_yes_no "是否启用" "n"; then
+        printf -v "$enable_var" '%s' "y"
+        "$configure_fn"
+        commit_changes
+        return 0
+    fi
+
+    return 1
 }
 
 show_service_and_config() {
@@ -974,315 +1357,38 @@ show_service_and_config() {
     pause_and_return
 }
 
-modify_shadowsocks() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Shadowsocks_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_SS" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改加密"
-            echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}切换UDP"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1)
-                    read_address_value "SS_ADDRESS" "新监听地址(当前:${SS_ADDRESS}): " "$SS_ADDRESS"
-                    commit_changes
-                    ;;
-                2)
-                    read_value "SS_CIPHER" "新加密方式(当前:${SS_CIPHER}): " "$SS_CIPHER"
-                    commit_changes
-                    ;;
-                3)
-                    read_password_or_random "SS_PASSWORD" "新密码(回车随机): "
-                    commit_changes
-                    ;;
-                4)
-                    if [[ "$SS_UDP_ENABLED" == "true" ]]; then
-                        SS_UDP_ENABLED="false"
-                    else
-                        SS_UDP_ENABLED="true"
-                    fi
-                    commit_changes
-                    ;;
-                5)
-                    if ask_yes_no "确定禁用 Shadowsocks" "n" && disable_protocol "ENABLE_SS"; then
-                        commit_changes
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ask_yes_no "是否启用" "n"; then
-                ENABLE_SS="y"
-                configure_shadowsocks
-                commit_changes
-            else
-                break
-            fi
-        fi
-    done
-}
-
-modify_anytls() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ AnyTLS_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改密码"
-            echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}切换UDP"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1)
-                    read_address_value "ANYTLS_ADDRESS" "新监听地址(当前:${ANYTLS_ADDRESS}): " "$ANYTLS_ADDRESS"
-                    commit_changes
-                    ;;
-                2)
-                    read_password_or_random "ANYTLS_PASSWORD" "新密码(回车随机): "
-                    commit_changes
-                    ;;
-                3)
-                    select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
-                    ANYTLS_CERT="$cert_path"
-                    ANYTLS_KEY="$key_path"
-                    print_ok "域名/SNI 已同步为: $(derive_name_from_cert_path "$ANYTLS_CERT")"
-                    commit_changes
-                    ;;
-                4)
-                    if [[ "$ANYTLS_UDP_ENABLED" == "true" ]]; then
-                        ANYTLS_UDP_ENABLED="false"
-                    else
-                        ANYTLS_UDP_ENABLED="true"
-                    fi
-                    commit_changes
-                    ;;
-                5)
-                    if ask_yes_no "确定禁用 AnyTLS" "n" && disable_protocol "ENABLE_ANYTLS"; then
-                        commit_changes
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ask_yes_no "是否启用" "n"; then
-                ENABLE_ANYTLS="y"
-                configure_anytls
-                commit_changes
-            else
-                break
-            fi
-        fi
-    done
-}
-
-modify_trojan() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Trojan_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_TROJAN" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改路径"
-            echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1)
-                    read_address_value "TROJAN_ADDRESS" "新监听地址(当前:${TROJAN_ADDRESS}): " "$TROJAN_ADDRESS"
-                    commit_changes
-                    ;;
-                2)
-                    read_value "TROJAN_WS_PATH" "新 WS 路径(当前:${TROJAN_WS_PATH}): " "$TROJAN_WS_PATH"
-                    commit_changes
-                    ;;
-                3)
-                    read_password_or_random "TROJAN_PASSWORD" "新密码(回车随机): "
-                    commit_changes
-                    ;;
-                4)
-                    select_cert "$TROJAN_CERT" "$TROJAN_KEY"
-                    TROJAN_CERT="$cert_path"
-                    TROJAN_KEY="$key_path"
-                    print_ok "域名/SNI 已同步为: $(derive_name_from_cert_path "$TROJAN_CERT")"
-                    commit_changes
-                    ;;
-                5)
-                    if ask_yes_no "确定禁用 Trojan" "n" && disable_protocol "ENABLE_TROJAN"; then
-                        commit_changes
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ask_yes_no "是否启用" "n"; then
-                ENABLE_TROJAN="y"
-                configure_trojan
-                commit_changes
-            else
-                break
-            fi
-        fi
-    done
-}
-
-modify_tuic() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ TUIC_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_TUIC" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改UUID"
-            echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1)
-                    read_address_value "TUIC_ADDRESS" "新监听地址(当前:${TUIC_ADDRESS}): " "$TUIC_ADDRESS"
-                    commit_changes
-                    ;;
-                2)
-                    read_uuid_or_random "TUIC_UUID" "新 UUID(回车随机): "
-                    commit_changes
-                    ;;
-                3)
-                    read_password_or_random "TUIC_PASSWORD" "新密码(回车随机): "
-                    commit_changes
-                    ;;
-                4)
-                    select_cert "$TUIC_CERT" "$TUIC_KEY"
-                    TUIC_CERT="$cert_path"
-                    TUIC_KEY="$key_path"
-                    commit_changes
-                    ;;
-                5)
-                    if ask_yes_no "确定禁用 TUIC v5" "n" && disable_protocol "ENABLE_TUIC"; then
-                        commit_changes
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ask_yes_no "是否启用" "n"; then
-                ENABLE_TUIC="y"
-                configure_tuic
-                commit_changes
-            else
-                break
-            fi
-        fi
-    done
-}
-
-modify_hysteria() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Hysteria2_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_HY2" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改密码"
-            echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}切换UDP"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1)
-                    read_address_value "HY2_ADDRESS" "新监听地址(当前:${HY2_ADDRESS}): " "$HY2_ADDRESS"
-                    commit_changes
-                    ;;
-                2)
-                    read_password_or_random "HY2_PASSWORD" "新密码(回车随机): "
-                    commit_changes
-                    ;;
-                3)
-                    select_cert "$HY2_CERT" "$HY2_KEY"
-                    HY2_CERT="$cert_path"
-                    HY2_KEY="$key_path"
-                    commit_changes
-                    ;;
-                4)
-                    if [[ "$HY2_UDP_ENABLED" == "true" ]]; then
-                        HY2_UDP_ENABLED="false"
-                    else
-                        HY2_UDP_ENABLED="true"
-                    fi
-                    commit_changes
-                    ;;
-                5)
-                    if ask_yes_no "确定禁用 Hysteria2" "n" && disable_protocol "ENABLE_HY2"; then
-                        commit_changes
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ask_yes_no "是否启用" "n"; then
-                ENABLE_HY2="y"
-                configure_hysteria2
-                commit_changes
-            else
-                break
-            fi
-        fi
-    done
-}
-
 modify_config() {
+    local opt protocol_key index modify_fn
     load_current_config
 
     while true; do
         clear
         echo -e "${BLUE}✦ Modify_Conf ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}Anytls      [${YELLOW}$(protocol_status "$ENABLE_ANYTLS")${PLAIN}]"
-        echo -e "${GREEN}  2.${PLAIN}Trojan      [${YELLOW}$(protocol_status "$ENABLE_TROJAN")${PLAIN}]"
-        echo -e "${GREEN}  3.${PLAIN}Tuicv5      [${YELLOW}$(protocol_status "$ENABLE_TUIC")${PLAIN}]"
-        echo -e "${GREEN}  4.${PLAIN}Hysteria    [${YELLOW}$(protocol_status "$ENABLE_HY2")${PLAIN}]"
-        echo -e "${GREEN}  5.${PLAIN}Shadowsocks [${YELLOW}$(protocol_status "$ENABLE_SS")${PLAIN}]"
+        index=1
+        while IFS= read -r protocol_key; do
+            print_modify_protocol_entry "$index" "$protocol_key"
+            ((index++))
+        done < <(protocol_keys)
         echo -e "${GREEN}  0.${PLAIN}Return"
         read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
         case "$opt" in
-            1) modify_anytls ;;
-            2) modify_trojan ;;
-            3) modify_tuic ;;
-            4) modify_hysteria ;;
-            5) modify_shadowsocks ;;
             0) break ;;
-            *) print_warn "无效选项"; sleep 1 ;;
+            *)
+                if [[ "$opt" =~ ^[1-9][0-9]*$ ]]; then
+                    protocol_key="$(protocol_keys | sed -n "${opt}p")"
+                    if [[ -n "$protocol_key" ]]; then
+                        modify_fn="$(protocol_meta_value "$protocol_key" "modify_fn")"
+                        "$modify_fn"
+                    else
+                        print_warn "无效选项"
+                        sleep 1
+                    fi
+                else
+                    print_warn "无效选项"
+                    sleep 1
+                fi
+                ;;
         esac
     done
 }
@@ -1303,20 +1409,14 @@ manage_service() {
             1) show_service_and_config ;;
             2) modify_config ;;
             3)
-                if systemctl stop "$SERVICE_NAME"; then
+                if run_service_action_checked "stop" "停止 shoes 服务失败"; then
                     print_ok "已停止"
-                else
-                    print_err "停止失败"
-                    systemctl --no-pager --full status "$SERVICE_NAME" || true
                 fi
                 pause_and_return
                 ;;
             4)
-                if systemctl restart "$SERVICE_NAME"; then
+                if run_service_action_checked "restart" "重启 shoes 服务失败"; then
                     print_ok "已重启"
-                else
-                    print_err "重启失败"
-                    systemctl --no-pager --full status "$SERVICE_NAME" || true
                 fi
                 pause_and_return
                 ;;
@@ -1377,23 +1477,26 @@ update_shoes() {
 
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     if install_binary_from_release; then
-        if systemctl start "$SERVICE_NAME"; then
+        if run_service_action_checked "start" "更新后启动失败"; then
             rm -f "$backup_path"
             print_ok "更新完成"
         else
             print_err "更新后启动失败，正在回滚旧版本"
-            if install -m 755 "$backup_path" "$EXEC_PATH" && systemctl start "$SERVICE_NAME"; then
+            if install -m 755 "$backup_path" "$EXEC_PATH" && run_service_action_checked "start" "回滚后启动失败"; then
                 print_warn "已回滚到旧版本"
             else
                 print_err "回滚失败"
-                systemctl --no-pager --full status "$SERVICE_NAME" || true
             fi
             rm -f "$backup_path"
         fi
     else
         install -m 755 "$backup_path" "$EXEC_PATH" >/dev/null 2>&1 || true
         rm -f "$backup_path"
-        systemctl start "$SERVICE_NAME" 2>/dev/null || true
+        if ! run_service_action_checked "start" "恢复旧版本后启动失败"; then
+            print_err "更新失败，且恢复后的服务未成功启动"
+            pause_and_return
+            return
+        fi
         print_err "更新失败"
     fi
     pause_and_return
@@ -1429,7 +1532,7 @@ main_menu() {
         case "$option" in
             1) install_shoes ;;
             2)
-                if [[ ! -f "$EXEC_PATH" ]]; then
+                if [[ ! -x "$EXEC_PATH" ]]; then
                     print_err "未安装"
                     pause_and_return
                     continue
