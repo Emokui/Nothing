@@ -16,6 +16,7 @@ DOMAIN,mobile-collector.newrelic.com
 DOMAIN,u.expo.dev
 DOMAIN-SUFFIX,kraken.com
 DOMAIN,kraken.zendesk.com
+DOMAIN-SUFFIX,nsureapi.com
 DOMAIN-SUFFIX,launchdarkly.com
 DOMAIN-SUFFIX,appsflyersdk.com
 DOMAIN,cdn-settings.segment.com
