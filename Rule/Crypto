@@ -14,6 +14,7 @@ DOMAIN,consumer.inapp.customer.io
 DOMAIN,mobile-collector.newrelic.com
 # Krak
 DOMAIN,u.expo.dev
+DOMAIN-SUFFIX,sardine.ai
 DOMAIN-SUFFIX,kraken.com
 DOMAIN,kraken.zendesk.com
 DOMAIN-SUFFIX,nsureapi.com
