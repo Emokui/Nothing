@@ -4,4 +4,4 @@ DOMAIN,analytics.adjust.com
 DOMAIN,app-analytics-services.com
 DOMAIN,crashlyticsreports-pa.googleapis.com
 PROCESS-NAME,CleanMyMac_5
-AND,((PROTOCOL,UDP), (DEST-PORT,3478))
+AND,((OR,((DEST-PORT,3478), (DEST-PORT,19302))), (PROTOCOL,UDP))
