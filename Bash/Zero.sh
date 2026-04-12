@@ -1475,20 +1475,10 @@ firewall_prepare_nat_chain_for_cmd() {
     firewall_exec "$cmd" -t nat -I PREROUTING 1 -j "$ZERO_PORT_JUMP_CHAIN"
 }
 
-firewall_policy_text() {
-    local policy="$1"
-    case "$policy" in
-        ACCEPT) echo -e "${GREEN}${policy}${PLAIN}" ;;
-        DROP)   echo -e "${RED}${policy}${PLAIN}" ;;
-        *)      echo -e "${YELLOW}${policy:-未知}${PLAIN}" ;;
-    esac
-}
-
 firewall_protocol_label() {
     case "$1" in
         tcp)  echo "TCP" ;;
         udp)  echo "UDP" ;;
-        both) echo "TCP+UDP" ;;
         *)    echo "$1" ;;
     esac
 }
@@ -1535,27 +1525,6 @@ firewall_hook_scope() {
         echo "仅IPv6"
     else
         echo "未挂载"
-    fi
-}
-
-firewall_combined_policy_line() {
-    local chain="$1"
-    local p4=""
-    local p6=""
-
-    command -v iptables >/dev/null 2>&1 && p4=$(iptables -S "$chain" 2>/dev/null | awk '/^-P / {print $3; exit}')
-    command -v ip6tables >/dev/null 2>&1 && p6=$(ip6tables -S "$chain" 2>/dev/null | awk '/^-P / {print $3; exit}')
-
-    if [[ -n "$p4" && -n "$p6" && "$p4" == "$p6" ]]; then
-        echo "${chain}=$(firewall_policy_text "$p4")"
-    elif [[ -n "$p4" && -n "$p6" ]]; then
-        echo "${chain}=IPv4:$(firewall_policy_text "$p4")/IPv6:$(firewall_policy_text "$p6")"
-    elif [[ -n "$p4" ]]; then
-        echo "${chain}=IPv4:$(firewall_policy_text "$p4")"
-    elif [[ -n "$p6" ]]; then
-        echo "${chain}=IPv6:$(firewall_policy_text "$p6")"
-    else
-        echo "${chain}=未知"
     fi
 }
 
@@ -2136,9 +2105,8 @@ configure_firewall() {
         [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
             1|2)
-                local input_ports protocol_choice protocol_label action_failed port_range start_port end_port port_spec backup
-                protocol_choice="both"
-                protocol_label=$(firewall_protocol_label "$protocol_choice")
+                local input_ports protocol_label action_failed port_range start_port end_port port_spec backup
+                protocol_label="TCP+UDP"
 
                 read -rp "请输入端口（如 443 或 1000-2000，可空格分隔多个）: " input_ports
                 action_failed=0
@@ -2174,14 +2142,8 @@ configure_firewall() {
                         port_spec="$start_port:$end_port"
                     fi
 
-                    local -a proto_list
-                    case "$protocol_choice" in
-                        both) proto_list=(tcp udp) ;;
-                        tcp|udp) proto_list=("$protocol_choice") ;;
-                    esac
-
                     local proto cmd
-                    for proto in "${proto_list[@]}"; do
+                    for proto in tcp udp; do
                         if [[ "$action_choice" == "2" && "$proto" == "tcp" && "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
                             echo -e "${YELLOW}[!] 跳过 TCP ${port_range}: 不能阻断当前 SSH 端口 ${current_ssh_port}${PLAIN}"
                             continue
