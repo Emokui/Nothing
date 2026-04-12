@@ -19,6 +19,13 @@ get_root_home() {
 
 ROOT_HOME="$(get_root_home)"
 SSHD_CONFIG="/etc/ssh/sshd_config"
+FIREWALL_RULE_DIR="/etc/iptables"
+FIREWALL_RULES_V4="$FIREWALL_RULE_DIR/zero.rules.v4"
+FIREWALL_RULES_V6="$FIREWALL_RULE_DIR/zero.rules.v6"
+ZERO_FIREWALL_SERVICE="/etc/systemd/system/zero-firewall-persistent.service"
+ZERO_FIREWALL_SERVICE_NAME="zero-firewall-persistent.service"
+ZERO_FW_CHAIN="ZERO_INPUT"
+ZERO_PORT_JUMP_CHAIN="ZERO_PORT_JUMP"
 
 get_sshd_effective_option() {
     local option="$1"
@@ -1138,241 +1145,1011 @@ reboot_vps() {
     reboot
 }
 
-generate_firewall_awk_script() {
-    cat << 'AWKSCRIPT'
-BEGIN {
-    GREEN="\033[0;32m"
-    RED="\033[0;31m"
-    YELLOW="\033[0;33m"
-    PLAIN="\033[0m"
+firewall_exec_quiet() {
+    local cmd="$1"
+    shift
+    "$cmd" -w 3 "$@" >/dev/null 2>&1 && return 0
+    "$cmd" "$@" >/dev/null 2>&1
 }
-{
-    ver=$1
-    num=$2
-    target=$5
-    raw_prot=$6
-    in_iface=$8
-    
-    extra=""
-    for(i=12; i<=NF; i++) extra = extra $i " "
-    
-    if (raw_prot == "6") prot="tcp"
-    else if (raw_prot == "17") prot="udp"
-    else if (raw_prot == "1") prot="icmp"
-    else if (raw_prot == "58") prot="icmpv6"
-    else if (raw_prot == "0" || raw_prot == "all") prot="all"
-    else prot=raw_prot
-    
-    if (prot == "icmpv6") next
-    
-    gsub(/0.0.0.0\/0/, "", extra)
-    gsub(/::\/0/, "", extra)
-    gsub(/^[ \t]+|[ \t]+$/, "", extra)
-    if (extra ~ "^" prot " ") {
-        sub("^" prot " ", "", extra)
-    }
-    real_in=""
-    if ($7 == "--") real_in=$8
-    else real_in=$7
-    
-    if (real_in != "*") {
-        extra = "[网卡:" real_in "] " extra
-    }
-    
-    if (real_in == "lo") next
-    if (extra ~ /\[网卡:lo\]/) next 
-    
-    if (extra ~ /RELATED,ESTABLISHED/) next
-    
-    signature = target "|" prot "|" extra
-    
-    if (!seen[signature]++) {
-        order[count++] = signature
-    }
-    
-    if (ver == "v4") id_v4[signature] = num
-    else id_v6[signature] = num
-    
-    meta_target[signature] = target
-    meta_prot[signature] = prot
-    meta_extra[signature] = extra
+
+firewall_exec() {
+    local cmd="$1"
+    shift
+    local output
+
+    if output=$("$cmd" -w 3 "$@" 2>&1); then
+        return 0
+    fi
+    if output=$("$cmd" "$@" 2>&1); then
+        return 0
+    fi
+
+    [[ -n "$output" ]] && echo -e "${RED}[!] ${cmd} $* 失败: ${output}${PLAIN}"
+    return 1
 }
-END {
-    for(i=0; i<count; i++) {
-        sig = order[i]
-        
-        v4 = id_v4[sig]
-        v6 = id_v6[sig]
-        if (v4 && v6 && v4 == v6) disp_id = v4;
-        else if (v4 && v6) disp_id = v4 "(v4)/" v6 "(v6)";
-        else if (v4) disp_id = v4 "(v4)";
-        else disp_id = v6 "(v6)";
-        
-        t = meta_target[sig]
-        if (t == "ACCEPT") color = GREEN
-        else if (t == "DROP") color = RED
-        else color = YELLOW
-        
-        len_t = length(t)
-        pad_len = 14 - len_t
-        if (pad_len < 0) pad_len = 0
-        pad = sprintf("%" pad_len "s", "")
-        
-        final_target = color t pad PLAIN
-        
-        printf "%-14s %s %-14s %s\n", disp_id, final_target, meta_prot[sig], meta_extra[sig]
-    }
+
+firewall_supports_table() {
+    local cmd="$1"
+    local table="$2"
+    command -v "$cmd" >/dev/null 2>&1 || return 1
+    firewall_exec_quiet "$cmd" -t "$table" -S
 }
-AWKSCRIPT
+
+firewall_chain_exists() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    firewall_exec_quiet "$cmd" -t "$table" -S "$chain"
 }
-parse_firewall_table() {
-    local ver=$1
-    local cmd=$2
-    if ! command -v "$cmd" &>/dev/null; then return; fi
-    
-    ($cmd -L INPUT -n -v --line-numbers | grep -v "Chain" | grep -v "target") | while read -r line; do
-         echo "$ver $line"
+
+firewall_ensure_chain() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    firewall_chain_exists "$cmd" "$table" "$chain" && return 0
+    firewall_exec "$cmd" -t "$table" -N "$chain"
+}
+
+firewall_flush_chain() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    firewall_chain_exists "$cmd" "$table" "$chain" || return 0
+    firewall_exec "$cmd" -t "$table" -F "$chain"
+}
+
+firewall_delete_chain() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    firewall_chain_exists "$cmd" "$table" "$chain" || return 0
+    firewall_flush_chain "$cmd" "$table" "$chain" || return 1
+    firewall_exec "$cmd" -t "$table" -X "$chain"
+}
+
+firewall_rule_exists() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    shift 3
+    firewall_exec_quiet "$cmd" -t "$table" -C "$chain" "$@"
+}
+
+firewall_ensure_rule_absent() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    shift 3
+    while firewall_rule_exists "$cmd" "$table" "$chain" "$@"; do
+        firewall_exec "$cmd" -t "$table" -D "$chain" "$@" || return 1
     done
 }
-list_firewall_rules() {
-    local check_cmd="$1"
-    
-    clear
-    echo -e "\n${BLUE}=================== 防火墙规则详情 (IPv4/IPv6) ===================${PLAIN}"
-    
-    local policy
-    policy=$($check_cmd -L INPUT -n 2>/dev/null | grep "Chain INPUT" | awk '{print $4}' | tr -d ')')
-    echo -e "默认策略: $([[ "$policy" == "DROP" ]] && echo -e "${RED}拒绝 (DROP)${PLAIN}" || echo -e "${GREEN}接受 (ACCEPT)${PLAIN}")"
-    
-    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
-    printf "%-14s %-16s %-16s %-s\n" "ID" "行为" "协议" "端口"
-    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
-    
-    {
-        parse_firewall_table "v4" "iptables"
-        parse_firewall_table "v6" "ip6tables"
-    } | awk "$(generate_firewall_awk_script)"
-    
-    echo -e "${BLUE}----------------------------------------------------------------------${PLAIN}"
+
+firewall_ensure_rule_present() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    shift 3
+    firewall_rule_exists "$cmd" "$table" "$chain" "$@" && return 0
+    firewall_exec "$cmd" -t "$table" -A "$chain" "$@"
 }
-configure_firewall() {
-    get_ssh_port() {
-        local port
-        port=$(get_sshd_option "Port" "22")
-        [[ "$port" =~ ^[0-9]+$ ]] || port=22
-        echo "$port"
-    }
-    
-    apply_firewall_cmd() {
-        if command -v iptables &>/dev/null; then
-            iptables "$@" 2>/dev/null || true
-        fi
-        
-        if command -v ip6tables &>/dev/null; then
-            ip6tables "$@" 2>/dev/null || true
-        fi
-    }
-    
-    ensure_iptables_persistent() {
-        if command -v netfilter-persistent &>/dev/null; then
-            systemctl enable netfilter-persistent 2>/dev/null || true
-            return 0
-        fi
-        if systemctl list-unit-files iptables.service 2>/dev/null | grep -q iptables; then
-            systemctl enable iptables 2>/dev/null || true
-            systemctl enable ip6tables 2>/dev/null || true
-            return 0
-        fi
-        echo -e "${YELLOW}[*] 正在安装防火墙持久化工具...${PLAIN}"
-        if command -v apt &>/dev/null; then
-            DEBIAN_FRONTEND=noninteractive apt update && DEBIAN_FRONTEND=noninteractive apt install -y iptables-persistent || true
-            systemctl enable netfilter-persistent 2>/dev/null || true
-        elif command -v dnf &>/dev/null; then
-            dnf install -y iptables-services || true
-            systemctl enable iptables 2>/dev/null || true
-            systemctl enable ip6tables 2>/dev/null || true
-        elif command -v yum &>/dev/null; then
-            yum install -y iptables-services || true
-            systemctl enable iptables 2>/dev/null || true
-            systemctl enable ip6tables 2>/dev/null || true
-        fi
+
+firewall_ensure_rule_first() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    shift 3
+    firewall_ensure_rule_absent "$cmd" "$table" "$chain" "$@" || return 1
+    firewall_exec "$cmd" -t "$table" -I "$chain" 1 "$@"
+}
+
+firewall_has_rules() {
+    local cmd="$1"
+    local table="$2"
+    local chain="$3"
+    firewall_chain_exists "$cmd" "$table" "$chain" || return 1
+    "$cmd" -t "$table" -S "$chain" 2>/dev/null | grep -q '^-A '
+}
+
+firewall_get_default_iface() {
+    local iface
+    iface=$(ip route show default 2>/dev/null | awk '{print $5; exit}')
+    [[ -z "$iface" ]] && iface=$(ip -6 route show default 2>/dev/null | awk '{print $5; exit}')
+    [[ -z "$iface" ]] && iface=$(ip -o link show 2>/dev/null | awk -F': ' '$2 != "lo" {print $2; exit}')
+    echo "$iface"
+}
+
+firewall_install_tools() {
+    local pm
+    pm=$(detect_pkg_manager)
+
+    case "$pm" in
+        apt)    apt update && apt install -y iptables iproute2 ;;
+        dnf)    dnf install -y iptables-services iproute ;;
+        yum)    yum install -y iptables-services iproute ;;
+        apk)    apk add iptables ip6tables iproute2 ;;
+        pacman) pacman -Sy --noconfirm iptables iproute2 ;;
+        zypper) zypper --non-interactive install iptables iproute2 ;;
+        emerge) emerge --ask=n net-firewall/iptables sys-apps/iproute2 ;;
+        *)      return 1 ;;
+    esac
+}
+
+firewall_prepare_tools() {
+    if command -v iptables >/dev/null 2>&1 || command -v ip6tables >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}[!] 未检测到 iptables/ip6tables,正在尝试安装...${PLAIN}"
+    if ! firewall_install_tools; then
+        echo -e "${RED}[!] 无法自动安装防火墙工具,请手动安装 iptables/ip6tables${PLAIN}"
+        return 1
+    fi
+
+    if ! command -v iptables >/dev/null 2>&1 && ! command -v ip6tables >/dev/null 2>&1; then
+        echo -e "${RED}[!] 安装完成后仍未找到可用的防火墙工具${PLAIN}"
+        return 1
+    fi
+}
+
+firewall_write_restore_service() {
+    mkdir -p "$FIREWALL_RULE_DIR" || return 1
+    cat > "$ZERO_FIREWALL_SERVICE" <<EOF
+[Unit]
+Description=Restore Zero firewall rules
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '[ -s "$FIREWALL_RULES_V4" ] && iptables-restore < "$FIREWALL_RULES_V4" || true; [ -s "$FIREWALL_RULES_V6" ] && ip6tables-restore < "$FIREWALL_RULES_V6" || true'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+firewall_setup_persistence() {
+    mkdir -p "$FIREWALL_RULE_DIR" || return 1
+
+    if command -v systemctl >/dev/null 2>&1; then
+        firewall_write_restore_service || return 1
+        systemctl daemon-reload >/dev/null 2>&1 || return 1
+        systemctl enable "$ZERO_FIREWALL_SERVICE_NAME" >/dev/null 2>&1 || return 1
+        return 0
+    fi
+
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if command -v service >/dev/null 2>&1; then
+        return 0
+    fi
+
+    return 1
+}
+
+firewall_save_rules() {
+    local persistence_ok=0
+    local legacy_saved=0
+
+    mkdir -p "$FIREWALL_RULE_DIR" || {
+        echo -e "${RED}[!] 无法创建规则保存目录: $FIREWALL_RULE_DIR${PLAIN}"
+        return 1
     }
 
-    save_rules() {
-        if command -v netfilter-persistent &>/dev/null; then
-            netfilter-persistent save 2>/dev/null || true
-        elif command -v service &>/dev/null; then
-             service iptables save 2>/dev/null || true
-             service ip6tables save 2>/dev/null || true
-        else
-            mkdir -p /etc/iptables
-            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
-            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
-        fi
-    }
-    
-    local current_ssh_port
-    current_ssh_port=$(get_ssh_port)
-    echo -e "${BLUE}[*] 检查 iptables/ip6tables 工具...${PLAIN}"
-    
-    local has_iptables=false
-    local has_ip6tables=false
-    
-    if command -v iptables &>/dev/null; then has_iptables=true; fi
-    if command -v ip6tables &>/dev/null; then has_ip6tables=true; fi
-    
-    if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
-        echo -e "${YELLOW}[!] 未检测到防火墙工具，尝试安装...${PLAIN}"
-        if command -v apt &>/dev/null; then
-            apt update && apt install -y iptables iptables-persistent || true
-        elif command -v dnf &>/dev/null; then
-            dnf install -y iptables-services || true
-        elif command -v yum &>/dev/null; then
-            yum install -y iptables-services || true
-        else
-            echo -e "${RED}[!] 请手动安装 iptables!${PLAIN}"
+    if command -v iptables-save >/dev/null 2>&1; then
+        iptables-save > "$FIREWALL_RULES_V4" 2>/dev/null || {
+            echo -e "${RED}[!] 保存 IPv4 规则失败${PLAIN}"
             return 1
+        }
+    fi
+
+    if command -v ip6tables-save >/dev/null 2>&1; then
+        ip6tables-save > "$FIREWALL_RULES_V6" 2>/dev/null || {
+            echo -e "${RED}[!] 保存 IPv6 规则失败${PLAIN}"
+            return 1
+        }
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        if firewall_setup_persistence; then
+            persistence_ok=1
+        else
+            echo -e "${RED}[!] 无法启用 systemd 防火墙自恢复服务${PLAIN}"
         fi
-        
-        if command -v iptables &>/dev/null; then has_iptables=true; fi
-        if command -v ip6tables &>/dev/null; then has_ip6tables=true; fi
-        
-        if [[ "$has_iptables" == "false" && "$has_ip6tables" == "false" ]]; then
-             echo -e "${RED}[!] 无法安装或找到有效的防火墙工具，脚本退出${PLAIN}"
-             return 1
+    elif command -v netfilter-persistent >/dev/null 2>&1; then
+        if netfilter-persistent save >/dev/null 2>&1; then
+            persistence_ok=1
+        else
+            echo -e "${RED}[!] netfilter-persistent 保存失败${PLAIN}"
+        fi
+    elif command -v service >/dev/null 2>&1; then
+        service iptables save >/dev/null 2>&1 && legacy_saved=1
+        service ip6tables save >/dev/null 2>&1 && legacy_saved=1
+        (( legacy_saved == 1 )) && persistence_ok=1
+        if (( legacy_saved == 0 )); then
+            echo -e "${YELLOW}[!] 已写入规则文件,但当前系统未检测到可用的 service 持久化入口${PLAIN}"
         fi
     fi
-    
-    ensure_iptables_persistent
-    
-    local check_cmd="iptables"
-    if [[ "$has_iptables" == "false" ]]; then
-        check_cmd="ip6tables"
+
+    if (( persistence_ok == 0 )); then
+        echo -e "${YELLOW}[!] 规则当前已生效,并已保存到 ${FIREWALL_RULE_DIR},但重启后的自动恢复未完全确认${PLAIN}"
+        return 1
     fi
-    
+
+    return 0
+}
+
+firewall_create_backup() {
+    local v4_backup=""
+    local v6_backup=""
+    local created=0
+
+    if command -v iptables >/dev/null 2>&1 && ! command -v iptables-save >/dev/null 2>&1; then
+        return 1
+    fi
+
+    if command -v ip6tables >/dev/null 2>&1 && ! command -v ip6tables-save >/dev/null 2>&1; then
+        return 1
+    fi
+
+    if command -v iptables-save >/dev/null 2>&1; then
+        v4_backup=$(mktemp /tmp/zero-fw-v4.XXXXXX) || return 1
+        iptables-save > "$v4_backup" 2>/dev/null || {
+            rm -f "$v4_backup"
+            return 1
+        }
+        created=1
+    fi
+
+    if command -v ip6tables-save >/dev/null 2>&1; then
+        v6_backup=$(mktemp /tmp/zero-fw-v6.XXXXXX) || {
+            rm -f "$v4_backup"
+            return 1
+        }
+        ip6tables-save > "$v6_backup" 2>/dev/null || {
+            rm -f "$v4_backup" "$v6_backup"
+            return 1
+        }
+        created=1
+    fi
+
+    (( created == 1 )) || return 1
+    echo "${v4_backup}|${v6_backup}"
+}
+
+firewall_restore_backup() {
+    local backup="$1"
+    local v4_backup=""
+    local v6_backup=""
+    local restored=0
+
+    IFS='|' read -r v4_backup v6_backup <<< "$backup"
+
+    if [[ -n "$v4_backup" && -f "$v4_backup" ]]; then
+        command -v iptables-restore >/dev/null 2>&1 || return 1
+        iptables-restore < "$v4_backup" >/dev/null 2>&1 || return 1
+        restored=1
+    fi
+
+    if [[ -n "$v6_backup" && -f "$v6_backup" ]]; then
+        command -v ip6tables-restore >/dev/null 2>&1 || return 1
+        ip6tables-restore < "$v6_backup" >/dev/null 2>&1 || return 1
+        restored=1
+    fi
+
+    (( restored == 1 ))
+}
+
+firewall_remove_backup() {
+    local backup="$1"
+    local v4_backup=""
+    local v6_backup=""
+
+    IFS='|' read -r v4_backup v6_backup <<< "$backup"
+    rm -f "$v4_backup" "$v6_backup"
+}
+
+firewall_get_ssh_port() {
+    local port
+    port=$(get_sshd_option "Port" "22")
+    [[ "$port" =~ ^[0-9]+$ ]] || port=22
+    echo "$port"
+}
+
+firewall_prepare_input_chain_for_cmd() {
+    local cmd="$1"
+    firewall_supports_table "$cmd" filter || return 1
+    firewall_ensure_chain "$cmd" filter "$ZERO_FW_CHAIN" || return 1
+    firewall_ensure_rule_absent "$cmd" filter INPUT -j "$ZERO_FW_CHAIN" || return 1
+    firewall_exec "$cmd" -t filter -I INPUT 1 -j "$ZERO_FW_CHAIN"
+}
+
+firewall_prepare_nat_chain_for_cmd() {
+    local cmd="$1"
+    firewall_supports_table "$cmd" nat || return 1
+    firewall_ensure_chain "$cmd" nat "$ZERO_PORT_JUMP_CHAIN" || return 1
+    firewall_ensure_rule_absent "$cmd" nat PREROUTING -j "$ZERO_PORT_JUMP_CHAIN" || return 1
+    firewall_exec "$cmd" -t nat -I PREROUTING 1 -j "$ZERO_PORT_JUMP_CHAIN"
+}
+
+firewall_policy_text() {
+    local policy="$1"
+    case "$policy" in
+        ACCEPT) echo -e "${GREEN}${policy}${PLAIN}" ;;
+        DROP)   echo -e "${RED}${policy}${PLAIN}" ;;
+        *)      echo -e "${YELLOW}${policy:-未知}${PLAIN}" ;;
+    esac
+}
+
+firewall_protocol_label() {
+    case "$1" in
+        tcp)  echo "TCP" ;;
+        udp)  echo "UDP" ;;
+        both) echo "TCP+UDP" ;;
+        *)    echo "$1" ;;
+    esac
+}
+
+firewall_scope_suffix() {
+    case "$1" in
+        v4) echo " [仅IPv4]" ;;
+        v6) echo " [仅IPv6]" ;;
+        *)  echo "" ;;
+    esac
+}
+
+firewall_should_hide_rule_in_view() {
+    local chain="$1"
+    local rule="$2"
+
+    case "$chain" in
+        "$ZERO_FW_CHAIN")
+            [[ "$rule" == *"-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"* ]] && return 0
+            [[ "$rule" == *"-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"* ]] && return 0
+            [[ "$rule" == *"-i lo -j ACCEPT"* ]] && return 0
+            [[ "$rule" == *"-p ipv6-icmp -j ACCEPT"* ]] && return 0
+            ;;
+    esac
+
+    return 1
+}
+
+firewall_hook_scope() {
+    local table="$1"
+    local parent_chain="$2"
+    local target_chain="$3"
+    local has_v4=0
+    local has_v6=0
+
+    firewall_rule_exists "iptables" "$table" "$parent_chain" -j "$target_chain" && has_v4=1
+    firewall_rule_exists "ip6tables" "$table" "$parent_chain" -j "$target_chain" && has_v6=1
+
+    if (( has_v4 == 1 && has_v6 == 1 )); then
+        echo "v4/v6"
+    elif (( has_v4 == 1 )); then
+        echo "仅IPv4"
+    elif (( has_v6 == 1 )); then
+        echo "仅IPv6"
+    else
+        echo "未挂载"
+    fi
+}
+
+firewall_combined_policy_line() {
+    local chain="$1"
+    local p4=""
+    local p6=""
+
+    command -v iptables >/dev/null 2>&1 && p4=$(iptables -S "$chain" 2>/dev/null | awk '/^-P / {print $3; exit}')
+    command -v ip6tables >/dev/null 2>&1 && p6=$(ip6tables -S "$chain" 2>/dev/null | awk '/^-P / {print $3; exit}')
+
+    if [[ -n "$p4" && -n "$p6" && "$p4" == "$p6" ]]; then
+        echo "${chain}=$(firewall_policy_text "$p4")"
+    elif [[ -n "$p4" && -n "$p6" ]]; then
+        echo "${chain}=IPv4:$(firewall_policy_text "$p4")/IPv6:$(firewall_policy_text "$p6")"
+    elif [[ -n "$p4" ]]; then
+        echo "${chain}=IPv4:$(firewall_policy_text "$p4")"
+    elif [[ -n "$p6" ]]; then
+        echo "${chain}=IPv6:$(firewall_policy_text "$p6")"
+    else
+        echo "${chain}=未知"
+    fi
+}
+
+firewall_humanize_rule() {
+    local chain="$1"
+    local rule="$2"
+    local target=""
+    local proto=""
+    local dport=""
+    local iface=""
+    local to_ports=""
+
+    [[ "$rule" =~ -j[[:space:]]+([^[:space:]]+) ]] && target="${BASH_REMATCH[1]}"
+    [[ "$rule" =~ -p[[:space:]]+([^[:space:]]+) ]] && proto="${BASH_REMATCH[1]}"
+    [[ "$rule" =~ --dport[[:space:]]+([^[:space:]]+) ]] && dport="${BASH_REMATCH[1]}"
+    [[ "$rule" =~ -i[[:space:]]+([^[:space:]]+) ]] && iface="${BASH_REMATCH[1]}"
+    [[ "$rule" =~ --to-ports[[:space:]]+([^[:space:]]+) ]] && to_ports="${BASH_REMATCH[1]}"
+
+    case "$chain" in
+        "$ZERO_FW_CHAIN")
+            if [[ "$rule" == *"-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT"* ]] || [[ "$rule" == *"-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"* ]]; then
+                echo "放行 已建立连接"
+                return
+            fi
+            if [[ "$rule" == *"-i lo -j ACCEPT"* ]]; then
+                echo "放行 本地回环"
+                return
+            fi
+            if [[ "$rule" == *"-p ipv6-icmp -j ACCEPT"* ]]; then
+                echo "放行 IPv6 ICMP"
+                return
+            fi
+            if [[ "$rule" == "-j DROP" ]]; then
+                echo "阻断 其他流量"
+                return
+            fi
+            if [[ -n "$target" && -n "$proto" && -n "$dport" ]]; then
+                case "$target" in
+                    ACCEPT) echo "放行 $(firewall_protocol_label "$proto") ${dport}" ;;
+                    DROP)   echo "阻断 $(firewall_protocol_label "$proto") ${dport}" ;;
+                    *)      echo "${target} $(firewall_protocol_label "$proto") ${dport}" ;;
+                esac
+                return
+            fi
+            ;;
+        "$ZERO_PORT_JUMP_CHAIN")
+            if [[ "$target" == "REDIRECT" && -n "$proto" && -n "$dport" && -n "$to_ports" ]]; then
+                if [[ -n "$iface" ]]; then
+                    echo "跳跃 $(firewall_protocol_label "$proto") ${dport} -> ${to_ports} (${iface})"
+                else
+                    echo "跳跃 $(firewall_protocol_label "$proto") ${dport} -> ${to_ports}"
+                fi
+                return
+            fi
+            ;;
+    esac
+
+    echo "$rule"
+}
+
+firewall_compact_rendered_lines() {
+    local chain="$1"
+    local scope rule proto port target action
+    local -a order_types order_values raw_lines group_scopes group_actions group_ports group_tcp group_udp
+    local order_count=0
+    local raw_count=0
+    local group_count=0
+    local found_index
+    local i
+
+    if [[ "$chain" != "$ZERO_FW_CHAIN" ]]; then
+        cat
+        return 0
+    fi
+
+    while IFS=$'\t' read -r scope rule; do
+        [[ -z "$scope" ]] && continue
+
+        proto=""
+        port=""
+        target=""
+        action=""
+
+        if [[ "$rule" =~ -p[[:space:]]+(tcp|udp) ]]; then
+            proto="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$rule" =~ --dport[[:space:]]+([^[:space:]]+) ]]; then
+            port="${BASH_REMATCH[1]}"
+        fi
+        if [[ "$rule" =~ -j[[:space:]]+(ACCEPT|DROP) ]]; then
+            target="${BASH_REMATCH[1]}"
+        fi
+
+        if [[ -n "$proto" && -n "$port" && -n "$target" ]]; then
+            proto=$(firewall_protocol_label "$proto")
+            if [[ "$target" == "ACCEPT" ]]; then
+                action="放行"
+            else
+                action="阻断"
+            fi
+
+            found_index=-1
+            for (( i=0; i<group_count; i++ )); do
+                if [[ "${group_scopes[i]}" == "$scope" && "${group_actions[i]}" == "$action" && "${group_ports[i]}" == "$port" ]]; then
+                    found_index=$i
+                    break
+                fi
+            done
+
+            if (( found_index < 0 )); then
+                found_index=$group_count
+                group_scopes[group_count]="$scope"
+                group_actions[group_count]="$action"
+                group_ports[group_count]="$port"
+                group_tcp[group_count]=0
+                group_udp[group_count]=0
+                order_types[order_count]="group"
+                order_values[order_count]="$group_count"
+                ((order_count++))
+                ((group_count++))
+            fi
+
+            if [[ "$proto" == "TCP" ]]; then
+                group_tcp[found_index]=1
+            elif [[ "$proto" == "UDP" ]]; then
+                group_udp[found_index]=1
+            fi
+
+            continue
+        fi
+
+        raw_lines[raw_count]="${scope}"$'\t'"${rule}"
+        order_types[order_count]="line"
+        order_values[order_count]="$raw_count"
+        ((order_count++))
+        ((raw_count++))
+    done
+
+    for (( i=0; i<order_count; i++ )); do
+        if [[ "${order_types[i]}" == "line" ]]; then
+            printf '%s\n' "${raw_lines[${order_values[i]}]}"
+            continue
+        fi
+
+        local group_index="${order_values[i]}"
+        local proto_label="UDP"
+
+        if (( ${group_tcp[group_index]:-0} == 1 && ${group_udp[group_index]:-0} == 1 )); then
+            proto_label="TCP+UDP"
+        elif (( ${group_tcp[group_index]:-0} == 1 )); then
+            proto_label="TCP"
+        fi
+
+        printf '%s\tDISPLAY:%s %s %s\n' \
+            "${group_scopes[group_index]}" \
+            "${group_actions[group_index]}" \
+            "$proto_label" \
+            "${group_ports[group_index]}"
+    done
+}
+
+firewall_render_merged_chain() {
+    local table="$1"
+    local chain="$2"
+    local title="$3"
+    local rendered=""
+    local displayed=0
+
+    rendered=$(
+        {
+            if firewall_has_rules "iptables" "$table" "$chain"; then
+                iptables -t "$table" -S "$chain" 2>/dev/null | sed -n "s/^-A ${chain} /v4 /p"
+            fi
+            if firewall_has_rules "ip6tables" "$table" "$chain"; then
+                ip6tables -t "$table" -S "$chain" 2>/dev/null | sed -n "s/^-A ${chain} /v6 /p"
+            fi
+        } | awk '
+            function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+            {
+                ver=$1
+                $1=""
+                rule=trim($0)
+                if (!(rule in idx)) {
+                    idx[rule]=++count
+                    order[count]=rule
+                }
+                if (ver=="v4") seen4[rule]=1
+                if (ver=="v6") seen6[rule]=1
+            }
+            END {
+                for (i=1; i<=count; i++) {
+                    rule=order[i]
+                    if (seen4[rule] && seen6[rule]) scope="both"
+                    else if (seen4[rule]) scope="v4"
+                    else scope="v6"
+                    printf "%s\t%s\n", scope, rule
+                }
+            }
+        '
+    )
+    rendered=$(printf '%s\n' "$rendered" | firewall_compact_rendered_lines "$chain")
+
+    echo -e "${YELLOW}${title}:${PLAIN}"
+    if [[ -z "$rendered" ]]; then
+        if firewall_chain_exists "iptables" "$table" "$chain" || firewall_chain_exists "ip6tables" "$table" "$chain"; then
+            echo "  (空)"
+        else
+            echo "  (未创建)"
+        fi
+        return
+    fi
+
+    while IFS=$'\t' read -r scope rule; do
+        [[ -z "$scope" ]] && continue
+        firewall_should_hide_rule_in_view "$chain" "$rule" && continue
+        displayed=1
+        if [[ "$rule" == DISPLAY:* ]]; then
+            echo "  - ${rule#DISPLAY:}$(firewall_scope_suffix "$scope")"
+        else
+            echo "  - $(firewall_humanize_rule "$chain" "$rule")$(firewall_scope_suffix "$scope")"
+        fi
+    done <<< "$rendered"
+
+    if (( displayed == 0 )); then
+        echo "  (无自定义规则)"
+    fi
+}
+
+port_jump_legacy_rules() {
+    local cmd="$1"
+    command -v "$cmd" >/dev/null 2>&1 || return 0
+    firewall_supports_table "$cmd" nat || return 0
+    "$cmd" -t nat -S PREROUTING 2>/dev/null | grep -E '^-A PREROUTING .* -j REDIRECT --to-ports '
+}
+
+port_jump_has_legacy_rules() {
+    local cmd="$1"
+    [[ -n "$(port_jump_legacy_rules "$cmd")" ]]
+}
+
+list_firewall_rules() {
+    local jump_summary="不支持"
+
+    clear
+    echo -e "${BLUE}=================== 防火墙规则详情 ===================${PLAIN}"
+    if firewall_supports_table "iptables" nat || firewall_supports_table "ip6tables" nat; then
+        jump_summary=$(firewall_hook_scope nat PREROUTING "$ZERO_PORT_JUMP_CHAIN")
+    fi
+
+    echo -e "${YELLOW}状态:${PLAIN} 入站管理=$(firewall_hook_scope filter INPUT "$ZERO_FW_CHAIN")  |  端口跳跃=${jump_summary}"
+    firewall_render_merged_chain filter "$ZERO_FW_CHAIN" "端口规则"
+
+    if firewall_supports_table "iptables" nat || firewall_supports_table "ip6tables" nat; then
+        firewall_render_merged_chain nat "$ZERO_PORT_JUMP_CHAIN" "端口跳跃"
+
+        if port_jump_has_legacy_rules "iptables" || port_jump_has_legacy_rules "ip6tables"; then
+            echo -e "${YELLOW}旧版直连 REDIRECT 规则:${PLAIN}"
+            port_jump_legacy_rules "iptables"
+            port_jump_legacy_rules "ip6tables"
+        fi
+    fi
+
+    echo -e "${BLUE}======================================================${PLAIN}"
+}
+
+firewall_apply_port_rule() {
+    local cmd="$1"
+    local action="$2"
+    local proto="$3"
+    local port_spec="$4"
+
+    firewall_prepare_input_chain_for_cmd "$cmd" || return 1
+
+    if [[ "$action" == "open" ]]; then
+        firewall_ensure_rule_absent "$cmd" filter "$ZERO_FW_CHAIN" -p "$proto" --dport "$port_spec" -j DROP || return 1
+        firewall_ensure_rule_first "$cmd" filter "$ZERO_FW_CHAIN" -p "$proto" --dport "$port_spec" -j ACCEPT
+    else
+        firewall_ensure_rule_absent "$cmd" filter "$ZERO_FW_CHAIN" -p "$proto" --dport "$port_spec" -j ACCEPT || return 1
+        firewall_ensure_rule_first "$cmd" filter "$ZERO_FW_CHAIN" -p "$proto" --dport "$port_spec" -j DROP
+    fi
+}
+
+firewall_clear_managed_rules() {
+    local cmd
+    for cmd in iptables ip6tables; do
+        firewall_supports_table "$cmd" filter || continue
+        firewall_prepare_input_chain_for_cmd "$cmd" || return 1
+        firewall_flush_chain "$cmd" filter "$ZERO_FW_CHAIN" || return 1
+    done
+}
+
+firewall_lockdown_all() {
+    local current_ssh_port="$1"
+    local cmd
+    local active=0
+
+    for cmd in iptables ip6tables; do
+        firewall_supports_table "$cmd" filter || continue
+        active=1
+        firewall_prepare_input_chain_for_cmd "$cmd" || return 1
+        firewall_flush_chain "$cmd" filter "$ZERO_FW_CHAIN" || return 1
+        firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || return 1
+        firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -i lo -j ACCEPT || return 1
+        firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -p tcp --dport "$current_ssh_port" -j ACCEPT || return 1
+        if [[ "$cmd" == "ip6tables" ]]; then
+            firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -p ipv6-icmp -j ACCEPT || return 1
+        fi
+        firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -j DROP || return 1
+    done
+
+    (( active == 1 ))
+}
+
+port_jump_has_managed_config() {
+    local cmd
+    for cmd in iptables ip6tables; do
+        firewall_has_rules "$cmd" nat "$ZERO_PORT_JUMP_CHAIN" && return 0
+    done
+    return 1
+}
+
+port_jump_clear_managed_rules() {
+    local cmd
+    for cmd in iptables ip6tables; do
+        firewall_supports_table "$cmd" nat || continue
+        firewall_ensure_rule_absent "$cmd" nat PREROUTING -j "$ZERO_PORT_JUMP_CHAIN" || return 1
+        firewall_delete_chain "$cmd" nat "$ZERO_PORT_JUMP_CHAIN" || return 1
+    done
+}
+
+port_jump_view() {
+    clear
+    echo -e "${BLUE}=================== 端口跳跃状态 ===================${PLAIN}\n"
+    echo -e "${YELLOW}状态:${PLAIN} 端口跳跃=$(firewall_hook_scope nat PREROUTING "$ZERO_PORT_JUMP_CHAIN")"
+    firewall_render_merged_chain nat "$ZERO_PORT_JUMP_CHAIN" "端口跳跃"
+    if port_jump_has_legacy_rules "iptables" || port_jump_has_legacy_rules "ip6tables"; then
+        echo -e "${YELLOW}旧版直连 REDIRECT 规则:${PLAIN}"
+        port_jump_legacy_rules "iptables"
+        port_jump_legacy_rules "ip6tables"
+    fi
+    echo -e "${BLUE}====================================================${PLAIN}"
+    press_any_key_to_continue
+}
+
+port_jump_set() {
+    local mode="${1:-create}"
+    local backup=""
+
+    clear
+    echo -e "${BLUE}检查 iptables/ip6tables 是否已安装...${PLAIN}"
+    firewall_prepare_tools || {
+        press_any_key_to_continue
+        return 1
+    }
+
+    if [[ "$mode" != "overwrite" ]] && port_jump_has_managed_config; then
+        echo -e "${YELLOW}已检测到当前脚本管理的端口跳跃规则,请先使用“修改跳跃”或“删除跳跃”${PLAIN}"
+        press_any_key_to_continue
+        return 0
+    fi
+
+    if port_jump_has_legacy_rules "iptables" || port_jump_has_legacy_rules "ip6tables"; then
+        echo -e "${YELLOW}检测到旧版直连 PREROUTING REDIRECT 规则。${PLAIN}"
+        echo -e "${YELLOW}为避免误删其他 NAT 规则,当前版本只管理本脚本创建的端口跳跃链,请先手动清理旧规则。${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    local interface
+    interface=$(firewall_get_default_iface)
+    if [[ -z "$interface" ]]; then
+        echo -e "${RED}未检测到有效网卡,请检查网络配置${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    local user_interface
+    read -rp "$(echo -e "${YELLOW}请输入网卡名称(默认:${interface}): ${PLAIN}")" user_interface
+    user_interface=${user_interface:-$interface}
+    if ! ip link show "$user_interface" >/dev/null 2>&1; then
+        echo -e "${RED}网卡 ${user_interface} 不存在${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    local port_range start_port end_port
+    read -rp "$(echo -e "${YELLOW}请输入 UDP 端口范围(默认18443:28444): ${PLAIN}")" port_range
+    port_range=${port_range:-18443:28444}
+    if [[ "$port_range" =~ ^([0-9]+):([0-9]+)$ ]]; then
+        start_port=${BASH_REMATCH[1]}
+        end_port=${BASH_REMATCH[2]}
+    else
+        echo -e "${RED}端口范围格式错误,请使用 start:end${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+    if (( start_port < 1 || end_port > 65535 || start_port > end_port )); then
+        echo -e "${RED}无效端口范围,必须在 1-65535 且起始不大于结束${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    local target_port
+    read -rp "$(echo -e "${YELLOW}请输入目标 UDP 端口: ${PLAIN}")" target_port
+    if ! [[ "$target_port" =~ ^[0-9]+$ ]] || (( target_port < 1 || target_port > 65535 )); then
+        echo -e "${RED}无效的目标端口,请输入 1-65535${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    local need_v4=0 need_v6=0 ok_v4=0 ok_v6=0
+    firewall_supports_table "iptables" nat && need_v4=1
+    firewall_supports_table "ip6tables" nat && need_v6=1
+    if (( need_v4 == 0 && need_v6 == 0 )); then
+        echo -e "${RED}当前系统未检测到可用的 NAT 表,无法设置端口跳跃${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    backup=$(firewall_create_backup) || {
+        echo -e "${RED}创建防火墙备份失败,已取消本次修改${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+
+    if (( need_v4 == 1 )); then
+        firewall_prepare_nat_chain_for_cmd "iptables" &&
+        firewall_flush_chain "iptables" nat "$ZERO_PORT_JUMP_CHAIN" &&
+        firewall_ensure_rule_present "iptables" nat "$ZERO_PORT_JUMP_CHAIN" -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port" &&
+        ok_v4=1
+    fi
+
+    if (( need_v6 == 1 )); then
+        firewall_prepare_nat_chain_for_cmd "ip6tables" &&
+        firewall_flush_chain "ip6tables" nat "$ZERO_PORT_JUMP_CHAIN" &&
+        firewall_ensure_rule_present "ip6tables" nat "$ZERO_PORT_JUMP_CHAIN" -i "$user_interface" -p udp --dport "$port_range" -j REDIRECT --to-ports "$target_port" &&
+        ok_v6=1
+    fi
+
+    if (( (need_v4 == 1 && ok_v4 == 0) || (need_v6 == 1 && ok_v6 == 0) )); then
+        echo -e "${RED}端口跳跃规则未能完整写入,正在回滚本次修改...${PLAIN}"
+        if firewall_restore_backup "$backup"; then
+            firewall_save_rules >/dev/null 2>&1 || true
+            echo -e "${YELLOW}已恢复到修改前的端口跳跃状态${PLAIN}"
+        else
+            echo -e "${RED}回滚失败,请手动检查当前 NAT 规则${PLAIN}"
+        fi
+        firewall_remove_backup "$backup"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    firewall_save_rules || true
+    firewall_remove_backup "$backup"
+    echo -e "${GREEN}端口跳跃规则已写入: ${user_interface} ${port_range} -> ${target_port}/udp${PLAIN}"
+    port_jump_view
+}
+
+port_jump_modify() {
+    clear
+    if ! port_jump_has_managed_config; then
+        echo -e "${YELLOW}当前没有由本脚本管理的端口跳跃规则${PLAIN}"
+        press_any_key_to_continue
+        return 0
+    fi
+
+    port_jump_set overwrite
+}
+
+port_jump_delete() {
+    local backup=""
+
+    clear
+    if ! port_jump_has_managed_config; then
+        echo -e "${YELLOW}当前没有由本脚本管理的端口跳跃规则${PLAIN}"
+        if port_jump_has_legacy_rules "iptables" || port_jump_has_legacy_rules "ip6tables"; then
+            echo -e "${YELLOW}检测到旧版直连 REDIRECT 规则,请手动清理 PREROUTING 中的对应条目${PLAIN}"
+        fi
+        press_any_key_to_continue
+        return 0
+    fi
+
+    backup=$(firewall_create_backup) || {
+        echo -e "${RED}创建防火墙备份失败,已取消删除${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+
+    echo -e "${BLUE}正在删除端口跳跃规则...${PLAIN}"
+    if ! port_jump_clear_managed_rules; then
+        echo -e "${RED}删除端口跳跃规则失败${PLAIN}"
+        if firewall_restore_backup "$backup"; then
+            firewall_save_rules >/dev/null 2>&1 || true
+            echo -e "${YELLOW}已恢复删除前的端口跳跃状态${PLAIN}"
+        else
+            echo -e "${RED}回滚失败,请手动检查 NAT 规则${PLAIN}"
+        fi
+        firewall_remove_backup "$backup"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    firewall_save_rules || true
+    firewall_remove_backup "$backup"
+    echo -e "${GREEN}端口跳跃配置已删除${PLAIN}"
+    press_any_key_to_continue
+}
+
+port_jump_menu() {
     while true; do
         clear
-        echo -e "${BLUE}========= iptables 防火墙管理 =========${PLAIN}"
+        echo -e "${BLUE}✦ Ports Jump ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}设置跳跃"
+        echo -e "${GREEN}  2.${PLAIN}修改跳跃"
+        echo -e "${GREEN}  3.${PLAIN}查看跳跃"
+        echo -e "${GREEN}  4.${PLAIN}删除跳跃"
+        echo -e "${GREEN}  0.${PLAIN}返回上级"
+        read -rp "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" pjopt
+
+        case "$pjopt" in
+            1) port_jump_set ;;
+            2) port_jump_modify ;;
+            3) port_jump_view ;;
+            4) port_jump_delete ;;
+            0) break ;;
+            *) echo -e "${RED}无效选项,请重新输入${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
+configure_firewall() {
+    if ! firewall_prepare_tools; then
+        press_any_key_to_continue
+        return 1
+    fi
+
+    if ! firewall_prepare_input_chain_for_cmd "iptables" 2>/dev/null && ! firewall_prepare_input_chain_for_cmd "ip6tables" 2>/dev/null; then
+        echo -e "${RED}[!] 无法初始化防火墙管理链${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    firewall_setup_persistence || true
+
+    while true; do
+        local current_ssh_port
+        local has_iptables=false
+        local has_ip6tables=false
+
+        firewall_supports_table "iptables" filter && has_iptables=true
+        firewall_supports_table "ip6tables" filter && has_ip6tables=true
+        current_ssh_port=$(firewall_get_ssh_port)
+
+        clear
+        echo -e "${BLUE}===== iptables 防火墙管理 =====${PLAIN}"
         echo -e "${BLUE}SSH端口:  ${YELLOW}${current_ssh_port}${PLAIN}"
-        echo -e "${BLUE}IPv4支持: $([[ "$has_iptables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未开启${PLAIN}")${PLAIN}"
-        echo -e "${BLUE}IPv6支持: $([[ "$has_ip6tables" == "true" ]] && echo -e "${GREEN}开启${PLAIN}" || echo -e "${RED}未开启${PLAIN}")${PLAIN}"
-        echo -e "${BLUE}=======================================${PLAIN}"
-        echo -e "${GREEN}1.开启端口${PLAIN}"
-        echo -e "${RED}2.关闭端口${PLAIN}"
-        echo -e "${GREEN}3.开启全部端口${PLAIN}"
-        echo -e "${RED}4.关闭全部端口(保留SSH)${PLAIN}"
-        echo -e "${BLUE}5.显示当前规则${PLAIN}"
+        if [[ "$has_iptables" != "true" || "$has_ip6tables" != "true" ]]; then
+            if [[ "$has_iptables" == "true" && "$has_ip6tables" != "true" ]]; then
+                echo -e "${YELLOW}当前仅支持 IPv4，规则将只写入 IPv4${PLAIN}"
+            elif [[ "$has_iptables" != "true" && "$has_ip6tables" == "true" ]]; then
+                echo -e "${YELLOW}当前仅支持 IPv6，规则将只写入 IPv6${PLAIN}"
+            else
+                echo -e "${RED}未检测到可用的 iptables/ip6tables，部分功能可能不可用${PLAIN}"
+            fi
+        fi
+        echo -e "${BLUE}===============================${PLAIN}"
+        echo -e "${GREEN}1.放行端口${PLAIN}"
+        echo -e "${RED}2.阻断端口${PLAIN}"
+        echo -e "${GREEN}3.清空规则${PLAIN}"
+        echo -e "${RED}4.仅放行SSH${PLAIN}"
+        echo -e "${BLUE}5.查看当前规则${PLAIN}"
+        echo -e "${GREEN}6.配置端口跳跃${PLAIN}"
         echo -e "${YELLOW}0.返回主菜单${PLAIN}"
-        echo -e "${BLUE}=======================================${PLAIN}"
-        read -p "$(echo -e "${BLUE}请输入选项 [0-5]: ${PLAIN}")" action_choice
+        echo -e "${BLUE}===============================${PLAIN}"
+        read -rp "$(echo -e "${BLUE}请输入选项 [0-6]: ${PLAIN}")" action_choice
         action_choice=$(echo "$action_choice" | xargs)
-        
+
         [[ "$action_choice" == "0" ]] && return
         case "$action_choice" in
             1|2)
-                read -rp "请输入端口（如 443 或 1000-2000）: " input_ports
+                local input_ports protocol_choice protocol_label action_failed port_range start_port end_port port_spec backup
+                protocol_choice="both"
+                protocol_label=$(firewall_protocol_label "$protocol_choice")
+
+                read -rp "请输入端口（如 443 或 1000-2000，可空格分隔多个）: " input_ports
+                action_failed=0
+                backup=$(firewall_create_backup) || {
+                    echo -e "${RED}创建防火墙备份失败,已取消本次操作${PLAIN}"
+                    press_any_key_to_continue
+                    continue
+                }
+
                 for port_range in $input_ports; do
-                    local start_port end_port
+                    local port_failed=0
                     if [[ "$port_range" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                         start_port=${BASH_REMATCH[1]}
                         end_port=${BASH_REMATCH[2]}
@@ -1381,70 +2158,126 @@ configure_firewall() {
                         end_port=$port_range
                     else
                         echo -e "${RED}[!] 无效端口格式: $port_range${PLAIN}"
+                        action_failed=1
                         continue
                     fi
+
                     if (( start_port < 1 || end_port > 65535 || start_port > end_port )); then
                         echo -e "${RED}[!] 端口范围无效: $port_range (必须 1-65535 且起始≤结束)${PLAIN}"
+                        action_failed=1
                         continue
                     fi
-                    if [[ "$action_choice" == "1" ]]; then
-                        apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j DROP
-                        apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j DROP
-                        apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
-                        apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
-                        
-                        apply_firewall_cmd -I INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
-                        apply_firewall_cmd -I INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
-                        echo -e "${GREEN}[✓] 端口 $port_range 已开启${PLAIN}"
+
+                    if (( start_port == end_port )); then
+                        port_spec="$start_port"
                     else
-                        if [[ "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
-                            echo -e "${YELLOW}[!] 警告: 即使选择关闭,SSH 端口 ($current_ssh_port) 也不会被阻断${PLAIN}"
-                        else
-                            apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j ACCEPT
-                            apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j ACCEPT
-                            apply_firewall_cmd -D INPUT -p tcp --dport "$start_port:$end_port" -j DROP
-                            apply_firewall_cmd -D INPUT -p udp --dport "$start_port:$end_port" -j DROP
-                            apply_firewall_cmd -I INPUT -p tcp --dport "$start_port:$end_port" -j DROP
-                            apply_firewall_cmd -I INPUT -p udp --dport "$start_port:$end_port" -j DROP
-                            echo -e "${RED}[✓] 端口 $port_range 已关闭${PLAIN}"
+                        port_spec="$start_port:$end_port"
+                    fi
+
+                    local -a proto_list
+                    case "$protocol_choice" in
+                        both) proto_list=(tcp udp) ;;
+                        tcp|udp) proto_list=("$protocol_choice") ;;
+                    esac
+
+                    local proto cmd
+                    for proto in "${proto_list[@]}"; do
+                        if [[ "$action_choice" == "2" && "$proto" == "tcp" && "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
+                            echo -e "${YELLOW}[!] 跳过 TCP ${port_range}: 不能阻断当前 SSH 端口 ${current_ssh_port}${PLAIN}"
+                            continue
                         fi
+
+                        for cmd in iptables ip6tables; do
+                            firewall_supports_table "$cmd" filter || continue
+                            if [[ "$action_choice" == "1" ]]; then
+                                firewall_apply_port_rule "$cmd" "open" "$proto" "$port_spec" || {
+                                    action_failed=1
+                                    port_failed=1
+                                }
+                            else
+                                firewall_apply_port_rule "$cmd" "close" "$proto" "$port_spec" || {
+                                    action_failed=1
+                                    port_failed=1
+                                }
+                            fi
+                        done
+                    done
+
+                    if (( port_failed == 0 )); then
+                        if [[ "$action_choice" == "1" ]]; then
+                            echo -e "${GREEN}[✓] 端口 $port_range 已按 ${protocol_label} 规则放行${PLAIN}"
+                        else
+                            echo -e "${RED}[✓] 端口 $port_range 已按 ${protocol_label} 规则阻断${PLAIN}"
+                        fi
+                    else
+                        echo -e "${YELLOW}[!] 端口 $port_range 的部分规则写入失败,请查看当前规则${PLAIN}"
                     fi
                 done
-                save_rules
-                press_any_key_to_continue
-                ;;
-            3)  
-                apply_firewall_cmd -F
-                apply_firewall_cmd -P INPUT ACCEPT
-                apply_firewall_cmd -P FORWARD ACCEPT
-                apply_firewall_cmd -P OUTPUT ACCEPT
-                save_rules
-                echo -e "${GREEN}[✓] 防火墙规则已清空,所有端口开放${PLAIN}"
-                press_any_key_to_continue
-                ;;
-            4)  
-                echo -e "${YELLOW}[*] 正在配置全关闭策略(保留SSH: $current_ssh_port）...${PLAIN}"
-                
-                apply_firewall_cmd -F
-                
-                apply_firewall_cmd -P INPUT DROP
-                apply_firewall_cmd -P FORWARD DROP
-                apply_firewall_cmd -P OUTPUT ACCEPT
-                apply_firewall_cmd -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-                 
-                apply_firewall_cmd -A INPUT -i lo -j ACCEPT
-                
-                apply_firewall_cmd -A INPUT -p tcp --dport "$current_ssh_port" -j ACCEPT
-                if command -v ip6tables &>/dev/null; then
-                   ip6tables -A INPUT -p ipv6-icmp -j ACCEPT 2>/dev/null || true
+
+                if (( action_failed == 0 )); then
+                    firewall_save_rules || true
+                else
+                    if firewall_restore_backup "$backup"; then
+                        firewall_save_rules >/dev/null 2>&1 || true
+                        echo -e "${YELLOW}[!] 本次操作存在失败项,已回滚到修改前状态${PLAIN}"
+                    else
+                        echo -e "${RED}[!] 本次操作存在失败项,且回滚失败,请立即检查规则${PLAIN}"
+                    fi
                 fi
-                save_rules
-                echo -e "${RED}[✓] 已阻止所有入站连接(SSH 端口 $current_ssh_port 已放行)${PLAIN}"
+                firewall_remove_backup "$backup"
+                press_any_key_to_continue
+                ;;
+            3)
+                local backup
+                backup=$(firewall_create_backup) || {
+                    echo -e "${RED}创建防火墙备份失败,已取消清空${PLAIN}"
+                    press_any_key_to_continue
+                    continue
+                }
+                if firewall_clear_managed_rules; then
+                    firewall_save_rules || true
+                    echo -e "${GREEN}[✓] 已清空本脚本管理的规则,不再改动系统原有 INPUT/FORWARD/OUTPUT 策略${PLAIN}"
+                else
+                    echo -e "${RED}[!] 清空规则失败${PLAIN}"
+                    if firewall_restore_backup "$backup"; then
+                        firewall_save_rules >/dev/null 2>&1 || true
+                        echo -e "${YELLOW}已恢复到清空前的状态${PLAIN}"
+                    else
+                        echo -e "${RED}回滚失败,请手动检查当前规则${PLAIN}"
+                    fi
+                fi
+                firewall_remove_backup "$backup"
+                press_any_key_to_continue
+                ;;
+            4)
+                local backup
+                backup=$(firewall_create_backup) || {
+                    echo -e "${RED}创建防火墙备份失败,已取消本次操作${PLAIN}"
+                    press_any_key_to_continue
+                    continue
+                }
+                echo -e "${YELLOW}[*] 正在配置仅保留 SSH 的入站策略(SSH: ${current_ssh_port})...${PLAIN}"
+                if firewall_lockdown_all "$current_ssh_port"; then
+                    firewall_save_rules || true
+                    echo -e "${GREEN}[✓] 已应用仅留 SSH 的入站规则${PLAIN}"
+                else
+                    echo -e "${RED}[!] 写入仅保留 SSH 规则失败${PLAIN}"
+                    if firewall_restore_backup "$backup"; then
+                        firewall_save_rules >/dev/null 2>&1 || true
+                        echo -e "${YELLOW}已恢复到修改前的状态${PLAIN}"
+                    else
+                        echo -e "${RED}回滚失败,请手动检查当前规则${PLAIN}"
+                    fi
+                fi
+                firewall_remove_backup "$backup"
                 press_any_key_to_continue
                 ;;
             5)
-                list_firewall_rules "$check_cmd"
+                list_firewall_rules
                 press_any_key_to_continue
+                ;;
+            6)
+                port_jump_menu
                 ;;
             *)
                 echo -e "${RED}[!] 无效选项${PLAIN}"
@@ -1546,7 +2379,7 @@ main_menu() {
         echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
         echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
-        read -p "$(echo -e "${BLUE}✦ Choice [0-15] ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice [0-17] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         if [[ "$choice" =~ ^[0-9]+$ ]]; then
             choice=$((10#$choice))
