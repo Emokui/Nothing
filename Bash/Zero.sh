@@ -1276,18 +1276,18 @@ firewall_install_tools() {
 }
 
 firewall_prepare_tools() {
-    if command -v iptables >/dev/null 2>&1 || command -v ip6tables >/dev/null 2>&1; then
+    if (command -v iptables >/dev/null 2>&1 || command -v ip6tables >/dev/null 2>&1) && command -v ip >/dev/null 2>&1; then
         return 0
     fi
 
-    echo -e "${YELLOW}[!] 未检测到 iptables/ip6tables,正在尝试安装...${PLAIN}"
+    echo -e "${YELLOW}[!] 未检测到完整的防火墙工具(iptables/ip6tables/ip),正在尝试安装...${PLAIN}"
     if ! firewall_install_tools; then
-        echo -e "${RED}[!] 无法自动安装防火墙工具,请手动安装 iptables/ip6tables${PLAIN}"
+        echo -e "${RED}[!] 无法自动安装防火墙工具,请手动安装 iptables/ip6tables 和 iproute2${PLAIN}"
         return 1
     fi
 
-    if ! command -v iptables >/dev/null 2>&1 && ! command -v ip6tables >/dev/null 2>&1; then
-        echo -e "${RED}[!] 安装完成后仍未找到可用的防火墙工具${PLAIN}"
+    if (! command -v iptables >/dev/null 2>&1 && ! command -v ip6tables >/dev/null 2>&1) || ! command -v ip >/dev/null 2>&1; then
+        echo -e "${RED}[!] 安装完成后仍缺少可用的防火墙工具或 ip 命令${PLAIN}"
         return 1
     fi
 }
@@ -1841,6 +1841,9 @@ firewall_lockdown_all() {
 port_jump_has_managed_config() {
     local cmd
     for cmd in iptables ip6tables; do
+        firewall_supports_table "$cmd" nat || continue
+        firewall_chain_exists "$cmd" nat "$ZERO_PORT_JUMP_CHAIN" && return 0
+        firewall_rule_exists "$cmd" nat PREROUTING -j "$ZERO_PORT_JUMP_CHAIN" && return 0
         firewall_has_rules "$cmd" nat "$ZERO_PORT_JUMP_CHAIN" && return 0
     done
     return 1
