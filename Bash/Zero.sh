@@ -971,29 +971,64 @@ change_timezone() {
         press_any_key_to_continue
         return
     fi
-    
-    if ! command -v curl >/dev/null; then
-        echo -e "${YELLOW}未检测到 curl,正在自动安装...${PLAIN}"
-        pkg_install curl
-    fi
 
-    echo -e "${YELLOW}正在检测当前网络推荐时区...${PLAIN}"
+    _timezone_is_valid() {
+        local tz="$1"
+        [[ "$tz" =~ ^[A-Za-z0-9._+-]+(/[A-Za-z0-9._+-]+)+$ ]] || return 1
+        [[ -f "/usr/share/zoneinfo/$tz" ]] || return 1
+        return 0
+    }
+
+    _timezone_get_system_tz() {
+        local sys_tz
+        sys_tz=$(timedatectl show -p Timezone --value 2>/dev/null | xargs)
+        echo "${sys_tz:-未知}"
+    }
+
+    _timezone_detect_recommended() {
+        local tz=""
+        if ! command -v curl >/dev/null; then
+            echo -e "${YELLOW}未检测到 curl,正在尝试安装...${PLAIN}" >&2
+            pkg_install curl >/dev/null 2>&1 || return 1
+        fi
+
+        tz=$(curl -fsSL --connect-timeout 5 --max-time 8 https://ipapi.co/timezone 2>/dev/null | tr -d '\r' | xargs)
+        _timezone_is_valid "$tz" || return 1
+        echo "$tz"
+    }
+
+    _timezone_apply() {
+        local tz="$1"
+        if ! _timezone_is_valid "$tz"; then
+            echo -e "${RED}无效的时区名称: ${tz}${PLAIN}"
+            return 1
+        fi
+
+        echo -e "${YELLOW}正在设置时区为 ${tz} ...${PLAIN}"
+        if timedatectl set-timezone "$tz"; then
+            echo -e "${GREEN}✔ 设置成功! 当前时间: $(date)${PLAIN}"
+            return 0
+        fi
+
+        echo -e "${RED}✘ 设置失败${PLAIN}"
+        return 1
+    }
+
+    echo -e "${YELLOW}正在检测推荐时区...${PLAIN}"
     local current_tz_web
-    current_tz_web=$(curl -s --connect-timeout 5 https://ipapi.co/timezone)
+    current_tz_web=$(_timezone_detect_recommended || true)
 
     while true; do
         local sys_tz
-        sys_tz=$(timedatectl 2>/dev/null | grep -i 'time zone' | awk '{print $3}')
+        sys_tz=$(_timezone_get_system_tz)
         clear
-        echo -e "${BLUE}========= 更改时区管理 ========${PLAIN}"
-        echo -e "${YELLOW} 当前系统时区: ${GREEN}${sys_tz}${PLAIN}"
-        echo -e "${YELLOW} 网络推荐时区: ${GREEN}${current_tz_web:-未知}${PLAIN}"
-        echo -e "${BLUE}===============================${PLAIN}"
-        echo -e "${GREEN} 1.使用推荐时区 (${current_tz_web})${PLAIN}"
-        echo -e "${GREEN} 2.按国家代码选择${PLAIN}"
-        echo -e "${GREEN} 3.手动输入时区名称${PLAIN}"
-        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
-        echo -e "${BLUE}===============================${PLAIN}"
+        echo -e "${BLUE}======= 时区管理 =====${PLAIN}"
+        echo -e "${YELLOW}当前 ${sys_tz}${PLAIN}"
+        echo -e "${YELLOW}推荐 ${current_tz_web:-不可用}${PLAIN}"
+        echo -e "${BLUE}======================${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}推荐时区  ${GREEN}2.${PLAIN}国家代码"
+        echo -e "${GREEN}3.${PLAIN}手动输入  ${YELLOW}0.${PLAIN}返回菜单"
+        echo -e "${BLUE}======================${PLAIN}"
         
         read -p "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -1001,14 +1036,9 @@ change_timezone() {
         case "$choice" in
             1)
                 if [ -n "$current_tz_web" ]; then
-                    echo -e "${YELLOW}正在设置时区为 $current_tz_web ...${PLAIN}"
-                    if timedatectl set-timezone "$current_tz_web"; then
-                        echo -e "${GREEN}✔ 设置成功!当前时间: $(date)${PLAIN}"
-                    else
-                        echo -e "${RED}✘ 设置失败,请检查时区名称是否正确。${PLAIN}"
-                    fi
+                    _timezone_apply "$current_tz_web"
                 else
-                    echo -e "${RED}如果是离线环境或API超时,无法获取推荐时区。${PLAIN}"
+                    echo -e "${YELLOW}当前无法获取推荐时区,请使用国家代码或手动输入${PLAIN}"
                 fi
                 press_any_key_to_continue
                 ;;
@@ -1027,7 +1057,7 @@ change_timezone() {
                     continue
                 fi
 
-                mapfile -t lines < <(awk -v code="$input_code" '$1 == code {print $3}' "$zone_tab" | sort -u)
+                mapfile -t lines < <(awk -v code="$input_code" '$1 ~ ("(^|,)" code "(,|$)") {print $3}' "$zone_tab" | sort -u)
                 
                 if [ "${#lines[@]}" -eq 0 ]; then
                     echo -e "${RED}未找到代码 [$input_code] 对应的时区信息。${PLAIN}"
@@ -1044,12 +1074,7 @@ change_timezone() {
                 read -rp "$(echo -e "${BLUE}请选择编号: ${PLAIN}")" tz_idx
                 if [[ "$tz_idx" =~ ^[0-9]+$ ]] && [ "$tz_idx" -ge 1 ] && [ "$tz_idx" -le "${#lines[@]}" ]; then
                     sel_tz="${lines[$((tz_idx-1))]}"
-                    echo -e "${YELLOW}正在设置时区为 $sel_tz ...${PLAIN}"
-                    if timedatectl set-timezone "$sel_tz"; then
-                        echo -e "${GREEN}✔ 设置成功！当前时间: $(date)${PLAIN}"
-                    else
-                        echo -e "${RED}设置失败。${PLAIN}"
-                    fi
+                    _timezone_apply "$sel_tz"
                 else
                     echo -e "${RED}无效编号${PLAIN}"
                 fi
@@ -1057,12 +1082,9 @@ change_timezone() {
                 ;;
             3)
                 read -rp "$(echo -e "${BLUE}请输入时区全称 (例: Asia/Shanghai): ${PLAIN}")" manual_tz
+                manual_tz=$(echo "$manual_tz" | xargs)
                 if [ -n "$manual_tz" ]; then
-                    if timedatectl set-timezone "$manual_tz" 2>/dev/null; then
-                        echo -e "${GREEN}✔ 设置成功!当前时间: $(date)${PLAIN}"
-                    else
-                        echo -e "${RED}设置失败:${PLAIN}无效的时区名称"
-                    fi
+                    _timezone_apply "$manual_tz"
                 fi
                 press_any_key_to_continue
                 ;;
