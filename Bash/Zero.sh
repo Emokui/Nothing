@@ -644,6 +644,12 @@ change_ssh_port() {
             return
         fi
         if [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )); then
+            if ! firewall_can_change_ssh_port "$new_port"; then
+                echo -e "${RED}当前防火墙未放行 TCP ${new_port},请先到 FireWall -> 放行端口 中放行后再修改 SSH 端口${PLAIN}"
+                press_any_key_to_continue
+                continue
+            fi
+
             update_sshd_option "Port" "$new_port"
             
             if restart_sshd_safe; then
@@ -1457,6 +1463,74 @@ firewall_get_ssh_port() {
     port=$(get_sshd_option "Port" "22")
     [[ "$port" =~ ^[0-9]+$ ]] || port=22
     echo "$port"
+}
+
+firewall_port_spec_contains() {
+    local port="$1"
+    local spec="$2"
+
+    if [[ "$spec" =~ ^[0-9]+$ ]]; then
+        (( port == spec ))
+        return
+    fi
+
+    if [[ "$spec" =~ ^([0-9]+):([0-9]+)$ ]]; then
+        (( port >= ${BASH_REMATCH[1]} && port <= ${BASH_REMATCH[2]} ))
+        return
+    fi
+
+    return 1
+}
+
+firewall_chain_allows_tcp_port_for_ssh_change() {
+    local cmd="$1"
+    local port="$2"
+    local line proto dport target
+
+    firewall_supports_table "$cmd" filter || return 0
+    firewall_rule_exists "$cmd" filter INPUT -j "$ZERO_FW_CHAIN" || return 0
+    firewall_chain_exists "$cmd" filter "$ZERO_FW_CHAIN" || return 0
+
+    while IFS= read -r line; do
+        [[ "$line" == "-A $ZERO_FW_CHAIN "* ]] || continue
+        [[ "$line" == *"-m conntrack --ctstate ESTABLISHED,RELATED"* ]] && continue
+        [[ "$line" == *"-m conntrack --ctstate RELATED,ESTABLISHED"* ]] && continue
+        [[ "$line" == *"-i lo"* ]] && continue
+
+        proto=""
+        dport=""
+        target=""
+
+        [[ "$line" =~ -p[[:space:]]+([^[:space:]]+) ]] && proto="${BASH_REMATCH[1]}"
+        [[ "$line" =~ --dport[[:space:]]+([^[:space:]]+) ]] && dport="${BASH_REMATCH[1]}"
+        [[ "$line" =~ -j[[:space:]]+([^[:space:]]+) ]] && target="${BASH_REMATCH[1]}"
+
+        [[ -n "$proto" && "$proto" != "tcp" ]] && continue
+        [[ -n "$dport" ]] && ! firewall_port_spec_contains "$port" "$dport" && continue
+
+        case "$target" in
+            ACCEPT) return 0 ;;
+            DROP)   return 1 ;;
+        esac
+    done < <("$cmd" -t filter -S "$ZERO_FW_CHAIN" 2>/dev/null)
+
+    return 0
+}
+
+firewall_can_change_ssh_port() {
+    local port="$1"
+    local cmd
+    local checked=0
+
+    for cmd in iptables ip6tables; do
+        firewall_supports_table "$cmd" filter || continue
+        firewall_rule_exists "$cmd" filter INPUT -j "$ZERO_FW_CHAIN" || continue
+        checked=1
+        firewall_chain_allows_tcp_port_for_ssh_change "$cmd" "$port" || return 1
+    done
+
+    (( checked == 0 )) && return 0
+    return 0
 }
 
 firewall_prepare_input_chain_for_cmd() {
