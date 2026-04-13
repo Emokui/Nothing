@@ -611,12 +611,52 @@ set_swappiness() {
 ssh_config_menu() {
     while true; do
         clear
-        echo -e "${BLUE}====== SSH配置 ======${PLAIN}"
-        echo -e "${GREEN} 1.设置Root密码${PLAIN}"
-        echo -e "${GREEN} 2.设置Root密钥${PLAIN}"
-        echo -e "${BLUE} 3.修改登录端口${PLAIN}"
-        echo -e "${RED} 4.关闭登录方式${PLAIN}"
-        echo -e "${YELLOW} 0.返回主菜单${PLAIN}"
+        local current_port permit_root_login pass_auth pubkey_auth
+        local root_login_text password_login_text pubkey_login_text
+
+        current_port=$(get_sshd_option "Port" "22")
+        [[ "$current_port" =~ ^[0-9]+$ ]] || current_port=22
+        permit_root_login=$(get_sshd_option "PermitRootLogin" "yes")
+        pass_auth=$(get_sshd_option "PasswordAuthentication" "yes")
+        pubkey_auth=$(get_sshd_option "PubkeyAuthentication" "yes")
+
+        case "$permit_root_login" in
+            yes)
+                root_login_text="${GREEN}开启${PLAIN}"
+                ;;
+            prohibit-password|without-password)
+                root_login_text="${YELLOW}仅密钥${PLAIN}"
+                ;;
+            forced-commands-only)
+                root_login_text="${YELLOW}受限${PLAIN}"
+                ;;
+            no)
+                root_login_text="${RED}关闭${PLAIN}"
+                ;;
+            *)
+                root_login_text="${YELLOW}${permit_root_login:-未知}${PLAIN}"
+                ;;
+        esac
+
+        if [[ "$pass_auth" == "yes" ]]; then
+            password_login_text="${GREEN}开启${PLAIN}"
+        else
+            password_login_text="${RED}关闭${PLAIN}"
+        fi
+
+        if [[ "$pubkey_auth" == "yes" ]]; then
+            pubkey_login_text="${GREEN}开启${PLAIN}"
+        else
+            pubkey_login_text="${RED}关闭${PLAIN}"
+        fi
+
+        echo -e "${BLUE}======== SSH ========${PLAIN}"
+        echo -e "${BLUE}端口 ${YELLOW}${current_port}${PLAIN} | Root ${root_login_text}"
+        echo -e "${BLUE}密码 ${password_login_text} | 密钥 ${pubkey_login_text}"
+        echo -e "${BLUE}======================${PLAIN}"
+        echo -e "${GREEN}1.设置密码${PLAIN}  ${GREEN}2.设置密钥${PLAIN}"
+        echo -e "${BLUE}3.修改端口${PLAIN}  ${RED}4.修改登录${PLAIN}"
+        echo -e "${YELLOW}0.返回菜单${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" ssh_choice
         ssh_choice=$(echo "$ssh_choice" | xargs)
@@ -764,6 +804,7 @@ disable_ssh_login_menu() {
     local has_password=0
     local has_pubkey=0
     local pass_auth pubkey_auth
+    local password_login_text pubkey_login_text
 
     pass_auth=$(get_sshd_option "PasswordAuthentication" "yes")
     pubkey_auth=$(get_sshd_option "PubkeyAuthentication" "yes")
@@ -771,18 +812,34 @@ disable_ssh_login_menu() {
     [[ "$pass_auth" == "yes" ]] && has_password=1
     [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1
 
+    if [[ "$pass_auth" == "yes" ]]; then
+        password_login_text="${GREEN}开启${PLAIN}"
+    else
+        password_login_text="${RED}关闭${PLAIN}"
+    fi
+
+    if [[ "$pubkey_auth" == "yes" ]]; then
+        pubkey_login_text="${GREEN}开启${PLAIN}"
+    else
+        pubkey_login_text="${RED}关闭${PLAIN}"
+    fi
+
     local enabled_count=$((has_password + has_pubkey))
 
+    echo -e "${BLUE}==== 登录方式 ====${PLAIN}"
+    echo -e "${BLUE}密码 ${password_login_text} | 密钥 ${pubkey_login_text}"
+    echo
+
     if [[ $enabled_count -le 1 ]]; then
-        echo -e "${RED}当前仅剩一种登录方式,禁止关闭全部登录方式 ${PLAIN}"
+        echo -e "${RED}当前仅剩一种登录方式,禁止关闭全部登录方式${PLAIN}"
         press_any_key_to_continue
         return
     fi
 
-    echo -e "${BLUE}关闭哪种登录方式${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN}关闭密码登录"
-    echo -e "${GREEN}2.${PLAIN}关闭密钥登录"
-    read -p "$(echo -e "${BLUE}choice [1-2]: ${PLAIN}")" disable_choice
+    echo -e "${GREEN}1.关闭密码登录${PLAIN}"
+    echo -e "${GREEN}2.关闭密钥登录${PLAIN}"
+    echo -e "${YELLOW}0.返回上级${PLAIN}"
+    read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" disable_choice
     disable_choice=$(echo "$disable_choice" | xargs)
     case "$disable_choice" in
         1)
@@ -807,8 +864,12 @@ disable_ssh_login_menu() {
             fi
             press_any_key_to_continue
             ;;
-        *)
+        0)
             return
+            ;;
+        *)
+            echo -e "${RED}无效选项${PLAIN}"
+            press_any_key_to_continue
             ;;
     esac
 }
