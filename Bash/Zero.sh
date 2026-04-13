@@ -836,8 +836,8 @@ disable_ssh_login_menu() {
         return
     fi
 
-    echo -e "${GREEN}1.关闭密码登录${PLAIN}"
-    echo -e "${GREEN}2.关闭密钥登录${PLAIN}"
+    echo -e "${GREEN}1.关闭密码${PLAIN}"
+    echo -e "${GREEN}2.关闭密钥${PLAIN}"
     echo -e "${YELLOW}0.返回上级${PLAIN}"
     read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" disable_choice
     disable_choice=$(echo "$disable_choice" | xargs)
