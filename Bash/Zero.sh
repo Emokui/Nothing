@@ -836,8 +836,8 @@ disable_ssh_login_menu() {
         return
     fi
 
-    echo -e "${GREEN}1.关闭密码${PLAIN}"
-    echo -e "${GREEN}2.关闭密钥${PLAIN}"
+    echo -e "${GREEN}1.关闭密码登录${PLAIN}"
+    echo -e "${GREEN}2.关闭密钥登录${PLAIN}"
     echo -e "${YELLOW}0.返回上级${PLAIN}"
     read -p "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" disable_choice
     disable_choice=$(echo "$disable_choice" | xargs)
@@ -2389,17 +2389,54 @@ configure_firewall() {
 
 set_ip_priority() {
     local GAI_CONF="/etc/gai.conf"
-    local IPV4_RULE="precedence ::ffff:0:0/96  100"
+    local MANAGED_BEGIN="# Zero.sh IP Priority BEGIN"
+    local MANAGED_END="# Zero.sh IP Priority END"
 
     _get_current_priority() {
-        if [[ ! -f "$GAI_CONF" ]]; then
-            echo "IPv6 (系统默认)"
-            return
-        fi
-        if grep -qE '^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+100' "$GAI_CONF" 2>/dev/null; then
+        if [[ -f "$GAI_CONF" ]] && {
+            sed -n "/^${MANAGED_BEGIN}$/,/^${MANAGED_END}$/p" "$GAI_CONF" | grep -qE '^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+100$' ||
+            grep -qE '^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+100[[:space:]]*$' "$GAI_CONF"
+        }; then
             echo "IPv4 优先"
+        elif [[ -f "$GAI_CONF" ]] && {
+            sed -n "/^${MANAGED_BEGIN}$/,/^${MANAGED_END}$/p" "$GAI_CONF" | grep -qE '^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+10$' ||
+            grep -qE '^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+10[[:space:]]*$' "$GAI_CONF"
+        }; then
+            echo "IPv6 优先"
         else
-            echo "IPv6 优先 (默认)"
+            echo "系统默认"
+        fi
+    }
+
+    _remove_managed_priority() {
+        if [[ -f "$GAI_CONF" ]]; then
+            sed -i "/^${MANAGED_BEGIN}$/,/^${MANAGED_END}$/d" "$GAI_CONF"
+        fi
+    }
+
+    _write_priority_block() {
+        local mode="$1"
+        local ipv4_mapped_precedence="10"
+
+        [[ "$mode" == "ipv4" ]] && ipv4_mapped_precedence="100"
+
+        _remove_managed_priority
+        touch "$GAI_CONF"
+        {
+            echo
+            echo "$MANAGED_BEGIN"
+            echo "precedence ::1/128 50"
+            echo "precedence ::/0 40"
+            echo "precedence 2002::/16 30"
+            echo "precedence ::/96 20"
+            echo "precedence ::ffff:0:0/96 $ipv4_mapped_precedence"
+            echo "$MANAGED_END"
+        } >> "$GAI_CONF"
+    }
+
+    _cleanup_legacy_priority_rule() {
+        if [[ -f "$GAI_CONF" ]]; then
+            sed -i '/^precedence[[:space:]]\+::ffff:0:0\/96[[:space:]]\+[0-9]\+[[:space:]]*$/d' "$GAI_CONF"
         fi
     }
 
@@ -2407,42 +2444,25 @@ set_ip_priority() {
         clear
         local current_priority
         current_priority=$(_get_current_priority)
-        echo -e "${BLUE}======== IP优先级设置 ========${PLAIN}"
+        echo -e "${BLUE}====== IP优先级 ======${PLAIN}"
         echo -e "${YELLOW}当前优先级: ${GREEN}${current_priority}${PLAIN}"
-        echo -e "${BLUE}==============================${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN}设置IPv4优先"
-        echo -e "${GREEN}2.${PLAIN}设置IPv6优先"
-        echo -e "${GREEN}3.${PLAIN}恢复系统默认"
-        echo -e "${YELLOW}0.${PLAIN}返回主菜单"
-        echo -e "${BLUE}==============================${PLAIN}"
-        read -rp "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" choice
+        echo -e "${BLUE}======================${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}IPv4优先  ${GREEN}2.${PLAIN}IPv6优先"
+        echo -e "${YELLOW}0.${PLAIN}返回菜单"
+        echo -e "${BLUE}======================${PLAIN}"
+        read -rp "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" choice
 
         case "$choice" in
             1)
-                if [[ ! -f "$GAI_CONF" ]]; then
-                    echo "$IPV4_RULE" > "$GAI_CONF"
-                elif grep -qE '^precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF" 2>/dev/null; then
-                    sed -i 's/^precedence[[:space:]]\+::ffff:0:0\/96.*/precedence ::ffff:0:0\/96  100/' "$GAI_CONF"
-                elif grep -qE '^#.*precedence[[:space:]]+::ffff:0:0/96' "$GAI_CONF" 2>/dev/null; then
-                    sed -i 's/^#.*\(precedence[[:space:]]\+::ffff:0:0\/96\).*/precedence ::ffff:0:0\/96  100/' "$GAI_CONF"
-                else
-                    echo "$IPV4_RULE" >> "$GAI_CONF"
-                fi
+                _cleanup_legacy_priority_rule
+                _write_priority_block "ipv4"
                 echo -e "${GREEN}✔ 已设置为 IPv4 优先${PLAIN}"
                 press_any_key_to_continue
                 ;;
             2)
-                if [[ -f "$GAI_CONF" ]]; then
-                    sed -i '/^precedence[[:space:]]\+::ffff:0:0\/96/d' "$GAI_CONF"
-                fi
+                _cleanup_legacy_priority_rule
+                _write_priority_block "ipv6"
                 echo -e "${GREEN}✔ 已设置为 IPv6 优先${PLAIN}"
-                press_any_key_to_continue
-                ;;
-            3)
-                if [[ -f "$GAI_CONF" ]]; then
-                    sed -i '/^precedence[[:space:]]\+::ffff:0:0\/96/d' "$GAI_CONF"
-                fi
-                echo -e "${GREEN}✔ 已恢复系统默认 (IPv6 优先)${PLAIN}"
                 press_any_key_to_continue
                 ;;
             0)
