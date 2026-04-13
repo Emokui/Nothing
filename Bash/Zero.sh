@@ -427,27 +427,102 @@ get_recommended_swap() {
     fi
 }
 
+get_swap_file_size_mb() {
+    local path="$1"
+    if [[ -f "$path" ]]; then
+        local size_bytes
+        size_bytes=$(stat -c %s "$path" 2>/dev/null || echo 0)
+        echo $(((size_bytes + 1048575) / 1048576))
+    else
+        echo 0
+    fi
+}
+
+get_current_swap_mb() {
+    if [[ -r /proc/swaps ]]; then
+        awk 'NR>1 {sum+=$3} END {print int((sum + 512) / 1024)}' /proc/swaps
+    else
+        free -m | awk '/Swap:/ {print $2}'
+    fi
+}
+
+get_managed_swap_mb() {
+    if [[ -r /proc/swaps ]]; then
+        awk -v path="$swapfile_path" 'NR>1 && $1 == path {sum+=$3} END {print int((sum + 512) / 1024)}' /proc/swaps
+    elif [[ -f "$swapfile_path" ]]; then
+        get_swap_file_size_mb "$swapfile_path"
+    else
+        echo 0
+    fi
+}
+
+remove_swap_fstab_entries() {
+    local path
+    for path in "$@"; do
+        sed -i "\|${path}|d" /etc/fstab 2>/dev/null || true
+    done
+}
+
+create_swap_file() {
+    local path="$1"
+    local size_mb="$2"
+    local root_fstype="$3"
+
+    rm -f "$path"
+
+    if [[ "$root_fstype" == "btrfs" ]]; then
+        echo -e "${YELLOW}检测到 btrfs,正在按 swapfile 要求创建文件...${PLAIN}"
+        : > "$path" || return 1
+        if ! command -v chattr >/dev/null 2>&1 || ! chattr +C "$path" >/dev/null 2>&1; then
+            rm -f "$path"
+            echo -e "${RED}btrfs Swap 文件创建失败: 无法为文件设置 NoCOW${PLAIN}"
+            return 1
+        fi
+        if command -v btrfs >/dev/null 2>&1; then
+            btrfs property set "$path" compression none >/dev/null 2>&1 || true
+        fi
+        if ! dd if=/dev/zero of="$path" bs=1M count="$size_mb" status=progress; then
+            rm -f "$path"
+            return 1
+        fi
+    elif command -v fallocate >/dev/null 2>&1; then
+        if ! fallocate -l "${size_mb}M" "$path" 2>/dev/null; then
+            echo -e "${YELLOW}fallocate 创建失败,改用 dd 写零...${PLAIN}"
+            if ! dd if=/dev/zero of="$path" bs=1M count="$size_mb" status=progress; then
+                rm -f "$path"
+                return 1
+            fi
+        fi
+    else
+        if ! dd if=/dev/zero of="$path" bs=1M count="$size_mb" status=progress; then
+            rm -f "$path"
+            return 1
+        fi
+    fi
+
+    chmod 600 "$path" || return 1
+    mkswap "$path" >/dev/null || return 1
+}
+
 set_swap_menu() {
     while true; do
         clear
-        local current_swap total_ram recommend_swap
-        current_swap=$(free -m | awk '/Swap:/ {print $2}')
+        local current_swap managed_swap total_ram recommend_swap
+        current_swap=$(get_current_swap_mb)
+        managed_swap=$(get_managed_swap_mb)
         total_ram=$(free -m | awk '/Mem:/ {print $2}')
         recommend_swap=$(get_recommended_swap)
         
         local current_swappiness
         current_swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null || echo "未知")
 
-        echo -e "${BLUE}==== 虚拟内存(Swap) ====${PLAIN}"
-        echo -e "${YELLOW}物理内存: ${total_ram} MB${PLAIN}"
-        echo -e "${YELLOW}当前Swap: ${current_swap} MB${PLAIN}"
-        echo -e "${YELLOW}当前Swappiness: ${current_swappiness}${PLAIN}"
+        echo -e "${BLUE}========= SWAP =========${PLAIN}"
+        echo -e "${YELLOW}内存 ${total_ram}MB | 总Swap ${current_swap}MB${PLAIN}"
+        echo -e "${YELLOW}文件Swap ${managed_swap}MB | Swappiness ${current_swappiness}${PLAIN}"
         echo -e "${BLUE}========================${PLAIN}"
-        echo -e "${GREEN}1.设置Swap(推荐:${recommend_swap}MB)${PLAIN}"
-        echo -e "${GREEN}2.设置Swap(自定义)${PLAIN}"
-        echo -e "${GREEN}3.调整Swappiness策略${PLAIN}"
-        echo -e "${RED}4.关闭Swap${PLAIN}"
-        echo -e "${YELLOW}0.返回主菜单${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}推荐大小    ${GREEN}2.${PLAIN}自定义"
+        echo -e "${GREEN}3.${PLAIN}Swappiness  ${RED}4.${PLAIN}关闭Swap"
+        echo -e "${YELLOW}0.${PLAIN}返回菜单"
         echo -e "${BLUE}========================${PLAIN}"
         
         read -p "$(echo -e "${BLUE}请输入选项 [0-4]: ${PLAIN}")" opt
@@ -483,11 +558,21 @@ set_swap_menu() {
 
 set_swap() {
     local size_mb="$1"
-    local avail_kb avail_mb root_fstype
+    local avail_kb avail_mb existing_swap_mb root_fstype
+    local temp_swap_path="${swapfile_path}.zero.tmp"
+    local backup_swap_path="${swapfile_path}.zero.bak"
+    local had_existing=0 old_active=0
 
     echo -e "${YELLOW}正在检查环境...${PLAIN}"
+    if ! [[ "$size_mb" =~ ^[0-9]+$ ]] || (( size_mb < 128 )); then
+        echo -e "${RED}无效的 Swap 大小${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    existing_swap_mb=$(get_swap_file_size_mb "$swapfile_path")
     avail_kb=$(df --output=avail / | tail -1)
-    avail_mb=$((avail_kb / 1024))
+    avail_mb=$((avail_kb / 1024 + existing_swap_mb))
     
     if (( avail_mb < size_mb + 500 )); then
         echo -e "${RED}磁盘空间不足!当前可用: ${avail_mb}MB, 需要: ${size_mb}MB (+预留500MB)${PLAIN}"
@@ -495,75 +580,72 @@ set_swap() {
         return 1
     fi
 
-    if grep -q "$swapfile_path" /proc/swaps 2>/dev/null; then
-        echo -e "${YELLOW}发现已存在的 Swap,正在卸载...${PLAIN}"
-        swapoff "$swapfile_path" 2>/dev/null || true
-    fi
-    rm -f "$swapfile_path"
+    root_fstype=$(df --output=fstype / | tail -1 | xargs)
+    [[ -f "$swapfile_path" ]] && had_existing=1
+    grep -q "$swapfile_path" /proc/swaps 2>/dev/null && old_active=1
 
-    if ! sed -i "\|${swapfile_path}|d" /etc/fstab; then
-        echo -e "${RED}清理 /etc/fstab 旧 Swap 条目失败${PLAIN}"
-        press_any_key_to_continue
-        return 1
+    if grep -q "$temp_swap_path" /proc/swaps 2>/dev/null; then
+        swapoff "$temp_swap_path" 2>/dev/null || true
     fi
+    rm -f "$temp_swap_path"
+    rm -f "$backup_swap_path"
 
     echo -e "${BLUE}正在创建 ${size_mb}MB 的 Swap 文件...${PLAIN}"
-
-    root_fstype=$(df --output=fstype / | tail -1 | xargs)
-
-    if [[ "$root_fstype" == "btrfs" || "$root_fstype" == "xfs" ]]; then
-        echo -e "${YELLOW}检测到 ${root_fstype} 文件系统,使用 dd 创建 (请耐心等待)...${PLAIN}"
-        if ! dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress; then
-            echo -e "${RED}Swap 文件创建失败${PLAIN}"
-            rm -f "$swapfile_path"
-            press_any_key_to_continue
-            return 1
-        fi
-    elif command -v fallocate >/dev/null 2>&1; then
-        if ! fallocate -l "${size_mb}M" "$swapfile_path" 2>/dev/null; then
-             echo -e "${YELLOW}fallocate 创建失败,尝试使用 dd 写零 (速度较慢,请耐心等待)...${PLAIN}"
-             if ! dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress; then
-                 echo -e "${RED}Swap 文件创建失败${PLAIN}"
-                 rm -f "$swapfile_path"
-                 press_any_key_to_continue
-                 return 1
-             fi
-        fi
-    else
-        if ! dd if=/dev/zero of="$swapfile_path" bs=1M count="$size_mb" status=progress; then
-            echo -e "${RED}Swap 文件创建失败${PLAIN}"
-            rm -f "$swapfile_path"
-            press_any_key_to_continue
-            return 1
-        fi
-    fi
-
-    if ! chmod 600 "$swapfile_path"; then
-        echo -e "${RED}设置 Swap 文件权限失败${PLAIN}"
-        rm -f "$swapfile_path"
+    if ! create_swap_file "$temp_swap_path" "$size_mb" "$root_fstype"; then
+        echo -e "${RED}Swap 文件创建失败${PLAIN}"
+        rm -f "$temp_swap_path"
         press_any_key_to_continue
         return 1
     fi
 
-    if ! mkswap "$swapfile_path" >/dev/null; then
-        echo -e "${RED}mkswap 失败,未启用 Swap${PLAIN}"
-        rm -f "$swapfile_path"
+    if (( old_active )); then
+        echo -e "${YELLOW}正在切换旧 Swap...${PLAIN}"
+        if ! swapoff "$swapfile_path"; then
+            echo -e "${RED}旧 Swap 卸载失败,已保留原配置${PLAIN}"
+            rm -f "$temp_swap_path"
+            press_any_key_to_continue
+            return 1
+        fi
+    fi
+
+    if (( had_existing )); then
+        if ! mv "$swapfile_path" "$backup_swap_path"; then
+            echo -e "${RED}旧 Swap 备份失败,已保留原配置${PLAIN}"
+            (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
+            rm -f "$temp_swap_path"
+            press_any_key_to_continue
+            return 1
+        fi
+    fi
+
+    if ! mv "$temp_swap_path" "$swapfile_path"; then
+        echo -e "${RED}新 Swap 文件替换失败,已尝试恢复旧配置${PLAIN}"
+        rm -f "$temp_swap_path"
+        if (( had_existing )); then
+            mv "$backup_swap_path" "$swapfile_path" 2>/dev/null || true
+            (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
+        fi
         press_any_key_to_continue
         return 1
     fi
 
     if ! swapon "$swapfile_path"; then
-        echo -e "${RED}swapon 失败,未启用 Swap${PLAIN}"
+        echo -e "${RED}新 Swap 启用失败,已尝试恢复旧配置${PLAIN}"
         rm -f "$swapfile_path"
+        if (( had_existing )); then
+            mv "$backup_swap_path" "$swapfile_path" 2>/dev/null || true
+            (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
+        fi
         press_any_key_to_continue
         return 1
     fi
 
+    remove_swap_fstab_entries "$swapfile_path" "$temp_swap_path" "$backup_swap_path"
     if ! echo "$swapfile_path none swap sw 0 0" >> /etc/fstab; then
         echo -e "${YELLOW}Swap 已启用,但写入 /etc/fstab 失败,重启后不会自动挂载${PLAIN}"
-        press_any_key_to_continue
-        return 1
     fi
+
+    rm -f "$backup_swap_path"
 
     echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
@@ -571,15 +653,24 @@ set_swap() {
 }
 
 delete_swap() {
-    if ! grep -q "$swapfile_path" /proc/swaps 2>/dev/null && [ ! -f "$swapfile_path" ]; then
+    local temp_swap_path="${swapfile_path}.zero.tmp"
+    local backup_swap_path="${swapfile_path}.zero.bak"
+
+    if ! grep -q "$swapfile_path" /proc/swaps 2>/dev/null \
+        && ! grep -q "$temp_swap_path" /proc/swaps 2>/dev/null \
+        && [ ! -f "$swapfile_path" ] \
+        && [ ! -f "$temp_swap_path" ] \
+        && [ ! -f "$backup_swap_path" ]; then
         echo -e "${YELLOW}当前没有 Swap 文件,无需操作${PLAIN}"
         press_any_key_to_continue
         return 0
     fi
+
     echo -e "${YELLOW}正在删除 Swap...${PLAIN}"
     swapoff "$swapfile_path" 2>/dev/null || true
-    rm -f "$swapfile_path"
-    sed -i "\|${swapfile_path}|d" /etc/fstab
+    swapoff "$temp_swap_path" 2>/dev/null || true
+    rm -f "$swapfile_path" "$temp_swap_path" "$backup_swap_path"
+    remove_swap_fstab_entries "$swapfile_path" "$temp_swap_path" "$backup_swap_path"
     echo -e "${GREEN}✓ Swap 已删除并关闭${PLAIN}"
     free -h
     press_any_key_to_continue
