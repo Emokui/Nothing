@@ -198,21 +198,41 @@ install_wget_if_missing() {
 install_wget_if_missing
 
 enable_bbr_if_needed() {
-    local current_cc
+    local current_cc available_cc
+    local bbr_sysctl_conf="/etc/sysctl.d/99-zero-bbr.conf"
+    local bbr_module_conf="/etc/modules-load.d/bbr.conf"
+
     current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
-    if [[ "$current_cc" == "bbr" ]]; then
-        return 0
-    fi
+    available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
 
     echo -e "${YELLOW}正在开启 BBR 拥塞控制...${PLAIN}"
-    sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1
-    sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1
 
-    grep -qxF 'net.core.default_qdisc=fq' /etc/sysctl.conf || echo 'net.core.default_qdisc=fq' >> /etc/sysctl.conf
-    grep -qxF 'net.ipv4.tcp_congestion_control=bbr' /etc/sysctl.conf || echo 'net.ipv4.tcp_congestion_control=bbr' >> /etc/sysctl.conf
+    mkdir -p /etc/sysctl.d /etc/modules-load.d
+    cat > "$bbr_sysctl_conf" <<'EOF'
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+    echo "tcp_bbr" > "$bbr_module_conf"
 
-    sysctl -p >/dev/null 2>&1
-    echo -e "${GREEN}✓ BBR 已开启${PLAIN}"
+    if ! grep -qw bbr <<< "$available_cc"; then
+        modprobe tcp_bbr >/dev/null 2>&1 || true
+        available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
+    fi
+
+    sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
+    sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+    sysctl --system >/dev/null 2>&1 || sysctl -p "$bbr_sysctl_conf" >/dev/null 2>&1 || true
+
+    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
+
+    if [[ "$current_cc" == "bbr" ]]; then
+        echo -e "${GREEN}✓ BBR 已开启${PLAIN}"
+    elif grep -qw bbr <<< "$available_cc"; then
+        echo -e "${YELLOW}BBR 已写入持久化配置,当前内核未立即切换${PLAIN}"
+    else
+        echo -e "${RED}当前内核未检测到 BBR 支持${PLAIN}"
+    fi
 }
 
 enable_bbr_if_needed
