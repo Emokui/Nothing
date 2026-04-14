@@ -3427,7 +3427,7 @@ main_menu() {
         echo -e "${GREEN}  03.${PLAIN}重装系统"
         echo -e "${GREEN}  04.${PLAIN}设置时区"
         echo -e "${GREEN}  05.${PLAIN}配置IP栈"
-        echo -e "${GREEN}  06.${PLAIN}BBR管理"
+        echo -e "${GREEN}  06.${PLAIN}配置BBR"
         echo -e "${GREEN}  07.${PLAIN}配置DNS"
         echo -e "${GREEN}  08.${PLAIN}配置SSH"
         echo -e "${GREEN}  09.${PLAIN}重启VPS"
