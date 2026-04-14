@@ -90,29 +90,102 @@ get_sshd_option() {
     fi
 }
 
+ssh_socket_units_available() {
+    command -v systemctl >/dev/null 2>&1 || return 1
+    local unit
+    for unit in ssh.socket sshd.socket; do
+        systemctl cat "$unit" >/dev/null 2>&1 || continue
+        if systemctl is-active "$unit" >/dev/null 2>&1 || systemctl is-enabled "$unit" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+ssh_apply_socket_port() {
+    local port="$1"
+    local unit dropin_dir dropin_file applied=0
+
+    command -v systemctl >/dev/null 2>&1 || return 0
+
+    for unit in ssh.socket sshd.socket; do
+        systemctl cat "$unit" >/dev/null 2>&1 || continue
+        if systemctl is-active "$unit" >/dev/null 2>&1 || systemctl is-enabled "$unit" >/dev/null 2>&1; then
+            dropin_dir="/etc/systemd/system/${unit}.d"
+            dropin_file="${dropin_dir}/zero-port.conf"
+            mkdir -p "$dropin_dir" || return 1
+            {
+                echo "[Socket]"
+                echo "ListenStream="
+                echo "ListenStream=${port}"
+            } > "$dropin_file" || return 1
+            applied=1
+        fi
+    done
+
+    if (( applied )); then
+        systemctl daemon-reload >/dev/null 2>&1 || return 1
+        for unit in ssh.socket sshd.socket; do
+            systemctl cat "$unit" >/dev/null 2>&1 || continue
+            if systemctl is-active "$unit" >/dev/null 2>&1 || systemctl is-enabled "$unit" >/dev/null 2>&1; then
+                systemctl restart "$unit" >/dev/null 2>&1 || return 1
+            fi
+        done
+    fi
+
+    return 0
+}
+
+ssh_port_is_listening() {
+    local port="$1"
+
+    if command -v ss >/dev/null 2>&1; then
+        ss -H -lnt 2>/dev/null | awk -v port="$port" '$4 ~ ":" port "$" || $4 ~ "\\]:" port "$" {found=1} END {exit !found}'
+        return $?
+    fi
+
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -lnt 2>/dev/null | awk -v port="$port" '$4 ~ ":" port "$" || $4 ~ "\\]:" port "$" {found=1} END {exit !found}'
+        return $?
+    fi
+
+    return 1
+}
+
 restart_sshd_safe() {
+    local expected_port="${1:-}"
+
     if ! sshd -t 2>/dev/null; then
         echo -e "${RED}sshd 配置有误,未重启sshd请检查${SSHD_CONFIG}${PLAIN}"
-        press_any_key_to_continue
         return 1
     fi
 
     if command -v systemctl >/dev/null 2>&1; then
-        if ! systemctl restart sshd 2>/dev/null && ! systemctl restart ssh 2>/dev/null; then
+        if [[ -n "$expected_port" ]] && ! ssh_apply_socket_port "$expected_port"; then
+            echo -e "${RED}ssh.socket 端口更新失败,请手动检查 systemd socket 配置${PLAIN}"
+            return 1
+        fi
+
+        if ! systemctl restart sshd 2>/dev/null && ! systemctl restart ssh 2>/dev/null && ! ssh_socket_units_available; then
             echo -e "${RED}sshd 服务重启失败,请手动检查服务状态${PLAIN}"
-            press_any_key_to_continue
             return 1
         fi
     elif command -v service >/dev/null 2>&1; then
         if ! service sshd restart >/dev/null 2>&1 && ! service ssh restart >/dev/null 2>&1; then
             echo -e "${RED}sshd 服务重启失败,请手动检查服务状态${PLAIN}"
-            press_any_key_to_continue
             return 1
         fi
     else
         echo -e "${RED}未找到 systemctl/service,无法自动重启 sshd${PLAIN}"
-        press_any_key_to_continue
         return 1
+    fi
+
+    if [[ -n "$expected_port" ]]; then
+        sleep 1
+        if ! ssh_port_is_listening "$expected_port"; then
+            echo -e "${RED}sshd 未监听新的端口 ${expected_port},已停止本次修改${PLAIN}"
+            return 1
+        fi
     fi
 
     return 0
@@ -1591,9 +1664,10 @@ ssh_config_menu() {
 change_ssh_port() {
     while true; do
         clear
-        local current_port
+        local current_port old_port
         current_port=$(get_sshd_option "Port" "22")
         [[ "$current_port" =~ ^[0-9]+$ ]] || current_port=22
+        old_port="$current_port"
         echo -e "${YELLOW}当前SSH端口: ${GREEN}${current_port:-22}${PLAIN}\n"
         read -rp "$(echo -e "${BLUE}请输入新的SSH端口(输入0返回): ${PLAIN}")" new_port
         new_port=$(echo "$new_port" | xargs)
@@ -1601,19 +1675,37 @@ change_ssh_port() {
             return
         fi
         if [[ "$new_port" =~ ^[0-9]+$ ]] && (( new_port >= 1 && new_port <= 65535 )); then
+            if [[ "$new_port" == "$old_port" ]]; then
+                echo -e "${YELLOW}SSH 端口已是 ${old_port},无需修改${PLAIN}"
+                press_any_key_to_continue
+                return
+            fi
+
             if ! firewall_can_change_ssh_port "$new_port"; then
                 echo -e "${RED}当前防火墙未放行 TCP ${new_port},请先到 FireWall -> 放行端口 中放行后再修改 SSH 端口${PLAIN}"
                 press_any_key_to_continue
                 continue
             fi
 
-            update_sshd_option "Port" "$new_port"
-            
-            if restart_sshd_safe; then
+            if ! update_sshd_option "Port" "$new_port"; then
+                echo -e "${RED}写入 SSH 端口配置失败,请检查 ${SSHD_CONFIG}${PLAIN}"
+                press_any_key_to_continue
+                continue
+            fi
+
+            if restart_sshd_safe "$new_port"; then
                 echo -e "${YELLOW}[✓]SSH端口已修改为 $new_port${PLAIN}"
                 press_any_key_to_continue
                 return
             fi
+
+            if update_sshd_option "Port" "$old_port" && restart_sshd_safe "$old_port" >/dev/null 2>&1; then
+                echo -e "${YELLOW}已自动回滚到原 SSH 端口 ${old_port}${PLAIN}"
+            else
+                echo -e "${RED}回滚到原 SSH 端口 ${old_port} 失败,请立即通过控制台检查 SSH 配置${PLAIN}"
+            fi
+            press_any_key_to_continue
+            continue
         else
             echo "[!] 无效的端口格式"
             press_any_key_to_continue
