@@ -26,6 +26,9 @@ ZERO_FIREWALL_SERVICE="/etc/systemd/system/zero-firewall-persistent.service"
 ZERO_FIREWALL_SERVICE_NAME="zero-firewall-persistent.service"
 ZERO_FW_CHAIN="ZERO_INPUT"
 ZERO_PORT_JUMP_CHAIN="ZERO_PORT_JUMP"
+ACME_HOME="$ROOT_HOME/.acme.sh"
+ACME_BIN="$ACME_HOME/acme.sh"
+ACME_CERT_PATH="/etc/cert"
 
 get_sshd_effective_option() {
     local option="$1"
@@ -1922,11 +1925,601 @@ change_timezone() {
     done
 }
 
+acme_exec() {
+    [[ -f "$ACME_BIN" ]] || return 1
+    bash "$ACME_BIN" "$@"
+}
+
+acme_is_installed() {
+    acme_exec -v >/dev/null 2>&1
+}
+
+acme_ensure_cert_path() {
+    mkdir -p "$ACME_CERT_PATH"
+}
+
+acme_has_ipv4() {
+    ip -4 addr show scope global 2>/dev/null | grep -q inet
+}
+
+acme_get_download_url() {
+    local url="https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"
+    if ! acme_has_ipv4; then
+        url="${url/github.com/acme-cdn.pages.dev}"
+    fi
+    echo "$url"
+}
+
+acme_pkg_install() {
+    local pm
+    pm=$(detect_pkg_manager)
+
+    case "$pm" in
+        apt)    apt update && apt install -y "$@" ;;
+        dnf)    dnf install -y "$@" ;;
+        yum)    yum install -y "$@" ;;
+        apk)    apk add "$@" ;;
+        pacman) pacman -Sy --noconfirm "$@" ;;
+        zypper) zypper --non-interactive install "$@" ;;
+        *)      return 1 ;;
+    esac
+}
+
+acme_install_dependencies() {
+    local pm packages=()
+    pm=$(detect_pkg_manager)
+
+    case "$pm" in
+        apt)    packages=(curl wget socat openssl dnsutils cron tar ca-certificates) ;;
+        dnf)    packages=(curl wget socat openssl bind-utils cronie tar ca-certificates) ;;
+        yum)    packages=(curl wget socat openssl bind-utils cronie tar ca-certificates) ;;
+        apk)    packages=(curl wget socat openssl bind-tools dcron tar ca-certificates) ;;
+        pacman) packages=(curl wget socat openssl bind cronie tar ca-certificates) ;;
+        zypper) packages=(curl wget socat openssl bind-utils cron tar ca-certificates) ;;
+        *)
+            echo -e "${RED}当前系统暂不支持自动安装 ACME 依赖${PLAIN}"
+            return 1
+            ;;
+    esac
+
+    echo -e "${YELLOW}正在安装 ACME 依赖...${PLAIN}"
+    acme_pkg_install "${packages[@]}"
+}
+
+acme_enable_cron() {
+    systemctl start cron 2>/dev/null || systemctl start cronie 2>/dev/null || true
+    systemctl enable cron 2>/dev/null || systemctl enable cronie 2>/dev/null || true
+}
+
+acme_install_core() {
+    local tempdir tarball acme_tar_url automail email current_version
+
+    acme_ensure_cert_path
+
+    if acme_is_installed; then
+        current_version=$(acme_exec -v 2>/dev/null | head -n1)
+        echo -e "${YELLOW}检测到 acme.sh 已安装${PLAIN}${current_version:+: ${GREEN}${current_version}${PLAIN}}"
+        echo -e "${YELLOW}正在更新 acme.sh...${PLAIN}"
+        acme_exec --upgrade --auto-upgrade >/dev/null 2>&1 || {
+            echo -e "${RED}acme.sh 更新失败${PLAIN}"
+            return 1
+        }
+        acme_exec --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
+        echo -e "${GREEN}acme.sh 已更新完成${PLAIN}"
+        return 0
+    fi
+
+    acme_install_dependencies || return 1
+    acme_enable_cron
+
+    automail=$(date +%s%N | md5sum | cut -c 1-16)
+    email="${automail}@gmail.com"
+    acme_tar_url=$(acme_get_download_url)
+    tempdir=$(mktemp -d /tmp/zero-acme.XXXXXX) || {
+        echo -e "${RED}无法创建临时目录${PLAIN}"
+        return 1
+    }
+    tarball="$tempdir/master.tar.gz"
+
+    if ! wget --no-check-certificate -O "$tarball" "$acme_tar_url" 2>/dev/null; then
+        if ! curl -fsSL "$acme_tar_url" -o "$tarball" 2>/dev/null; then
+            echo -e "${RED}acme.sh 下载失败${PLAIN}"
+            rm -rf "$tempdir"
+            return 1
+        fi
+    fi
+
+    if ! tar zxf "$tarball" -C "$tempdir"; then
+        echo -e "${RED}acme.sh 解压失败${PLAIN}"
+        rm -rf "$tempdir"
+        return 1
+    fi
+
+    if ! (cd "$tempdir/acme.sh-master" && ./acme.sh --install --accountemail "$email"); then
+        echo -e "${RED}acme.sh 安装失败${PLAIN}"
+        rm -rf "$tempdir"
+        return 1
+    fi
+
+    rm -rf "$tempdir"
+    acme_exec --upgrade --auto-upgrade >/dev/null 2>&1 || true
+    acme_exec --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
+
+    if acme_is_installed; then
+        echo -e "${GREEN}acme.sh 安装成功${PLAIN}"
+        return 0
+    fi
+
+    echo -e "${RED}acme.sh 安装失败${PLAIN}"
+    return 1
+}
+
+acme_uninstall() {
+    if ! acme_is_installed; then
+        echo -e "${YELLOW}当前未安装 acme.sh${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+
+    if acme_exec --uninstall; then
+        rm -rf "$ACME_HOME"
+        echo -e "${GREEN}acme.sh 已卸载${PLAIN}"
+    else
+        echo -e "${RED}acme.sh 卸载失败，请手动检查${PLAIN}"
+    fi
+    press_any_key_to_continue
+}
+
+acme_ensure_installed() {
+    if acme_is_installed; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}检测到尚未安装 acme.sh，正在自动安装...${PLAIN}"
+    acme_install_core || return 1
+    acme_is_installed || {
+        echo -e "${RED}acme.sh 安装失败，无法继续操作${PLAIN}"
+        return 1
+    }
+}
+
+acme_get_cert_list() {
+    acme_exec --list 2>/dev/null | tail -n +2
+}
+
+acme_display_cert_list() {
+    local cert_list
+    cert_list=$(acme_get_cert_list)
+
+    if [[ -z "$cert_list" ]]; then
+        echo -e "${YELLOW}暂无已申请的证书${PLAIN}"
+        return 1
+    fi
+
+    printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | ${GREEN}%-15s${PLAIN}\n" "序号" "域名" "到期时间"
+    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
+
+    local index=1
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+
+        local main_domain expire_time
+        main_domain=$(echo "$line" | awk '{print $1}')
+        expire_time=$(echo "$line" | awk '{print $6}' | cut -d'T' -f1)
+
+        if [[ "$main_domain" == \** ]]; then
+            printf "${YELLOW}%-4s${PLAIN} | ${YELLOW}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
+        else
+            printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
+        fi
+        ((index++))
+    done <<< "$cert_list"
+
+    echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
+    return 0
+}
+
+acme_validate_domain() {
+    local domain="$1"
+    [[ "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]
+}
+
+acme_get_cf_credentials() {
+    local cfgak cfemail
+
+    read -rp "$(echo -e "${BLUE}请输入 CloudFlare Global API Key: ${PLAIN}")" cfgak
+    if [[ -z "$cfgak" ]]; then
+        echo -e "${RED}未输入 CloudFlare Global API Key${PLAIN}"
+        return 1
+    fi
+    export CF_Key="$cfgak"
+
+    read -rp "$(echo -e "${BLUE}请输入 CloudFlare 登录邮箱: ${PLAIN}")" cfemail
+    if [[ -z "$cfemail" ]]; then
+        echo -e "${RED}未输入 CloudFlare 登录邮箱${PLAIN}"
+        return 1
+    fi
+    export CF_Email="$cfemail"
+    return 0
+}
+
+acme_check_cert_result() {
+    local domain="$1"
+
+    acme_ensure_cert_path
+    if [[ -s "$ACME_CERT_PATH/$domain.crt" && -s "$ACME_CERT_PATH/$domain.key" ]]; then
+        echo -e "${GREEN}证书申请成功${PLAIN}"
+        echo -e "${YELLOW}证书: $ACME_CERT_PATH/$domain.crt${PLAIN}"
+        echo -e "${YELLOW}私钥: $ACME_CERT_PATH/$domain.key${PLAIN}"
+        return 0
+    fi
+
+    echo -e "${RED}证书申请失败${PLAIN}"
+    return 1
+}
+
+acme_install_issued_cert() {
+    local issue_domain="$1"
+    local save_name="$2"
+
+    acme_exec --install-cert -d "$issue_domain" --key-file "$ACME_CERT_PATH/$save_name.key" --fullchain-file "$ACME_CERT_PATH/$save_name.crt" --ecc || return 1
+    acme_check_cert_result "$save_name"
+}
+
+acme_print_issue_failed() {
+    echo -e "${RED}证书签发失败，已跳过证书安装${PLAIN}"
+    echo -e "${YELLOW}如上方提示 rateLimited，请等待限制时间结束后重试${PLAIN}"
+}
+
+acme_check_port_80() {
+    local firewall_opened=0
+    local zero_fw_managed=0
+    local cmd
+
+    if ! command -v lsof >/dev/null 2>&1; then
+        echo -e "${YELLOW}未检测到 lsof，正在安装...${PLAIN}"
+        acme_pkg_install lsof >/dev/null 2>&1 || {
+            echo -e "${RED}lsof 安装失败，无法检测 80 端口${PLAIN}"
+            return 1
+        }
+    fi
+
+    echo -e "${YELLOW}正在检测 80 端口状态...${PLAIN}"
+
+    for cmd in iptables ip6tables; do
+        firewall_supports_table "$cmd" filter || continue
+        firewall_rule_exists "$cmd" filter INPUT -j "$ZERO_FW_CHAIN" || continue
+        zero_fw_managed=1
+        if ! firewall_rule_exists "$cmd" filter "$ZERO_FW_CHAIN" -p tcp --dport 80 -j ACCEPT; then
+            firewall_apply_port_rule "$cmd" open tcp 80 || return 1
+            firewall_opened=1
+        fi
+    done
+    if (( zero_fw_managed == 1 && firewall_opened == 1 )); then
+        firewall_save_rules >/dev/null 2>&1 || true
+        echo -e "${GREEN}✓ 80 端口已放行 (Zero FireWall)${PLAIN}"
+    elif (( zero_fw_managed == 1 )); then
+        echo -e "${GREEN}Zero FireWall 已放行 80 端口${PLAIN}"
+    else
+        echo -e "${YELLOW}未检测到 Zero FireWall 正在接管入站规则，本步骤不会自动修改其他防火墙${PLAIN}"
+        echo -e "${YELLOW}如需放行 80 端口，请先到 FireWall 菜单中处理${PLAIN}"
+    fi
+
+    local listen_pids
+    listen_pids=$(lsof -t -iTCP:80 -sTCP:LISTEN 2>/dev/null | sort -u)
+    if [[ -z "$listen_pids" ]]; then
+        echo -e "${GREEN}检测到当前 80 端口未被占用${PLAIN}"
+        return 0
+    fi
+
+    echo -e "${RED}检测到 80 端口被其他程序占用${PLAIN}"
+    lsof -iTCP:80 -sTCP:LISTEN 2>/dev/null
+    read -rp "$(echo -e "${BLUE}如需结束占用进程请输入 Y，其他键返回菜单 [Y/N]: ${PLAIN}")" yn
+    if [[ "$yn" =~ ^[Yy]$ ]]; then
+        printf '%s\n' "$listen_pids" | xargs -r kill -9
+        sleep 1
+        return 0
+    fi
+    return 1
+}
+
+acme_issue_standalone() {
+    local domain
+
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return
+    }
+
+    acme_check_port_80 || {
+        press_any_key_to_continue
+        return
+    }
+
+    read -rp "$(echo -e "${BLUE}请输入解析完成的域名: ${PLAIN}")" domain
+    domain=$(echo "$domain" | xargs)
+    if [[ -z "$domain" ]]; then
+        echo -e "${RED}未输入域名${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+    if ! acme_validate_domain "$domain"; then
+        echo -e "${RED}域名格式不正确${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+
+    acme_ensure_cert_path
+    if ! acme_has_ipv4; then
+        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --listen-v6 --insecure; then
+            acme_print_issue_failed
+            press_any_key_to_continue
+            return
+        fi
+    else
+        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --insecure; then
+            acme_print_issue_failed
+            press_any_key_to_continue
+            return
+        fi
+    fi
+
+    acme_install_issued_cert "$domain" "$domain" || echo -e "${RED}证书安装失败${PLAIN}"
+    press_any_key_to_continue
+}
+
+acme_issue_cf_single() {
+    local domain
+
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return
+    }
+
+    read -rp "$(echo -e "${BLUE}请输入需要申请证书的域名: ${PLAIN}")" domain
+    domain=$(echo "$domain" | xargs)
+    if [[ -z "$domain" ]]; then
+        echo -e "${RED}未输入域名${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+    if ! acme_validate_domain "$domain"; then
+        echo -e "${RED}域名格式不正确${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+    if ! acme_get_cf_credentials; then
+        press_any_key_to_continue
+        return
+    fi
+
+    acme_ensure_cert_path
+    if ! acme_exec --issue --dns dns_cf -d "$domain" -k ec-256 --insecure; then
+        acme_print_issue_failed
+        press_any_key_to_continue
+        return
+    fi
+    acme_install_issued_cert "$domain" "$domain" || echo -e "${RED}证书安装失败${PLAIN}"
+    press_any_key_to_continue
+}
+
+acme_issue_cf_wildcard() {
+    local domain
+
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return
+    }
+
+    read -rp "$(echo -e "${BLUE}请输入需要申请证书的泛域名根域名: ${PLAIN}")" domain
+    domain=$(echo "$domain" | xargs)
+    if [[ -z "$domain" ]]; then
+        echo -e "${RED}未输入域名${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+    if ! acme_validate_domain "$domain"; then
+        echo -e "${RED}域名格式不正确${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+    if ! acme_get_cf_credentials; then
+        press_any_key_to_continue
+        return
+    fi
+
+    acme_ensure_cert_path
+    if ! acme_exec --issue --dns dns_cf -d "*.${domain}" -d "$domain" -k ec-256 --insecure; then
+        acme_print_issue_failed
+        press_any_key_to_continue
+        return
+    fi
+    acme_install_issued_cert "*.${domain}" "$domain" || echo -e "${RED}证书安装失败${PLAIN}"
+    press_any_key_to_continue
+}
+
+acme_revoke_cert() {
+    local cert_list choice confirm selected_domain base_domain
+    local -a domains=()
+
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return
+    }
+
+    clear
+    echo -e "${BLUE}================ 证书列表 ================${PLAIN}"
+    if ! acme_display_cert_list; then
+        press_any_key_to_continue
+        return
+    fi
+
+    cert_list=$(acme_get_cert_list)
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        domains+=("$(echo "$line" | awk '{print $1}')")
+    done <<< "$cert_list"
+    echo
+
+    read -rp "$(echo -e "${BLUE}请输入要撤销的证书序号(0返回): ${PLAIN}")" choice
+    choice=$(echo "$choice" | xargs)
+    if [[ "$choice" == "0" ]]; then
+        return
+    fi
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#domains[@]} )); then
+        echo -e "${RED}无效序号${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+
+    selected_domain="${domains[$((choice-1))]}"
+    echo -e "${YELLOW}即将撤销证书: ${selected_domain}${PLAIN}"
+    read -rp "$(echo -e "${BLUE}确认撤销? [y/N]: ${PLAIN}")" confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}已取消操作${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+
+    acme_exec --revoke -d "$selected_domain" --ecc || true
+    acme_exec --remove -d "$selected_domain" --ecc || true
+    rm -rf "$ACME_HOME/${selected_domain}_ecc"
+
+    base_domain="${selected_domain#\*.}"
+    rm -f "$ACME_CERT_PATH/$base_domain.crt" "$ACME_CERT_PATH/$base_domain.key"
+    rm -f "$ACME_CERT_PATH/$selected_domain.crt" "$ACME_CERT_PATH/$selected_domain.key" 2>/dev/null || true
+
+    echo -e "${GREEN}证书 ${selected_domain} 已撤销${PLAIN}"
+    press_any_key_to_continue
+}
+
+acme_renew_cert() {
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return
+    }
+
+    if acme_exec --cron; then
+        echo -e "${GREEN}证书续期任务已执行${PLAIN}"
+    else
+        echo -e "${RED}证书续期执行失败${PLAIN}"
+    fi
+    press_any_key_to_continue
+}
+
+acme_switch_provider() {
+    local provider
+
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return
+    }
+
+    clear
+    echo -e "${BLUE}======== 证书CA ========${PLAIN}"
+    echo -e "${GREEN}1.LetsEncrypt${PLAIN}  ${GREEN}2.BuyPass${PLAIN}"
+    echo -e "${GREEN}3.ZeroSSL${PLAIN}     ${YELLOW}0.返回菜单${PLAIN}"
+    echo -e "${BLUE}========================${PLAIN}"
+    read -rp "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" provider
+    provider=$(echo "$provider" | xargs)
+
+    case "$provider" in
+        1)
+            acme_exec --set-default-ca --server letsencrypt && echo -e "${GREEN}已切换到 LetsEncrypt${PLAIN}" || echo -e "${RED}切换失败${PLAIN}"
+            ;;
+        2)
+            acme_exec --set-default-ca --server buypass && echo -e "${GREEN}已切换到 BuyPass${PLAIN}" || echo -e "${RED}切换失败${PLAIN}"
+            ;;
+        3)
+            acme_exec --set-default-ca --server zerossl && echo -e "${GREEN}已切换到 ZeroSSL${PLAIN}" || echo -e "${RED}切换失败${PLAIN}"
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo -e "${RED}无效选项${PLAIN}"
+            ;;
+    esac
+    press_any_key_to_continue
+}
+
+acme_generate_self_signed_cert() {
+    local default_domain="icloud.com.cn"
+    local days=3650
+    local domain key_file crt_file
+
+    clear
+    acme_ensure_cert_path
+    read -rp "$(echo -e "${BLUE}请输入证书域名(默认: ${default_domain}): ${PLAIN}")" domain
+    domain=$(echo "$domain" | xargs)
+    domain="${domain:-$default_domain}"
+
+    key_file="$ACME_CERT_PATH/${domain}.key"
+    crt_file="$ACME_CERT_PATH/${domain}.crt"
+
+    openssl ecparam -name prime256v1 -genkey -noout -out "$key_file" || {
+        echo -e "${RED}私钥生成失败${PLAIN}"
+        press_any_key_to_continue
+        return
+    }
+
+    openssl req -new -x509 -key "$key_file" -out "$crt_file" -days "$days" -subj "/CN=$domain" -addext "subjectAltName=DNS:$domain" || {
+        echo -e "${RED}证书生成失败${PLAIN}"
+        press_any_key_to_continue
+        return
+    }
+
+    chmod 644 "$crt_file"
+    chmod 600 "$key_file"
+    echo -e "${GREEN}自签证书生成完成${PLAIN}"
+    echo -e "${YELLOW}证书: $crt_file${PLAIN}"
+    echo -e "${YELLOW}私钥: $key_file${PLAIN}"
+    press_any_key_to_continue
+}
+
+acme_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}===============================${PLAIN}"
+        echo -e "         ${RED}证书申请${PLAIN}"
+        echo -e "${BLUE}===============================${PLAIN}"
+        echo -e " ${GREEN}1.${PLAIN}安装Acme"
+        echo -e " ${GREEN}2.${PLAIN}卸载Acme"
+        echo -e "${BLUE}-------------${PLAIN}"
+        echo -e " ${GREEN}3.${PLAIN}申请单域名证书 ${YELLOW}(80 端口申请)${PLAIN}"
+        echo -e " ${GREEN}4.${PLAIN}申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+        echo -e " ${GREEN}5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+        echo -e "${BLUE}-------------${PLAIN}"
+        echo -e " ${GREEN}6.${PLAIN}撤销已申请的证书"
+        echo -e " ${GREEN}7.${PLAIN}续期已申请的证书"
+        echo -e " ${GREEN}8.${PLAIN}切换证书颁发机构"
+        echo -e " ${GREEN}9.${PLAIN}生成自签证书"
+        echo -e "${BLUE}-------------${PLAIN}"
+        echo -e " ${YELLOW}0.${PLAIN}返回菜单"
+        echo
+        read -rp "$(echo -e "${BLUE}请输入选项 [0-9]: ${PLAIN}")" acme_choice
+        acme_choice=$(echo "$acme_choice" | xargs)
+
+        case "$acme_choice" in
+            1) acme_install_core; press_any_key_to_continue ;;
+            2) acme_uninstall ;;
+            3) acme_issue_standalone ;;
+            4) acme_issue_cf_single ;;
+            5) acme_issue_cf_wildcard ;;
+            6) acme_revoke_cert ;;
+            7) acme_renew_cert ;;
+            8) acme_switch_provider ;;
+            9) acme_generate_self_signed_cert ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
 run_install_script() {
     bash <(curl -sL "$1")
 }
 
-install_acme()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/acme.sh"; }
 install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/snell.sh"; }
 install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh"; }
 install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/hysteria.sh"; }
@@ -3452,7 +4045,7 @@ main_menu() {
             8)  ssh_config_menu ;;
             9)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
             10) set_swap_menu ;;
-            11) install_acme ;;
+            11) acme_menu ;;
             12) install_snell ;;
             13) install_shoes ;;
             14) install_mihomo ;;
