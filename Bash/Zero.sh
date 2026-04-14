@@ -2522,7 +2522,6 @@ run_install_script() {
 
 install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/snell.sh"; }
 install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh"; }
-install_hysteria()  { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/hysteria.sh"; }
 install_system()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
 install_shoes()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/shoes.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
@@ -4024,10 +4023,9 @@ main_menu() {
         echo -e "${GREEN}  12.${PLAIN}配置Snell"
         echo -e "${GREEN}  13.${PLAIN}配置Shoes"
         echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
-        echo -e "${GREEN}  15.${PLAIN}配置Hysteria"
-        echo -e "${GREEN}  16.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  17.${PLAIN}配置WireProxy"
-        echo -e "${GREEN}  18.${PLAIN}配置WarpStack"
+        echo -e "${GREEN}  15.${PLAIN}配置FireWall"
+        echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
+        echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
         read -p "$(echo -e "${BLUE}✦ Choice [0-18] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
@@ -4049,10 +4047,9 @@ main_menu() {
             12) install_snell ;;
             13) install_shoes ;;
             14) install_mihomo ;;
-            15) install_hysteria ;;
-            16) configure_firewall ;;
-            17) install_wireproxy ;;
-            18) install_warp ;;
+            15) configure_firewall ;;
+            16) install_wireproxy ;;
+            17) install_warp ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
