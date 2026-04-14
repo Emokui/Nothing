@@ -775,7 +775,7 @@ bbr_check_disk_space() {
 }
 
 bbr_check_and_prepare_swap() {
-    local total_ram total_swap managed_swap recommend_swap
+    local total_ram total_swap managed_swap recommend_swap other_swap target_swapfile
     total_ram=$(free -m | awk '/Mem:/ {print $2}')
     total_swap=$(get_current_swap_mb)
     managed_swap=$(get_managed_swap_mb)
@@ -785,14 +785,20 @@ bbr_check_and_prepare_swap() {
         return 0
     fi
 
+    other_swap=$((total_swap - managed_swap))
+    target_swapfile=$((recommend_swap - other_swap))
+    if (( target_swapfile < 128 )); then
+        target_swapfile=128
+    fi
+
     echo -e "${YELLOW}检测到虚拟内存（SWAP）需要优化${PLAIN}"
     echo -e "物理内存: ${GREEN}${total_ram}MB${PLAIN} | 总Swap: ${GREEN}${total_swap}MB${PLAIN} | 推荐: ${GREEN}${recommend_swap}MB${PLAIN}"
-    echo -e "文件Swap: ${GREEN}${managed_swap}MB${PLAIN}（仅管理 ${swapfile_path}）"
+    echo -e "文件Swap: ${GREEN}${managed_swap}MB${PLAIN} -> ${GREEN}${target_swapfile}MB${PLAIN}（仅管理 ${swapfile_path}）"
 
     read -rp "是否现在配置虚拟内存？(Y/N): " answer
     case "$answer" in
         [Yy])
-            set_swap "$recommend_swap" 0 || return 1
+            set_swap "$target_swapfile" 0 || return 1
             ;;
         *)
             echo -e "${YELLOW}已跳过虚拟内存配置${PLAIN}"
@@ -1030,16 +1036,6 @@ bbr_calculate_buffer_size() {
     esac
 }
 
-bbr_clean_sysctl_conf() {
-    [[ -f /etc/sysctl.conf && ! -f /etc/sysctl.conf.bak.original ]] && cp /etc/sysctl.conf /etc/sysctl.conf.bak.original
-    sed -i '/^net\.core\.rmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
-    sed -i '/^net\.core\.wmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
-    sed -i '/^net\.ipv4\.tcp_rmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
-    sed -i '/^net\.ipv4\.tcp_wmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
-    sed -i '/^net\.core\.default_qdisc/s/^/# /' /etc/sysctl.conf 2>/dev/null
-    sed -i '/^net\.ipv4\.tcp_congestion_control/s/^/# /' /etc/sysctl.conf 2>/dev/null
-}
-
 bbr_check_and_clean_conflicts() {
     echo -e "${BLUE}=== 检查 sysctl 配置冲突 ===${PLAIN}"
     local conflicts=()
@@ -1181,7 +1177,6 @@ bbr_configure_direct() {
     buffer_bytes=$((buffer_mb * 1024 * 1024))
 
     echo -e "${YELLOW}[步骤 2/5] 清理配置冲突...${PLAIN}"
-    [[ -f /etc/sysctl.conf ]] && bbr_clean_sysctl_conf
     [[ -L /etc/sysctl.d/99-sysctl.conf ]] && rm -f /etc/sysctl.d/99-sysctl.conf
     bbr_check_and_clean_conflicts
 
