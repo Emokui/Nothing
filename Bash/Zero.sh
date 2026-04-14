@@ -631,6 +631,7 @@ set_swap() {
     echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
     (( show_pause )) && press_any_key_to_continue
+    return 0
 }
 
 delete_swap() {
@@ -3426,7 +3427,7 @@ main_menu() {
         echo -e "${GREEN}  03.${PLAIN}重装系统"
         echo -e "${GREEN}  04.${PLAIN}设置时区"
         echo -e "${GREEN}  05.${PLAIN}配置IP栈"
-        echo -e "${GREEN}  06.${PLAIN}管理BBR"
+        echo -e "${GREEN}  06.${PLAIN}BBR管理"
         echo -e "${GREEN}  07.${PLAIN}配置DNS"
         echo -e "${GREEN}  08.${PLAIN}配置SSH"
         echo -e "${GREEN}  09.${PLAIN}重启VPS"
