@@ -197,46 +197,6 @@ install_wget_if_missing() {
 
 install_wget_if_missing
 
-enable_bbr_if_needed() {
-    local current_cc available_cc
-    local bbr_sysctl_conf="/etc/sysctl.d/99-zero-bbr.conf"
-    local bbr_module_conf="/etc/modules-load.d/bbr.conf"
-
-    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
-    available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
-
-    echo -e "${YELLOW}正在开启 BBR 拥塞控制...${PLAIN}"
-
-    mkdir -p /etc/sysctl.d /etc/modules-load.d
-    cat > "$bbr_sysctl_conf" <<'EOF'
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-EOF
-    echo "tcp_bbr" > "$bbr_module_conf"
-
-    if ! grep -qw bbr <<< "$available_cc"; then
-        modprobe tcp_bbr >/dev/null 2>&1 || true
-        available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
-    fi
-
-    sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
-    sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
-    sysctl --system >/dev/null 2>&1 || sysctl -p "$bbr_sysctl_conf" >/dev/null 2>&1 || true
-
-    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
-    available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
-
-    if [[ "$current_cc" == "bbr" ]]; then
-        echo -e "${GREEN}✓ BBR 已开启${PLAIN}"
-    elif grep -qw bbr <<< "$available_cc"; then
-        echo -e "${YELLOW}BBR 已写入持久化配置,当前内核未立即切换${PLAIN}"
-    else
-        echo -e "${RED}当前内核未检测到 BBR 支持${PLAIN}"
-    fi
-}
-
-enable_bbr_if_needed
-
 fix_gcp_debian_sources() {(
     local product_name
     product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
@@ -578,6 +538,7 @@ set_swap_menu() {
 
 set_swap() {
     local size_mb="$1"
+    local show_pause="${2:-1}"
     local avail_kb avail_mb existing_swap_mb root_fstype
     local temp_swap_path="${swapfile_path}.zero.tmp"
     local backup_swap_path="${swapfile_path}.zero.bak"
@@ -586,7 +547,7 @@ set_swap() {
     echo -e "${YELLOW}正在检查环境...${PLAIN}"
     if ! [[ "$size_mb" =~ ^[0-9]+$ ]] || (( size_mb < 128 )); then
         echo -e "${RED}无效的 Swap 大小${PLAIN}"
-        press_any_key_to_continue
+        (( show_pause )) && press_any_key_to_continue
         return 1
     fi
 
@@ -596,7 +557,7 @@ set_swap() {
     
     if (( avail_mb < size_mb + 500 )); then
         echo -e "${RED}磁盘空间不足!当前可用: ${avail_mb}MB, 需要: ${size_mb}MB (+预留500MB)${PLAIN}"
-        press_any_key_to_continue
+        (( show_pause )) && press_any_key_to_continue
         return 1
     fi
 
@@ -614,7 +575,7 @@ set_swap() {
     if ! create_swap_file "$temp_swap_path" "$size_mb" "$root_fstype"; then
         echo -e "${RED}Swap 文件创建失败${PLAIN}"
         rm -f "$temp_swap_path"
-        press_any_key_to_continue
+        (( show_pause )) && press_any_key_to_continue
         return 1
     fi
 
@@ -623,7 +584,7 @@ set_swap() {
         if ! swapoff "$swapfile_path"; then
             echo -e "${RED}旧 Swap 卸载失败,已保留原配置${PLAIN}"
             rm -f "$temp_swap_path"
-            press_any_key_to_continue
+            (( show_pause )) && press_any_key_to_continue
             return 1
         fi
     fi
@@ -633,7 +594,7 @@ set_swap() {
             echo -e "${RED}旧 Swap 备份失败,已保留原配置${PLAIN}"
             (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
             rm -f "$temp_swap_path"
-            press_any_key_to_continue
+            (( show_pause )) && press_any_key_to_continue
             return 1
         fi
     fi
@@ -645,7 +606,7 @@ set_swap() {
             mv "$backup_swap_path" "$swapfile_path" 2>/dev/null || true
             (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
         fi
-        press_any_key_to_continue
+        (( show_pause )) && press_any_key_to_continue
         return 1
     fi
 
@@ -656,7 +617,7 @@ set_swap() {
             mv "$backup_swap_path" "$swapfile_path" 2>/dev/null || true
             (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
         fi
-        press_any_key_to_continue
+        (( show_pause )) && press_any_key_to_continue
         return 1
     fi
 
@@ -669,7 +630,7 @@ set_swap() {
 
     echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
-    press_any_key_to_continue
+    (( show_pause )) && press_any_key_to_continue
 }
 
 delete_swap() {
@@ -717,6 +678,852 @@ set_swappiness() {
         echo -e "${RED}输入无效${PLAIN}"
     fi
     press_any_key_to_continue
+}
+
+BBR_SYSCTL_CONF="/etc/sysctl.d/99-bbr-ultimate.conf"
+BBR_KEYRING="/etc/apt/keyrings/xanmod-archive-keyring.gpg"
+BBR_REPO_FILE="/etc/apt/sources.list.d/xanmod-release.list"
+BBR_PERSIST_SERVICE="/etc/systemd/system/bbr-optimize-persist.service"
+BBR_PERSIST_SERVICE_NAME="bbr-optimize-persist.service"
+BBR_PERSIST_SCRIPT="/usr/local/bin/bbr-optimize-apply.sh"
+
+bbr_prompt_reboot() {
+    read -rp "现在重启服务器使配置生效吗？(Y/N): " answer
+    case "$answer" in
+        [Yy]) reboot_vps ;;
+        *) echo -e "${YELLOW}已取消,请稍后手动执行 reboot${PLAIN}" ;;
+    esac
+}
+
+bbr_cpu_has_flags() {
+    local flags needle
+    flags=$(awk -F': ' '/^flags[[:space:]]*:/ {print tolower($2); exit}' /proc/cpuinfo 2>/dev/null)
+    [[ -n "$flags" ]] || return 1
+
+    for needle in "$@"; do
+        case " $flags " in
+            *" ${needle} "*) ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
+bbr_detect_x86_64_level_local() {
+    if ! bbr_cpu_has_flags cx16 lahf_lm popcnt sse3 ssse3 sse4_1 sse4_2; then
+        echo 1
+        return 0
+    fi
+
+    if ! bbr_cpu_has_flags avx avx2 bmi1 bmi2 f16c fma movbe xsave; then
+        echo 2
+        return 0
+    fi
+
+    if ! bbr_cpu_has_flags abm && ! bbr_cpu_has_flags lzcnt; then
+        echo 2
+        return 0
+    fi
+
+    if ! bbr_cpu_has_flags avx512f avx512bw avx512cd avx512dq avx512vl; then
+        echo 3
+        return 0
+    fi
+
+    echo 4
+}
+
+bbr_ensure_apt_packages() {
+    local missing_packages=()
+    local package check_cmd
+
+    for package in "$@"; do
+        check_cmd="$package"
+        case "$package" in
+            gnupg) check_cmd="gpg" ;;
+            ca-certificates) check_cmd="update-ca-certificates" ;;
+        esac
+
+        if ! command -v "$check_cmd" >/dev/null 2>&1; then
+            missing_packages+=("$package")
+        fi
+    done
+
+    [[ "${#missing_packages[@]}" -eq 0 ]] && return 0
+
+    echo -e "${YELLOW}正在更新软件仓库...${PLAIN}"
+    apt-get update || return 1
+
+    echo -e "${YELLOW}正在安装依赖: ${missing_packages[*]}${PLAIN}"
+    apt-get install -y "${missing_packages[@]}" || return 1
+}
+
+bbr_check_disk_space() {
+    local required_gb="$1"
+    local required_space_mb=$((required_gb * 1024))
+    local available_space_mb
+    available_space_mb=$(df -m / | awk 'NR==2 {print $4}')
+
+    if (( available_space_mb >= required_space_mb )); then
+        return 0
+    fi
+
+    echo -e "${YELLOW}警告: 磁盘空间不足${PLAIN}"
+    echo -e "当前可用: ${GREEN}$((available_space_mb / 1024))G${PLAIN} | 最低需求: ${GREEN}${required_gb}G${PLAIN}"
+    read -rp "是否继续？(Y/N): " answer
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+bbr_check_and_prepare_swap() {
+    local total_ram total_swap managed_swap recommend_swap
+    total_ram=$(free -m | awk '/Mem:/ {print $2}')
+    total_swap=$(get_current_swap_mb)
+    managed_swap=$(get_managed_swap_mb)
+    recommend_swap=$(get_recommended_swap)
+
+    if (( total_swap >= recommend_swap )); then
+        return 0
+    fi
+
+    echo -e "${YELLOW}检测到虚拟内存（SWAP）需要优化${PLAIN}"
+    echo -e "物理内存: ${GREEN}${total_ram}MB${PLAIN} | 总Swap: ${GREEN}${total_swap}MB${PLAIN} | 推荐: ${GREEN}${recommend_swap}MB${PLAIN}"
+    echo -e "文件Swap: ${GREEN}${managed_swap}MB${PLAIN}（仅管理 ${swapfile_path}）"
+
+    read -rp "是否现在配置虚拟内存？(Y/N): " answer
+    case "$answer" in
+        [Yy])
+            set_swap "$recommend_swap" 0 || return 1
+            ;;
+        *)
+            echo -e "${YELLOW}已跳过虚拟内存配置${PLAIN}"
+            ;;
+    esac
+}
+
+bbr_ensure_speedtest() {
+    if command -v speedtest >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}speedtest 未安装，正在安装...${PLAIN}" >&2
+    local cpu_arch download_url speedtest_tmp
+    cpu_arch=$(uname -m)
+
+    case "$cpu_arch" in
+        x86_64) download_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz" ;;
+        *)
+            echo -e "${RED}错误: 不支持的架构 ${cpu_arch}${PLAIN}" >&2
+            return 1
+            ;;
+    esac
+
+    speedtest_tmp=$(mktemp -d) || return 1
+    if command -v wget >/dev/null 2>&1; then
+        wget -q "$download_url" -O "${speedtest_tmp}/speedtest.tgz" || {
+            rm -rf "$speedtest_tmp"
+            return 1
+        }
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$download_url" -o "${speedtest_tmp}/speedtest.tgz" || {
+            rm -rf "$speedtest_tmp"
+            return 1
+        }
+    else
+        rm -rf "$speedtest_tmp"
+        return 1
+    fi
+
+    tar -xzf "${speedtest_tmp}/speedtest.tgz" -C "$speedtest_tmp" || {
+        rm -rf "$speedtest_tmp"
+        return 1
+    }
+    mv "${speedtest_tmp}/speedtest" /usr/local/bin/speedtest || {
+        rm -rf "$speedtest_tmp"
+        return 1
+    }
+    chmod +x /usr/local/bin/speedtest
+    rm -rf "$speedtest_tmp"
+}
+
+bbr_detect_bandwidth() {
+    echo -e "${BLUE}======== 带宽检测 ========${PLAIN}" >&2
+    echo -e "${GREEN}1.${PLAIN}自动检测    ${GREEN}2.${PLAIN}预设档位" >&2
+    echo -e "${YELLOW}0.${PLAIN}返回菜单" >&2
+    echo -e "${BLUE}==========================${PLAIN}" >&2
+    read -rp "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" bw_choice
+    bw_choice=${bw_choice:-1}
+
+    case "$bw_choice" in
+        0)
+            return 2
+            ;;
+        1)
+            echo -e "${YELLOW}正在运行 speedtest 自动测速...${PLAIN}" >&2
+            bbr_ensure_speedtest >/dev/null 2>&1 || {
+                echo -e "${YELLOW}测速工具安装失败，使用默认值 1000 Mbps${PLAIN}" >&2
+                echo "1000"
+                return 1
+            }
+
+            local servers_list server_count
+            servers_list=$(speedtest --accept-license --servers 2>/dev/null | sed -nE 's/^[[:space:]]*([0-9]+).*/\1/p' | head -n 10)
+            if [[ -n "$servers_list" ]]; then
+                server_count=$(echo "$servers_list" | wc -l | tr -d ' ')
+                echo -e "${GREEN}已找到 ${server_count} 个附近节点${PLAIN}" >&2
+            else
+                servers_list="auto"
+                echo -e "${YELLOW}未获取到节点列表，将自动选择最近服务器${PLAIN}" >&2
+            fi
+
+            local speedtest_output="" upload_speed="" upload_mbps="" success_server="" failed_server="" attempt=0 max_attempts=5 server_id
+            for server_id in $servers_list; do
+                attempt=$((attempt + 1))
+                (( attempt <= max_attempts )) || break
+
+                if [[ "$server_id" == "auto" ]]; then
+                    echo -e "${YELLOW}[尝试 ${attempt}] 自动选择最近服务器...${PLAIN}" >&2
+                    speedtest_output=$(speedtest --accept-license 2>&1)
+                else
+                    echo -e "${YELLOW}[尝试 ${attempt}] 测试服务器 #${server_id}...${PLAIN}" >&2
+                    speedtest_output=$(speedtest --accept-license --server-id="$server_id" 2>&1)
+                fi
+
+                echo "$speedtest_output" >&2
+                echo >&2
+
+                upload_speed=""
+                if echo "$speedtest_output" | grep -q "Upload:"; then
+                    upload_speed=$(echo "$speedtest_output" | sed -nE 's/.*[Uu]pload:[[:space:]]*([0-9]+(\.[0-9]+)?).*/\1/p' | head -n 1)
+                fi
+                if [[ -z "$upload_speed" ]]; then
+                    upload_speed=$(echo "$speedtest_output" | grep -i "Upload:" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+$/) {print $i; exit}}')
+                fi
+
+                if [[ -n "$upload_speed" ]] && ! echo "$speedtest_output" | grep -qi "FAILED\|error"; then
+                    success_server=$(echo "$speedtest_output" | grep "Server:" | head -n 1 | sed 's/.*Server: //')
+                    echo -e "${GREEN}测速成功${PLAIN}" >&2
+                    [[ -n "$success_server" ]] && echo -e "使用服务器: ${GREEN}${success_server}${PLAIN}" >&2
+                    break
+                fi
+
+                failed_server=$(echo "$speedtest_output" | grep "Server:" | head -n 1 | sed 's/.*Server: //' | sed 's/[[:space:]]*$//')
+                if [[ -n "$failed_server" ]]; then
+                    echo -e "${YELLOW}节点失败: ${failed_server}${PLAIN}" >&2
+                else
+                    echo -e "${YELLOW}节点失败,继续尝试下一个${PLAIN}" >&2
+                fi
+                echo >&2
+            done
+
+            if [[ -z "$upload_speed" ]] || echo "$speedtest_output" | grep -qi "FAILED\|error"; then
+                echo -e "${YELLOW}测速失败，使用默认值 1000 Mbps${PLAIN}" >&2
+                echo "1000"
+                return 1
+            fi
+
+            upload_mbps=${upload_speed%.*}
+            if ! [[ "$upload_mbps" =~ ^[0-9]+$ ]] || (( upload_mbps <= 0 )); then
+                echo -e "${YELLOW}检测值异常 (${upload_speed})，使用默认值 1000 Mbps${PLAIN}" >&2
+                echo "1000"
+                return 1
+            fi
+
+            echo -e "${GREEN}检测到上传带宽: ${upload_mbps} Mbps${PLAIN}" >&2
+            echo "$upload_mbps"
+            ;;
+        2)
+            echo "1. 100 Mbps" >&2
+            echo "2. 200 Mbps" >&2
+            echo "3. 300 Mbps" >&2
+            echo "4. 500 Mbps" >&2
+            echo "5. 700 Mbps" >&2
+            echo "6. 1000 Mbps" >&2
+            echo "7. 1500 Mbps" >&2
+            echo "8. 2000 Mbps" >&2
+            echo "9. 2500 Mbps" >&2
+            echo "10. 自定义输入" >&2
+            read -rp "请输入选择 [6]: " preset_choice
+            preset_choice=${preset_choice:-6}
+            case "$preset_choice" in
+                1) echo 100 ;;
+                2) echo 200 ;;
+                3) echo 300 ;;
+                4) echo 500 ;;
+                5) echo 700 ;;
+                6) echo 1000 ;;
+                7) echo 1500 ;;
+                8) echo 2000 ;;
+                9) echo 2500 ;;
+                10)
+                    read -rp "请输入带宽值（Mbps）: " manual_bandwidth
+                    if [[ "$manual_bandwidth" =~ ^[0-9]+$ ]] && (( manual_bandwidth > 0 )); then
+                        echo "$manual_bandwidth"
+                    else
+                        echo 1000
+                        return 1
+                    fi
+                    ;;
+                *) echo 1000; return 1 ;;
+            esac
+            ;;
+        *)
+            echo 1000
+            return 1
+            ;;
+    esac
+}
+
+bbr_calculate_buffer_size() {
+    local bandwidth="$1"
+    local region="${2:-asia}"
+    local buffer_mb
+
+    if ! [[ "$bandwidth" =~ ^[0-9]+$ ]] || (( bandwidth <= 0 )); then
+        [[ "$region" == "overseas" ]] && echo 32 || echo 16
+        return 0
+    fi
+
+    if [[ "$region" == "overseas" ]]; then
+        if (( bandwidth <= 100 )); then
+            buffer_mb=8
+        elif (( bandwidth <= 200 )); then
+            buffer_mb=16
+        elif (( bandwidth <= 300 )); then
+            buffer_mb=20
+        elif (( bandwidth <= 500 )); then
+            buffer_mb=32
+        elif (( bandwidth <= 700 )); then
+            buffer_mb=48
+        else
+            buffer_mb=64
+        fi
+    else
+        if (( bandwidth <= 100 )); then
+            buffer_mb=6
+        elif (( bandwidth <= 200 )); then
+            buffer_mb=8
+        elif (( bandwidth <= 300 )); then
+            buffer_mb=10
+        elif (( bandwidth <= 500 )); then
+            buffer_mb=12
+        elif (( bandwidth <= 700 )); then
+            buffer_mb=14
+        elif (( bandwidth <= 1000 )); then
+            buffer_mb=16
+        elif (( bandwidth <= 1500 )); then
+            buffer_mb=20
+        elif (( bandwidth <= 2000 )); then
+            buffer_mb=24
+        elif (( bandwidth <= 2500 )); then
+            buffer_mb=28
+        else
+            buffer_mb=32
+        fi
+    fi
+
+    echo -e "${YELLOW}推荐缓冲区: ${GREEN}${buffer_mb}MB${PLAIN}" >&2
+    read -rp "是否使用推荐值 ${buffer_mb}MB？(Y/N) [Y]: " confirm
+    confirm=${confirm:-Y}
+    case "$confirm" in
+        [Yy]) echo "$buffer_mb" ;;
+        *) [[ "$region" == "overseas" ]] && echo 32 || echo 16 ;;
+    esac
+}
+
+bbr_clean_sysctl_conf() {
+    [[ -f /etc/sysctl.conf && ! -f /etc/sysctl.conf.bak.original ]] && cp /etc/sysctl.conf /etc/sysctl.conf.bak.original
+    sed -i '/^net\.core\.rmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
+    sed -i '/^net\.core\.wmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
+    sed -i '/^net\.ipv4\.tcp_rmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
+    sed -i '/^net\.ipv4\.tcp_wmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
+    sed -i '/^net\.core\.default_qdisc/s/^/# /' /etc/sysctl.conf 2>/dev/null
+    sed -i '/^net\.ipv4\.tcp_congestion_control/s/^/# /' /etc/sysctl.conf 2>/dev/null
+}
+
+bbr_check_and_clean_conflicts() {
+    echo -e "${BLUE}=== 检查 sysctl 配置冲突 ===${PLAIN}"
+    local conflicts=()
+    local conf base num
+    local tune_key_regex='(^|\s)net\.(core\.(rmem_max|wmem_max|default_qdisc)|ipv4\.tcp_(rmem|wmem|congestion_control))'
+
+    for conf in /etc/sysctl.d/*.conf; do
+        [[ -f "$conf" ]] || continue
+        [[ "$conf" == "$BBR_SYSCTL_CONF" ]] && continue
+        if grep -qE "$tune_key_regex" "$conf" 2>/dev/null; then
+            base=$(basename "$conf")
+            num=$(echo "$base" | sed -n 's/^\([0-9]\+\).*/\1/p')
+            if [[ -z "$num" || "$num" -ge 99 ]]; then
+                conflicts+=("$conf")
+            fi
+        fi
+    done
+
+    local has_sysctl_conflict=0
+    if [[ -f /etc/sysctl.conf ]] && grep -qE "$tune_key_regex" /etc/sysctl.conf 2>/dev/null; then
+        has_sysctl_conflict=1
+    fi
+
+    if [[ "${#conflicts[@]}" -eq 0 && "$has_sysctl_conflict" -eq 0 ]]; then
+        echo -e "${GREEN}✓ 未发现可能的覆盖配置${PLAIN}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}发现可能的覆盖配置${PLAIN}"
+    if [[ "${#conflicts[@]}" -gt 0 ]]; then
+        printf '  - %s\n' "${conflicts[@]}"
+    fi
+    [[ "$has_sysctl_conflict" -eq 1 ]] && echo "  - /etc/sysctl.conf"
+
+    read -rp "是否自动禁用/注释这些覆盖配置？(Y/N): " answer
+    case "$answer" in
+        [Yy])
+            if [[ "$has_sysctl_conflict" -eq 1 ]]; then
+                cp /etc/sysctl.conf /etc/sysctl.conf.bak.conflict 2>/dev/null || true
+                sed -i '/^net\.ipv4\.tcp_wmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
+                sed -i '/^net\.ipv4\.tcp_rmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
+                sed -i '/^net\.core\.rmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
+                sed -i '/^net\.core\.wmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
+                sed -i '/^net\.core\.default_qdisc/s/^/# /' /etc/sysctl.conf 2>/dev/null
+                sed -i '/^net\.ipv4\.tcp_congestion_control/s/^/# /' /etc/sysctl.conf 2>/dev/null
+            fi
+            for conf in "${conflicts[@]}"; do
+                mv "$conf" "${conf}.disabled.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+            done
+            ;;
+        *)
+            echo -e "${YELLOW}已跳过自动清理，可能导致新配置未完全生效${PLAIN}"
+            ;;
+    esac
+}
+
+bbr_eligible_ifaces() {
+    local path dev
+    for path in /sys/class/net/*; do
+        [[ -e "$path" ]] || continue
+        dev=$(basename "$path")
+        case "$dev" in
+            lo|docker*|veth*|br-*|virbr*|zt*|tailscale*|wg*|tun*|tap*) continue ;;
+        esac
+        echo "$dev"
+    done
+}
+
+bbr_apply_tc_fq_now() {
+    if ! command -v tc >/dev/null 2>&1; then
+        echo -e "${YELLOW}警告: 未检测到 tc（iproute2），跳过 fq 应用${PLAIN}"
+        return 0
+    fi
+
+    local applied=0 dev
+    for dev in $(bbr_eligible_ifaces); do
+        tc qdisc replace dev "$dev" root fq 2>/dev/null && applied=$((applied + 1))
+    done
+
+    if (( applied > 0 )); then
+        echo -e "${GREEN}已对 ${applied} 个网卡应用 fq${PLAIN}"
+    else
+        echo -e "${YELLOW}未发现可应用 fq 的网卡${PLAIN}"
+    fi
+}
+
+bbr_apply_mss_clamp() {
+    local action="$1"
+    if ! command -v iptables >/dev/null 2>&1; then
+        echo -e "${YELLOW}警告: 未检测到 iptables，跳过 MSS clamp${PLAIN}"
+        return 0
+    fi
+
+    if [[ "$action" == "enable" ]]; then
+        iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 \
+            || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    else
+        iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
+    fi
+}
+
+bbr_cleanup_persist() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl disable --now "$BBR_PERSIST_SERVICE_NAME" >/dev/null 2>&1 || true
+    fi
+    rm -f "$BBR_PERSIST_SERVICE" "$BBR_PERSIST_SCRIPT"
+    command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload >/dev/null 2>&1 || true
+}
+
+bbr_configure_direct() {
+    if [[ "$(uname -m)" != "x86_64" ]]; then
+        echo -e "${RED}错误: 当前仅支持 x86_64 系统${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    bbr_check_and_prepare_swap || {
+        echo -e "${RED}虚拟内存配置失败，已停止本次优化${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+
+    echo -e "${YELLOW}[步骤 1/5] 带宽检测与缓冲区...${PLAIN}"
+    local detected_bandwidth
+    detected_bandwidth=$(bbr_detect_bandwidth)
+    local bandwidth_status=$?
+    if [[ "$bandwidth_status" -eq 2 ]]; then
+        return 0
+    fi
+
+    local region="asia" region_choice
+    echo "1. 亚太地区（港/日/新/韩等）"
+    echo "2. 美国/欧洲（跨太平洋/大西洋）"
+    read -rp "请输入选择 [1]: " region_choice
+    [[ "${region_choice:-1}" == "2" ]] && region="overseas"
+
+    local buffer_mb buffer_bytes
+    buffer_mb=$(bbr_calculate_buffer_size "$detected_bandwidth" "$region")
+    buffer_bytes=$((buffer_mb * 1024 * 1024))
+
+    echo -e "${YELLOW}[步骤 2/5] 清理配置冲突...${PLAIN}"
+    [[ -f /etc/sysctl.conf ]] && bbr_clean_sysctl_conf
+    [[ -L /etc/sysctl.d/99-sysctl.conf ]] && rm -f /etc/sysctl.d/99-sysctl.conf
+    bbr_check_and_clean_conflicts
+
+    echo -e "${YELLOW}[步骤 3/5] 创建配置文件...${PLAIN}"
+    local mem_total vm_swappiness=5 vm_dirty_ratio=15 vm_min_free_kbytes=65536
+    mem_total=$(free -m | awk '/Mem:/ {print $2}')
+    if (( mem_total < 2048 )); then
+        vm_swappiness=20
+        vm_dirty_ratio=20
+        vm_min_free_kbytes=32768
+    fi
+
+    cat > "$BBR_SYSCTL_CONF" <<EOF
+# BBR Direct/Endpoint Configuration
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.core.rmem_max=${buffer_bytes}
+net.core.wmem_max=${buffer_bytes}
+net.ipv4.tcp_rmem=4096 87380 ${buffer_bytes}
+net.ipv4.tcp_wmem=4096 65536 ${buffer_bytes}
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.ip_local_port_range=1024 65535
+net.core.somaxconn=4096
+net.ipv4.tcp_max_syn_backlog=8192
+net.core.netdev_max_backlog=5000
+net.ipv4.tcp_slow_start_after_idle=0
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_notsent_lowat=16384
+net.ipv4.tcp_fin_timeout=15
+net.ipv4.tcp_max_tw_buckets=5000
+net.ipv4.tcp_fastopen=3
+net.ipv4.tcp_keepalive_time=300
+net.ipv4.tcp_keepalive_intvl=30
+net.ipv4.tcp_keepalive_probes=5
+net.ipv4.udp_rmem_min=8192
+net.ipv4.udp_wmem_min=8192
+net.ipv4.tcp_syncookies=1
+vm.swappiness=${vm_swappiness}
+vm.dirty_ratio=${vm_dirty_ratio}
+vm.dirty_background_ratio=5
+vm.overcommit_memory=1
+vm.min_free_kbytes=${vm_min_free_kbytes}
+vm.vfs_cache_pressure=50
+kernel.sched_autogroup_enabled=0
+kernel.numa_balancing=0
+EOF
+
+    echo -e "${YELLOW}[步骤 4/5] 应用所有优化参数...${PLAIN}"
+    local sysctl_output sysctl_rc
+    sysctl_output=$(sysctl -p "$BBR_SYSCTL_CONF" 2>&1)
+    sysctl_rc=$?
+    if [[ "$sysctl_rc" -ne 0 ]]; then
+        echo -e "${YELLOW}部分 sysctl 参数应用失败（不支持的参数会被跳过）${PLAIN}"
+        echo "$sysctl_output" | grep -i "error\|invalid\|unknown\|cannot" | head -n 5
+    fi
+
+    bbr_apply_tc_fq_now
+    bbr_apply_mss_clamp enable
+    bbr_cleanup_persist
+
+    cat > "$BBR_PERSIST_SERVICE" <<'EOF'
+[Unit]
+Description=BBR Optimize - Restore tc fq and MSS clamp after boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/bbr-optimize-apply.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat > "$BBR_PERSIST_SCRIPT" <<'EOF'
+#!/bin/bash
+for d in /sys/class/net/*; do
+    [ -e "$d" ] || continue
+    dev=$(basename "$d")
+    case "$dev" in
+        lo|docker*|veth*|br-*|virbr*|zt*|tailscale*|wg*|tun*|tap*) continue ;;
+    esac
+    tc qdisc replace dev "$dev" root fq 2>/dev/null
+done
+if command -v iptables >/dev/null 2>&1; then
+    iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 \
+        || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+fi
+EOF
+
+    chmod +x "$BBR_PERSIST_SCRIPT"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1
+        systemctl enable "$BBR_PERSIST_SERVICE_NAME" >/dev/null 2>&1
+    else
+        echo -e "${YELLOW}未检测到 systemctl，已跳过持久化服务启用${PLAIN}"
+    fi
+
+    echo -e "${YELLOW}[步骤 5/5] 验证配置...${PLAIN}"
+    local actual_qdisc actual_cc available_cc current_kernel
+    actual_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    actual_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
+    current_kernel=$(uname -r)
+
+    if [[ "$actual_qdisc" == "fq" && "$actual_cc" == "bbr" ]] && echo "$available_cc" | grep -qw bbr; then
+        if echo "$current_kernel" | grep -qi 'xanmod'; then
+            echo -e "${GREEN}✓ fq + bbr 已启用，当前运行内核为 XanMod${PLAIN}"
+            echo -e "配置说明: ${GREEN}${buffer_mb}MB${PLAIN} 缓冲区（${GREEN}${detected_bandwidth} Mbps${PLAIN} 带宽）"
+        else
+            echo -e "${YELLOW}fq + bbr 已启用，但当前运行内核不是 XanMod${PLAIN}"
+            echo -e "${YELLOW}如需确认 BBR v3，请先重启进入 XanMod 内核后再验证${PLAIN}"
+        fi
+    else
+        echo -e "${YELLOW}配置已保存，但部分参数未立即生效${PLAIN}"
+    fi
+
+    press_any_key_to_continue
+}
+
+bbr_install_xanmod_kernel() {
+    echo -e "${BLUE}=== 安装 XanMod 内核与 BBR v3 ===${PLAIN}"
+    echo "支持系统: Debian/Ubuntu (x86_64)"
+    echo -e "${YELLOW}警告: 将升级 Linux 内核，请提前备份重要数据${PLAIN}"
+    read -rp "确定继续安装吗？(Y/N): " choice
+    case "$choice" in
+        [Yy]) ;;
+        *) echo "已取消安装"; press_any_key_to_continue; return 1 ;;
+    esac
+
+    if [[ "$(uname -m)" != "x86_64" ]]; then
+        echo -e "${RED}错误: 当前仅支持 x86_64 系统${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    if [[ -r /etc/os-release ]]; then
+        . /etc/os-release
+        if [[ "$ID" != "debian" && "$ID" != "ubuntu" ]]; then
+            echo -e "${RED}错误: 仅支持 Debian 和 Ubuntu${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
+    else
+        echo -e "${RED}错误: 无法确定操作系统类型${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    bbr_check_disk_space 3 || {
+        press_any_key_to_continue
+        return 1
+    }
+    bbr_check_and_prepare_swap || {
+        echo -e "${RED}虚拟内存配置失败，已停止安装${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+    bbr_ensure_apt_packages wget curl gnupg ca-certificates || {
+        echo -e "${RED}依赖安装失败${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+
+    echo -e "${YELLOW}正在添加 XanMod 仓库密钥...${PLAIN}"
+    mkdir -p /etc/apt/keyrings
+    local key_tmp key_log
+    key_tmp=$(mktemp) || {
+        press_any_key_to_continue
+        return 1
+    }
+    key_log="${key_tmp}.log"
+
+    if command -v wget >/dev/null 2>&1; then
+        wget -O "$key_tmp" "https://gitlab.com/afrd.gpg" 2>"$key_log"
+    else
+        curl -fsSL "https://gitlab.com/afrd.gpg" -o "$key_tmp" 2>"$key_log"
+    fi
+
+    if [[ ! -s "$key_tmp" ]] || ! gpg --dearmor -o "$BBR_KEYRING" --yes < "$key_tmp" 2>>"$key_log"; then
+        echo -e "${RED}错误: XanMod 仓库密钥下载或导入失败${PLAIN}"
+        [[ -s "$key_log" ]] && tail -n 5 "$key_log"
+        rm -f "$key_tmp" "$key_log"
+        press_any_key_to_continue
+        return 1
+    fi
+    rm -f "$key_tmp" "$key_log"
+
+    local distro_codename
+    if [[ -n "${VERSION_CODENAME:-}" ]]; then
+        distro_codename="$VERSION_CODENAME"
+    elif [[ -n "${UBUNTU_CODENAME:-}" ]]; then
+        distro_codename="$UBUNTU_CODENAME"
+    elif command -v lsb_release >/dev/null 2>&1; then
+        distro_codename=$(lsb_release -sc 2>/dev/null)
+    else
+        distro_codename=""
+    fi
+
+    if [[ -z "$distro_codename" ]]; then
+        echo -e "${RED}错误: 无法确定系统代号，已停止安装${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    echo "deb [signed-by=${BBR_KEYRING}] http://deb.xanmod.org ${distro_codename} main" > "$BBR_REPO_FILE"
+
+    echo -e "${YELLOW}正在检测 CPU 支持的最优内核版本...${PLAIN}"
+    local version package_name package_hint
+    version=$(bbr_detect_x86_64_level_local)
+    if ! [[ "$version" =~ ^[1-4]$ ]]; then
+        echo -e "${RED}错误: 无法可靠检测 CPU 对应的 XanMod x64v 等级${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    case "$version" in
+        1)
+            package_name="linux-xanmod-lts-x64v1"
+            package_hint="x64v1 仅提供 LTS 包，已自动切换到 LTS"
+            ;;
+        2)
+            package_name="linux-xanmod-x64v2"
+            package_hint="x64v2"
+            ;;
+        3|4)
+            package_name="linux-xanmod-x64v3"
+            package_hint="x64v${version} 检测结果，按官方建议安装 x64v3"
+            ;;
+    esac
+
+    echo -e "${GREEN}将安装: ${package_name}${PLAIN}"
+    echo -e "${YELLOW}说明: ${package_hint}${PLAIN}"
+    apt-get update || {
+        echo -e "${RED}apt-get update 失败${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+
+    local installed_version candidate_version
+    installed_version=$(dpkg-query -W -f='${Version}' "$package_name" 2>/dev/null || true)
+    candidate_version=$(apt-cache policy "$package_name" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+
+    if [[ -n "$installed_version" && -n "$candidate_version" && "$candidate_version" != "(none)" && "$installed_version" == "$candidate_version" ]]; then
+        echo -e "${YELLOW}${package_name} 已是最新版本 (${installed_version})${PLAIN}"
+        if uname -r | grep -qi 'xanmod'; then
+            echo -e "${GREEN}当前系统已运行 XanMod 内核${PLAIN}"
+        else
+            echo -e "${YELLOW}当前系统尚未运行 XanMod 内核，如刚完成安装请重启后生效${PLAIN}"
+        fi
+        press_any_key_to_continue
+        return 0
+    fi
+
+    if ! apt-get install -y "$package_name"; then
+        echo -e "${RED}XanMod 内核安装失败${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    if ! dpkg -l 2>/dev/null | grep -qE "^ii[[:space:]]+${package_name}"; then
+        echo -e "${RED}未检测到 ${package_name} 安装成功${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    echo -e "${GREEN}XanMod 内核安装成功${PLAIN}"
+    echo -e "${YELLOW}提示: 请先重启系统加载新内核，然后再进行 BBR 调优${PLAIN}"
+    press_any_key_to_continue
+}
+
+bbr_uninstall_xanmod_kernel() {
+    echo -e "${YELLOW}警告: 即将卸载 XanMod 内核${PLAIN}"
+    local non_xanmod_kernels
+    non_xanmod_kernels=$(dpkg -l 2>/dev/null | grep '^ii' | grep 'linux-image-' | grep -v 'xanmod' | grep -v 'dbg' | wc -l)
+    if [[ "$non_xanmod_kernels" -eq 0 ]]; then
+        echo -e "${RED}安全检查未通过：未检测到非 XanMod 的回退内核${PLAIN}"
+        echo "建议先安装默认内核:"
+        echo "  apt install -y linux-image-amd64   # Debian"
+        echo "  apt install -y linux-image-generic # Ubuntu"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    read -rp "确定继续吗？(Y/N): " confirm
+    case "$confirm" in
+        [Yy])
+            echo -e "${YELLOW}正在卸载 XanMod 相关包...${PLAIN}"
+            if ! apt purge -y 'linux-*xanmod*'; then
+                press_any_key_to_continue
+                return 1
+            fi
+            update-grub 2>/dev/null || true
+            rm -f "$BBR_REPO_FILE" "$BBR_KEYRING" /usr/share/keyrings/xanmod-archive-keyring.gpg
+            rm -f "$BBR_SYSCTL_CONF" /etc/sysctl.d/99-zero-bbr.conf /etc/modules-load.d/bbr.conf
+            bbr_cleanup_persist
+            echo -e "${GREEN}XanMod 内核已卸载${PLAIN}"
+            bbr_prompt_reboot
+            ;;
+        *)
+            echo "已取消"
+            ;;
+    esac
+    press_any_key_to_continue
+}
+
+bbr_menu_status_line() {
+    local current_kernel cc qdisc xanmod_state
+    current_kernel=$(uname -r 2>/dev/null)
+    cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+
+    if dpkg -l 2>/dev/null | grep -q 'linux-.*xanmod'; then
+        xanmod_state="${GREEN}已安装${PLAIN}"
+    else
+        xanmod_state="${YELLOW}未安装${PLAIN}"
+    fi
+
+    echo -e "${BLUE}内核 ${YELLOW}${current_kernel:-unknown}${PLAIN}"
+    echo -e "${BLUE}XanMod ${xanmod_state} | BBR ${GREEN}${cc:-unknown}${PLAIN} | Qdisc ${GREEN}${qdisc:-unknown}${PLAIN}"
+}
+
+bbr_manage_menu() {
+    local opt
+    while true; do
+        clear
+        echo -e "${BLUE}============ BBR管理 ============${PLAIN}"
+        bbr_menu_status_line
+        echo -e "${BLUE}==================================${PLAIN}"
+        echo -e "${GREEN}1.安装XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
+        echo -e "${BLUE}3.BBR调优${PLAIN}      ${YELLOW}0.返回菜单${PLAIN}"
+        echo -e "${BLUE}==================================${PLAIN}"
+        read -rp "$(echo -e "${BLUE}请输入选项 [0-3]: ${PLAIN}")" opt
+
+        case "$opt" in
+            1) clear; bbr_install_xanmod_kernel ;;
+            2) clear; bbr_uninstall_xanmod_kernel ;;
+            3) clear; bbr_configure_direct ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
 }
 
 ssh_config_menu() {
@@ -2619,20 +3426,21 @@ main_menu() {
         echo -e "${GREEN}  03.${PLAIN}重装系统"
         echo -e "${GREEN}  04.${PLAIN}设置时区"
         echo -e "${GREEN}  05.${PLAIN}配置IP栈"
-        echo -e "${GREEN}  06.${PLAIN}配置DNS"
-        echo -e "${GREEN}  07.${PLAIN}配置SSH"
-        echo -e "${GREEN}  08.${PLAIN}重启VPS"
-        echo -e "${GREEN}  09.${PLAIN}配置SWAP"
-        echo -e "${GREEN}  10.${PLAIN}配置ACME"
-        echo -e "${GREEN}  11.${PLAIN}配置Snell"
-        echo -e "${GREEN}  12.${PLAIN}配置Shoes"
-        echo -e "${GREEN}  13.${PLAIN}配置Mihomo"
-        echo -e "${GREEN}  14.${PLAIN}配置Hysteria"
-        echo -e "${GREEN}  15.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
-        echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
+        echo -e "${GREEN}  06.${PLAIN}BBR管理"
+        echo -e "${GREEN}  07.${PLAIN}配置DNS"
+        echo -e "${GREEN}  08.${PLAIN}配置SSH"
+        echo -e "${GREEN}  09.${PLAIN}重启VPS"
+        echo -e "${GREEN}  10.${PLAIN}配置SWAP"
+        echo -e "${GREEN}  11.${PLAIN}配置ACME"
+        echo -e "${GREEN}  12.${PLAIN}配置Snell"
+        echo -e "${GREEN}  13.${PLAIN}配置Shoes"
+        echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
+        echo -e "${GREEN}  15.${PLAIN}配置Hysteria"
+        echo -e "${GREEN}  16.${PLAIN}配置FireWall"
+        echo -e "${GREEN}  17.${PLAIN}配置WireProxy"
+        echo -e "${GREEN}  18.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
-        read -p "$(echo -e "${BLUE}✦ Choice [0-17] ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice [0-18] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         if [[ "$choice" =~ ^[0-9]+$ ]]; then
             choice=$((10#$choice))
@@ -2643,18 +3451,19 @@ main_menu() {
             3)  install_system ;;
             4)  change_timezone ;;
             5)  set_ip_priority ;;
-            6)  dns_fix ;;
-            7)  ssh_config_menu ;;
-            8)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            9)  set_swap_menu ;;
-            10) install_acme ;;
-            11) install_snell ;;
-            12) install_shoes ;;
-            13) install_mihomo ;;
-            14) install_hysteria ;;
-            15) configure_firewall ;;
-            16) install_wireproxy ;;
-            17) install_warp ;;
+            6)  bbr_manage_menu ;;
+            7)  dns_fix ;;
+            8)  ssh_config_menu ;;
+            9)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
+            10) set_swap_menu ;;
+            11) install_acme ;;
+            12) install_snell ;;
+            13) install_shoes ;;
+            14) install_mihomo ;;
+            15) install_hysteria ;;
+            16) configure_firewall ;;
+            17) install_wireproxy ;;
+            18) install_warp ;;
             0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
             *)  clear; echo -e "${RED}[!] 无效选项，请重新选择${PLAIN}"; sleep 0.4 ;;
         esac
