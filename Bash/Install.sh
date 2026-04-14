@@ -92,14 +92,14 @@ selectMirror(){
   [ -n "$TEMP" ] || exit 1
   mirrorStatus=0
   declare -A MirrorBackup
-  MirrorBackup=(["debian0"]="" ["debian1"]="http://deb.debian.org/debian" ["debian2"]="http://archive.debian.org/debian" ["ubuntu0"]="" ["ubuntu1"]="http://archive.ubuntu.com/ubuntu" ["ubuntu2"]="http://ports.ubuntu.com" ["centos0"]="" ["centos1"]="http://mirror.centos.org/centos" ["centos2"]="http://vault.centos.org")
+  MirrorBackup=(["debian0"]="" ["debian1"]="https://deb.debian.org/debian" ["debian2"]="https://archive.debian.org/debian" ["ubuntu0"]="" ["ubuntu1"]="https://archive.ubuntu.com/ubuntu" ["ubuntu2"]="https://ports.ubuntu.com" ["centos0"]="" ["centos1"]="https://mirror.centos.org/centos" ["centos2"]="https://vault.centos.org")
   echo "$New" |grep -q '^http://\|^https://\|^ftp://' && MirrorBackup[${Relese}0]="$New"
   for mirror in $(echo "${!MirrorBackup[@]}" |sed 's/\ /\n/g' |sort -n |grep "^$Relese")
     do
       Current="${MirrorBackup[$mirror]}"
       [ -n "$Current" ] || continue
       MirrorURL=`echo "$TEMP" |sed "s#SUB_MIRROR#${Current}#g"`
-      wget --no-check-certificate --spider --timeout=3 -o /dev/null "$MirrorURL"
+      wget --spider --timeout=3 -o /dev/null "$MirrorURL"
       [ $? -eq 0 ] && mirrorStatus=1 && break
     done
   [ $mirrorStatus -eq 1 ] && echo "$Current" || exit 1
@@ -133,6 +133,18 @@ getInterface(){
 }
 
 getDisk(){
+  local root_source root_disk disks
+  root_source=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
+  if [[ -n "$root_source" ]]; then
+    root_disk=$(lsblk -ndo PKNAME "$root_source" 2>/dev/null | tail -n1)
+    if [[ "$root_disk" =~ ^dm- ]]; then
+      root_disk=$(lsblk -ndo PKNAME "/dev/$root_disk" 2>/dev/null | tail -n1)
+    fi
+    if [[ -n "$root_disk" ]]; then
+      echo "/dev/$root_disk"
+      return
+    fi
+  fi
   disks=`lsblk | sed 's/[[:space:]]*$//g' |grep "disk$" |cut -d' ' -f1 |grep -v "fd[0-9]*\|sr[0-9]*" |head -n1`
   [ -n "$disks" ] || echo ""
   echo "$disks" |grep -q "/dev"
@@ -185,6 +197,18 @@ validate_grub_config(){
   fi
   echo "Error! grub-script-check/grub2-script-check not found and fallback GRUB check failed."
   return 1
+}
+
+detect_current_ssh_port(){
+  local port=''
+  if command -v sshd >/dev/null 2>&1; then
+    port=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}')
+  fi
+  if [[ ! "$port" =~ ^[0-9]+$ ]] && [[ -f /etc/ssh/sshd_config ]]; then
+    port=$(awk 'tolower($1)=="port"{print $2}' /etc/ssh/sshd_config 2>/dev/null | tail -n1)
+  fi
+  [[ "$port" =~ ^[0-9]+$ ]] || port='22'
+  echo "$port"
 }
 
 installnet_main() {
@@ -338,13 +362,13 @@ installnet_main() {
       SpikCheckDIST='1'
       DISTCheck="$(echo "$tmpDIST" |grep -o '[\.0-9]\{1,\}' |head -n1)";
       LinuxMirror=$(selectMirror "$Relese" "$DISTCheck" "$VER" "$tmpMirror")
-      ListDIST="$(wget --no-check-certificate -qO- "$LinuxMirror/dir_sizes" |cut -f2 |grep '^[0-9]')"
+      ListDIST="$(wget -qO- "$LinuxMirror/dir_sizes" |cut -f2 |grep '^[0-9]')"
       DIST="$(echo "$ListDIST" |grep "^$DISTCheck" |head -n1)"
       [[ -z "$DIST" ]] && {
         echo -ne '\nThe dists version not found in this mirror, Please check it! \n\n'
         show_installnet_usage; exit 1;
       }
-      wget --no-check-certificate -qO- "$LinuxMirror/$DIST/os/$VER/.treeinfo" |grep -q 'general';
+      wget -qO- "$LinuxMirror/$DIST/os/$VER/.treeinfo" |grep -q 'general';
       [[ $? != '0' ]] && {
         echo -ne "\nThe version not found in this mirror, Please change mirror try again! \n\n";
         exit 1;
@@ -361,7 +385,7 @@ installnet_main() {
   fi
 
   if [[ "$SpikCheckDIST" == '0' ]]; then
-    DistsList="$(wget --no-check-certificate -qO- "$LinuxMirror/dists/" |grep -o 'href=.*/"' |cut -d'"' -f2 |sed '/-\|old\|Debian\|experimental\|stable\|test\|sid\|devel/d' |grep '^[^/]' |sed -n '1h;1!H;$g;s/\n//g;s/\//\;/g;$p')";
+    DistsList="$(wget -qO- "$LinuxMirror/dists/" |grep -o 'href=.*/"' |cut -d'"' -f2 |sed '/-\|old\|Debian\|experimental\|stable\|test\|sid\|devel/d' |grep '^[^/]' |sed -n '1h;1!H;$g;s/\n//g;s/\//\;/g;$p')";
     for CheckDEB in `echo "$DistsList" |sed 's/;/\n/g'`
       do
         [[ "$CheckDEB" == "$DIST" ]] && FindDists='1' && break;
@@ -402,24 +426,24 @@ installnet_main() {
   local MirrorHost MirrorFolder
   if [[ "$linux_relese" == 'debian' ]] || [[ "$linux_relese" == 'ubuntu' ]]; then
     [ "$DIST" == "focal" ] && legacy="legacy-" || legacy=""
-    wget --no-check-certificate -qO '/tmp/initrd.img' "${LinuxMirror}/dists/${DIST}/main/installer-${VER}/current/${legacy}images/netboot/${linux_relese}-installer/${VER}/initrd.gz"
+    wget -qO '/tmp/initrd.img' "${LinuxMirror}/dists/${DIST}/main/installer-${VER}/current/${legacy}images/netboot/${linux_relese}-installer/${VER}/initrd.gz"
     [[ $? -ne '0' ]] && echo -ne "\033[31mError! \033[0mDownload 'initrd.img' for \033[33m$linux_relese\033[0m failed! \n" && exit 1
-    wget --no-check-certificate -qO '/tmp/vmlinuz' "${LinuxMirror}/dists/${DIST}/main/installer-${VER}/current/${legacy}images/netboot/${linux_relese}-installer/${VER}/linux"
+    wget -qO '/tmp/vmlinuz' "${LinuxMirror}/dists/${DIST}/main/installer-${VER}/current/${legacy}images/netboot/${linux_relese}-installer/${VER}/linux"
     [[ $? -ne '0' ]] && echo -ne "\033[31mError! \033[0mDownload 'vmlinuz' for \033[33m$linux_relese\033[0m failed! \n" && exit 1
     MirrorHost="$(echo "$LinuxMirror" |awk -F'://|/' '{print $2}')";
     MirrorFolder="$(echo "$LinuxMirror" |awk -F''${MirrorHost}'' '{print $2}')";
     [ -n "$MirrorFolder" ] || MirrorFolder="/"
   elif [[ "$linux_relese" == 'centos' ]]; then
-    wget --no-check-certificate -qO '/tmp/initrd.img' "${LinuxMirror}/${DIST}/os/${VER}/isolinux/initrd.img"
+    wget -qO '/tmp/initrd.img' "${LinuxMirror}/${DIST}/os/${VER}/isolinux/initrd.img"
     [[ $? -ne '0' ]] && echo -ne "\033[31mError! \033[0mDownload 'initrd.img' for \033[33m$linux_relese\033[0m failed! \n" && exit 1
-    wget --no-check-certificate -qO '/tmp/vmlinuz' "${LinuxMirror}/${DIST}/os/${VER}/isolinux/vmlinuz"
+    wget -qO '/tmp/vmlinuz' "${LinuxMirror}/${DIST}/os/${VER}/isolinux/vmlinuz"
     [[ $? -ne '0' ]] && echo -ne "\033[31mError! \033[0mDownload 'vmlinuz' for \033[33m$linux_relese\033[0m failed! \n" && exit 1
   else
     show_installnet_usage; exit 1;
   fi
   if [[ "$linux_relese" == 'debian' ]]; then
     if [[ "$IncFirmware" == '1' ]]; then
-      wget --no-check-certificate -qO '/tmp/firmware.cpio.gz' "http://cdimage.debian.org/cdimage/unofficial/non-free/firmware/${DIST}/current/firmware.cpio.gz"
+      wget -qO '/tmp/firmware.cpio.gz' "https://cdimage.debian.org/cdimage/unofficial/non-free/firmware/${DIST}/current/firmware.cpio.gz"
       [[ $? -ne '0' ]] && echo -ne "\033[31mError! \033[0mDownload 'firmware' for \033[33m$linux_relese\033[0m failed! \n" && exit 1
     fi
   fi
@@ -605,8 +629,6 @@ d-i partman-lvm/confirm_nooverwrite boolean true
 d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
 
-d-i debian-installer/allow_unauthenticated boolean true
-
 tasksel tasksel/first multiselect standard
 d-i pkgsel/update-policy select none
 d-i pkgsel/include string openssh-server
@@ -692,12 +714,8 @@ EOF
   fi
 
   if [[ "$loaderMode" == "0" ]]; then
-    read -r -p " GRUB 已校验通过。输入 REBOOT 立即重启继续安装，其它键取消自动重启: " confirm_reboot
-    if [[ "$confirm_reboot" == "REBOOT" ]]; then
-      sleep 3 && reboot || sudo reboot >/dev/null 2>&1
-    else
-      echo -e "${Tip} 已取消自动重启，请在确认无误后手动执行 reboot。"
-    fi
+    echo -e "${Info} 安装引导已写入，系统将在 3 秒后自动重启继续安装。"
+    sleep 3 && reboot || sudo reboot >/dev/null 2>&1
   else
     rm -rf "$HOME/loader"
     mkdir -p "$HOME/loader"
@@ -711,6 +729,7 @@ EOF
 
 reinstall_debian() {
     local debian_version="$1"
+    local ssh_port target_disk confirm
     read -r -s -p " 请设置 root 密码: " pw
     echo
     if [[ -z "$pw" ]]; then
@@ -724,8 +743,21 @@ reinstall_debian() {
         return
     fi
 
+    ssh_port="$(detect_current_ssh_port)"
+    target_disk="$(getDisk)"
+    if [[ -z "$target_disk" ]]; then
+        echo -e "${Error} 未检测到目标磁盘。"
+        return
+    fi
+
     echo -e "${Tip} 将使用 Debian ${debian_version} 执行重装。"
-    installnet_main -d "${debian_version}" -v 64 -a -p "${pw}"
+    echo -e "${Tip} 目标磁盘: ${target_disk}"
+    echo -e "${Tip} 重装后「SSH」端口将保持为: ${ssh_port}"
+    echo -e "${Tip} 确认后会写入安装引导并在完成后自动重启"
+    read -r -p " 输入「YES」确认开始重装,其它键取消: " confirm
+    [[ "$confirm" == "YES" ]] || { echo -e "${Tip} 已取消重装。"; return; }
+
+    installnet_main -d "${debian_version}" -v 64 -a -p "${pw}" -port "${ssh_port}"
 }
 
 reinstall_debian11() {
