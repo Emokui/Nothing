@@ -398,7 +398,7 @@ linux_clean() {
             fi
             ;;
         dnf|yum)
-            local installed_kernels keep_count=1
+            local installed_kernels
             installed_kernels=$(rpm -q kernel kernel-core kernel-modules 2>/dev/null | grep -v "not installed" | grep -v "$current_kernel" || true)
             if [ -n "$installed_kernels" ]; then
                 echo -e "${YELLOW}发现以下旧内核包:${PLAIN}"
@@ -1151,12 +1151,17 @@ bbr_check_and_clean_conflicts() {
         [Yy])
             if [[ "$has_sysctl_conflict" -eq 1 ]]; then
                 cp /etc/sysctl.conf /etc/sysctl.conf.bak.conflict 2>/dev/null || true
-                sed -i '/^net\.ipv4\.tcp_wmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
-                sed -i '/^net\.ipv4\.tcp_rmem/s/^/# /' /etc/sysctl.conf 2>/dev/null
-                sed -i '/^net\.core\.rmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
-                sed -i '/^net\.core\.wmem_max/s/^/# /' /etc/sysctl.conf 2>/dev/null
-                sed -i '/^net\.core\.default_qdisc/s/^/# /' /etc/sysctl.conf 2>/dev/null
-                sed -i '/^net\.ipv4\.tcp_congestion_control/s/^/# /' /etc/sysctl.conf 2>/dev/null
+                local key
+                for key in \
+                    'net\.ipv4\.tcp_wmem' \
+                    'net\.ipv4\.tcp_rmem' \
+                    'net\.core\.rmem_max' \
+                    'net\.core\.wmem_max' \
+                    'net\.core\.default_qdisc' \
+                    'net\.ipv4\.tcp_congestion_control'
+                do
+                    sed -i "/^[[:space:]]*${key}/s/^[[:space:]]*/# /" /etc/sysctl.conf 2>/dev/null
+                done
             fi
             for conf in "${conflicts[@]}"; do
                 mv "$conf" "${conf}.disabled.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
@@ -2502,11 +2507,7 @@ acme_has_ipv4() {
 }
 
 acme_get_download_url() {
-    local url="https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"
-    if ! acme_has_ipv4; then
-        url="${url/github.com/acme-cdn.pages.dev}"
-    fi
-    echo "$url"
+    echo "https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"
 }
 
 acme_pkg_install() {
@@ -2580,7 +2581,7 @@ acme_install_core() {
     }
     tarball="$tempdir/master.tar.gz"
 
-    if ! wget --no-check-certificate -O "$tarball" "$acme_tar_url" 2>/dev/null; then
+    if ! wget -O "$tarball" "$acme_tar_url" 2>/dev/null; then
         if ! curl -fsSL "$acme_tar_url" -o "$tarball" 2>/dev/null; then
             echo -e "${RED}acme.sh 下载失败${PLAIN}"
             rm -rf "$tempdir"
@@ -2730,10 +2731,34 @@ acme_print_issue_failed() {
     echo -e "${YELLOW}如上方提示 rateLimited，请等待限制时间结束后重试${PLAIN}"
 }
 
+ACME_PORT80_FIREWALL_BACKUP=""
+ACME_PORT80_FIREWALL_CHANGED=0
+
+acme_reset_port_80_firewall_state() {
+    if [[ -n "$ACME_PORT80_FIREWALL_BACKUP" ]]; then
+        firewall_remove_backup "$ACME_PORT80_FIREWALL_BACKUP"
+    fi
+    ACME_PORT80_FIREWALL_BACKUP=""
+    ACME_PORT80_FIREWALL_CHANGED=0
+}
+
+acme_restore_port_80_firewall_if_needed() {
+    if (( ACME_PORT80_FIREWALL_CHANGED == 1 )) && [[ -n "$ACME_PORT80_FIREWALL_BACKUP" ]]; then
+        if firewall_restore_backup "$ACME_PORT80_FIREWALL_BACKUP"; then
+            firewall_save_rules >/dev/null 2>&1 || true
+        else
+            echo -e "${RED}80 端口防火墙回滚失败,请手动检查当前规则${PLAIN}"
+        fi
+    fi
+    acme_reset_port_80_firewall_state
+}
+
 acme_check_port_80() {
     local firewall_opened=0
     local zero_fw_managed=0
-    local cmd
+    local cmd backup=""
+
+    acme_reset_port_80_firewall_state
 
     if ! command -v lsof >/dev/null 2>&1; then
         echo -e "${YELLOW}未检测到 lsof，正在安装...${PLAIN}"
@@ -2750,13 +2775,25 @@ acme_check_port_80() {
         firewall_rule_exists "$cmd" filter INPUT -j "$ZERO_FW_CHAIN" || continue
         zero_fw_managed=1
         if ! firewall_rule_exists "$cmd" filter "$ZERO_FW_CHAIN" -p tcp --dport 80 -j ACCEPT; then
-            firewall_apply_port_rule "$cmd" open tcp 80 || return 1
+            if [[ -z "$backup" ]]; then
+                backup=$(firewall_create_backup) || {
+                    echo -e "${RED}创建防火墙备份失败,已取消本次申请${PLAIN}"
+                    return 1
+                }
+            fi
+            if ! firewall_apply_port_rule "$cmd" open tcp 80; then
+                [[ -n "$backup" ]] && firewall_restore_backup "$backup" >/dev/null 2>&1 || true
+                [[ -n "$backup" ]] && firewall_remove_backup "$backup"
+                echo -e "${RED}临时放行 80 端口失败,已恢复修改前规则${PLAIN}"
+                return 1
+            fi
             firewall_opened=1
         fi
     done
     if (( zero_fw_managed == 1 && firewall_opened == 1 )); then
-        firewall_save_rules >/dev/null 2>&1 || true
-        echo -e "${GREEN}✓ 80 端口已放行 (Zero FireWall)${PLAIN}"
+        ACME_PORT80_FIREWALL_BACKUP="$backup"
+        ACME_PORT80_FIREWALL_CHANGED=1
+        echo -e "${GREEN}✓ 已临时放行 80 端口 (Zero FireWall)${PLAIN}"
     elif (( zero_fw_managed == 1 )); then
         echo -e "${GREEN}Zero FireWall 已放行 80 端口${PLAIN}"
     else
@@ -2779,6 +2816,7 @@ acme_check_port_80() {
         sleep 1
         return 0
     fi
+    acme_restore_port_80_firewall_if_needed
     return 1
 }
 
@@ -2799,11 +2837,13 @@ acme_issue_standalone() {
     domain=$(echo "$domain" | xargs)
     if [[ -z "$domain" ]]; then
         echo -e "${RED}未输入域名${PLAIN}"
+        acme_restore_port_80_firewall_if_needed
         press_any_key_to_continue
         return
     fi
     if ! acme_validate_domain "$domain"; then
         echo -e "${RED}域名格式不正确${PLAIN}"
+        acme_restore_port_80_firewall_if_needed
         press_any_key_to_continue
         return
     fi
@@ -2812,17 +2852,23 @@ acme_issue_standalone() {
     if ! acme_has_ipv4; then
         if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --listen-v6 --insecure; then
             acme_print_issue_failed
+            acme_restore_port_80_firewall_if_needed
             press_any_key_to_continue
             return
         fi
     else
         if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --insecure; then
             acme_print_issue_failed
+            acme_restore_port_80_firewall_if_needed
             press_any_key_to_continue
             return
         fi
     fi
 
+    if (( ACME_PORT80_FIREWALL_CHANGED == 1 )); then
+        firewall_save_rules >/dev/null 2>&1 || true
+        acme_reset_port_80_firewall_state
+    fi
     acme_install_issued_cert "$domain" "$domain" || echo -e "${RED}证书安装失败${PLAIN}"
     press_any_key_to_continue
 }
@@ -2940,8 +2986,16 @@ acme_revoke_cert() {
         return
     fi
 
-    acme_exec --revoke -d "$selected_domain" --ecc || true
-    acme_exec --remove -d "$selected_domain" --ecc || true
+    if ! acme_exec --revoke -d "$selected_domain" --ecc; then
+        echo -e "${RED}证书撤销失败,本地文件未删除${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
+    if ! acme_exec --remove -d "$selected_domain" --ecc; then
+        echo -e "${RED}证书移除失败,请手动检查 acme.sh 状态${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
     rm -rf "$ACME_HOME/${selected_domain}_ecc"
 
     base_domain="${selected_domain#\*.}"
