@@ -1925,6 +1925,473 @@ change_timezone() {
     done
 }
 
+check_sys() {
+    if [[ -f /etc/redhat-release ]]; then
+        release="centos"
+    elif grep -qi "debian" /etc/issue; then
+        release="debian"
+    elif grep -qi "ubuntu" /etc/issue; then
+        release="ubuntu"
+    elif grep -qiE "centos|red hat|redhat" /etc/issue; then
+        release="centos"
+    elif grep -qi "debian" /proc/version; then
+        release="debian"
+    elif grep -qi "ubuntu" /proc/version; then
+        release="ubuntu"
+    elif grep -qiE "centos|red hat|redhat" /proc/version; then
+        release="centos"
+    fi
+}
+
+first_job() {
+    if [[ "${release}" == "centos" ]]; then
+        yum install -y xz openssl gawk file wget cpio gzip iproute util-linux
+    elif [[ "${release}" == "debian" || "${release}" == "ubuntu" ]]; then
+        apt-get update
+        apt-get install -y xz-utils openssl gawk file wget cpio gzip iproute2 util-linux
+    fi
+}
+
+dependence() {
+    Full='0'
+    for BIN_DEP in $(echo "$1" | sed 's/,/\n/g'); do
+        if [[ -n "$BIN_DEP" ]]; then
+            Found='0'
+            for BIN_PATH in $(echo "$PATH" | sed 's/:/\n/g'); do
+                ls "$BIN_PATH/$BIN_DEP" >/dev/null 2>&1
+                if [ $? == '0' ]; then
+                    Found='1'
+                    break
+                fi
+            done
+            if [ "$Found" == '1' ]; then
+                echo -en "[\033[32mok\033[0m]\t"
+            else
+                Full='1'
+                echo -en "[\033[31mNot Install\033[0m]"
+            fi
+            echo -en "\t$BIN_DEP\n"
+        fi
+    done
+    if [ "$Full" == '1' ]; then
+        echo -ne "\n\033[31mError! \033[0mPlease use '\033[33mapt-get\033[0m' or '\033[33myum\033[0m' install it.\n\n\n"
+        exit 1
+    fi
+}
+
+selectMirror() {
+    local dist="$1"
+    local ver="${2:-amd64}"
+    local temp mirror_url current
+    local -a mirrors
+
+    [[ -n "$dist" && -n "$ver" ]] || return 1
+    temp="SUB_MIRROR/dists/${dist}/main/installer-${ver}/current/images/netboot/debian-installer/${ver}/initrd.gz"
+
+    mirrors+=("https://deb.debian.org/debian" "https://archive.debian.org/debian")
+
+    for current in "${mirrors[@]}"; do
+        mirror_url="${temp/SUB_MIRROR/$current}"
+        if wget --spider --timeout=3 -o /dev/null "$mirror_url"; then
+            echo "$current"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+netmask() {
+    n="${1:-32}"
+    b=""
+    m=""
+    for ((i=0;i<32;i++)); do
+        [ $i -lt $n ] && b="${b}1" || b="${b}0"
+    done
+    for ((i=0;i<4;i++)); do
+        s=$(echo "$b" | cut -c$[$[$i*8]+1]-$[$[$i+1]*8])
+        [ "$m" == "" ] && m="$((2#${s}))" || m="${m}.$((2#${s}))"
+    done
+    echo "$m"
+}
+
+getInterface() {
+    interface=""
+    Interfaces=$(cat /proc/net/dev | grep ':' | cut -d':' -f1 | sed 's/\s//g' | grep -iv '^lo\|^sit\|^stf\|^gif\|^dummy\|^vmnet\|^vir\|^gre\|^ipip\|^ppp\|^bond\|^tun\|^tap\|^ip6gre\|^ip6tnl\|^teql\|^ocserv\|^vpn')
+    defaultRoute=$(ip route show default | grep "^default")
+    for item in $Interfaces; do
+        [ -n "$item" ] || continue
+        echo "$defaultRoute" | grep -q "$item"
+        [ $? -eq 0 ] && interface="$item" && break
+    done
+    echo "$interface"
+}
+
+getDisk() {
+    local root_source root_disk disks
+    root_source=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
+    if [[ -n "$root_source" ]]; then
+        root_disk=$(lsblk -ndo PKNAME "$root_source" 2>/dev/null | tail -n1)
+        if [[ "$root_disk" =~ ^dm- ]]; then
+            root_disk=$(lsblk -ndo PKNAME "/dev/$root_disk" 2>/dev/null | tail -n1)
+        fi
+        if [[ -n "$root_disk" ]]; then
+            echo "/dev/$root_disk"
+            return
+        fi
+    fi
+    disks=$(lsblk | sed 's/[[:space:]]*$//g' | grep "disk$" | cut -d' ' -f1 | grep -v "fd[0-9]*\|sr[0-9]*" | head -n1)
+    [ -n "$disks" ] || echo ""
+    echo "$disks" | grep -q "/dev"
+    [ $? -eq 0 ] && echo "$disks" || echo "/dev/$disks"
+}
+
+getGrub() {
+    Boot="${1:-/boot}"
+    folder=$(find "$Boot" -type d -name "grub*" 2>/dev/null | head -n1)
+    [ -n "$folder" ] || return
+    fileName=$(ls -1 "$folder" 2>/dev/null | grep '^grub.conf$\|^grub.cfg$')
+    if [ -z "$fileName" ]; then
+        ls -1 "$folder" 2>/dev/null | grep -q '^grubenv$'
+        [ $? -eq 0 ] || return
+        folder=$(find "$Boot" -type f -name "grubenv" 2>/dev/null | xargs dirname | grep -v "^$folder" | head -n1)
+        [ -n "$folder" ] || return
+        fileName=$(ls -1 "$folder" 2>/dev/null | grep '^grub.conf$\|^grub.cfg$')
+    fi
+    [ -n "$fileName" ] || return
+    [ "$fileName" == "grub.cfg" ] && ver="0" || ver="1"
+    echo "${folder}:${fileName}:${ver}"
+}
+
+lowMem() {
+    mem=$(grep "^MemTotal:" /proc/meminfo 2>/dev/null | grep -o "[0-9]*")
+    [ -n "$mem" ] || return 0
+    [ "$mem" -le "524288" ] && return 1 || return 0
+}
+
+validate_grub_config() {
+    local grub_file="$1"
+    if command -v grub-script-check >/dev/null 2>&1; then
+        grub-script-check "$grub_file" >/tmp/grub-script-check.log 2>&1
+        return $?
+    elif command -v grub2-script-check >/dev/null 2>&1; then
+        grub2-script-check "$grub_file" >/tmp/grub-script-check.log 2>&1
+        return $?
+    fi
+    local open_count close_count
+    open_count=$(grep -o '{' "$grub_file" 2>/dev/null | wc -l | tr -d ' ')
+    close_count=$(grep -o '}' "$grub_file" 2>/dev/null | wc -l | tr -d ' ')
+    if grep -q 'menuentry ' "$grub_file" && [[ "$open_count" == "$close_count" ]]; then
+        echo "Warning: grub-script-check/grub2-script-check not found, fallback to basic GRUB sanity check."
+        : >/tmp/grub-script-check.log
+        return 0
+    fi
+    echo "Error! grub-script-check/grub2-script-check not found and fallback GRUB check failed."
+    return 1
+}
+
+detect_current_ssh_port() {
+    local port=''
+    if command -v sshd >/dev/null 2>&1; then
+        port=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}')
+    fi
+    if [[ ! "$port" =~ ^[0-9]+$ ]] && [[ -f /etc/ssh/sshd_config ]]; then
+        port=$(awk 'tolower($1)=="port"{print $2}' /etc/ssh/sshd_config 2>/dev/null | tail -n1)
+    fi
+    [[ "$port" =~ ^[0-9]+$ ]] || port='22'
+    echo "$port"
+}
+
+installnet_main() {
+    local debian_version="$1"
+    local root_password="$2"
+    local ssh_port="${3:-22}"
+    local ipAddr='' ipMask='' ipGate='' ipDNS='' interface='' iAddr=''
+    local IncDisk='' DIST='' LinuxMirror='' MirrorHost='' MirrorFolder=''
+    local Grub='' GRUBDIR='' GRUBFILE='' GRUBVER='' GRUB_BACKUP=''
+    local myPASSWORD='' READGRUB='' LoadNum='' CFG0='' CFG1='' CFG2='' INSERTGRUB=''
+    local Type='' LinuxKernel='' LinuxIMG='' Add_OPTION='' BOOT_OPTION='' GRUB_TMP=''
+    local partman_early_command='' late_command=''
+
+    [[ "$EUID" -ne '0' ]] && echo "Error: This script must be run as root!" && return 1
+
+    case "$debian_version" in
+        11) DIST='bullseye' ;;
+        12) DIST='bookworm' ;;
+        13) DIST='trixie' ;;
+        *) echo "Error! Unsupported Debian version: ${debian_version}"; return 1 ;;
+    esac
+
+    Grub=$(getGrub "/boot")
+    [[ -n "$Grub" ]] || { echo "Error! Not Found grub."; return 1; }
+    GRUBDIR=$(echo "$Grub" | cut -d':' -f1)
+    GRUBFILE=$(echo "$Grub" | cut -d':' -f2)
+    GRUBVER=$(echo "$Grub" | cut -d':' -f3)
+    [[ "$GRUBVER" == "0" ]] || { echo "Error! Only GRUB2 is supported in safe mode."; return 1; }
+
+    clear && echo -e "\n${BLUE}# Check Dependence${PLAIN}\n"
+    dependence ip,wget,awk,grep,sed,cut,cat,lsblk,cpio,gzip,find,dirname,basename,openssl
+
+    interface=$(getInterface)
+    [[ -n "$interface" ]] || { echo "Error! Network interface not found."; return 1; }
+    iAddr=$(ip -4 addr show dev "$interface" | awk '/inet /{print $2; exit}')
+    ipAddr="${iAddr%/*}"
+    ipMask=$(netmask "${iAddr#*/}")
+    ipGate=$(ip route show default | awk '/^default/{print $3; exit}')
+    ipDNS=$(awk '/^nameserver /{print $2; exit}' /etc/resolv.conf 2>/dev/null)
+    [[ -n "$ipDNS" ]] || ipDNS='8.8.8.8'
+    [[ -n "$ipAddr" && -n "$ipMask" && -n "$ipGate" ]] || { echo "Error! Invalid network config."; return 1; }
+
+    IncDisk=$(getDisk)
+    [[ -n "$IncDisk" ]] || { echo "Error! Target disk not found."; return 1; }
+
+    myPASSWORD="$(openssl passwd -1 "$root_password")"
+    LinuxMirror=$(selectMirror "$DIST" "amd64")
+    [[ -n "$LinuxMirror" ]] || { echo "Error! Invalid Debian mirror."; return 1; }
+    clear && echo -e "\n${BLUE}# Install${PLAIN}\n"
+    echo -e "\n${YELLOW}[Debian] [${DIST}] [amd64] Downloading...${PLAIN}"
+
+    MirrorHost="$(echo "$LinuxMirror" | awk -F'://|/' '{print $2}')"
+    MirrorFolder="$(echo "$LinuxMirror" | awk -F"${MirrorHost}" '{print $2}')"
+    [[ -n "$MirrorFolder" ]] || MirrorFolder="/"
+
+    wget -qO '/tmp/initrd.img' "${LinuxMirror}/dists/${DIST}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz" || {
+        echo "Error! Download 'initrd.img' failed."
+        return 1
+    }
+    wget -qO '/tmp/vmlinuz' "${LinuxMirror}/dists/${DIST}/main/installer-amd64/current/images/netboot/debian-installer/amd64/linux" || {
+        echo "Error! Download 'vmlinuz' failed."
+        return 1
+    }
+
+    [[ -f "${GRUBDIR}/${GRUBFILE}" ]] || { echo "Error! Not Found ${GRUBFILE}."; return 1; }
+    GRUB_BACKUP="${GRUBDIR}/${GRUBFILE}.installnet.$(date +%Y%m%d%H%M%S).bak"
+    cp -f "${GRUBDIR}/${GRUBFILE}" "$GRUB_BACKUP" || { echo "Error! Backup grub file failed."; return 1; }
+
+    READGRUB='/tmp/grub.read'
+    awk '
+    /^[[:space:]]*menuentry[[:space:]]/ {
+      if (found) exit
+      found = 1
+      depth = 0
+    }
+    found {
+      print
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        if (c == "{") depth++
+        if (c == "}") depth--
+      }
+      if (depth == 0) exit
+    }
+    ' "$GRUBDIR/$GRUBFILE" > "$READGRUB"
+    LoadNum="$(grep -c 'menuentry ' "$READGRUB")"
+    if [[ "$LoadNum" -eq '1' ]]; then
+        sed '/^$/d' "$READGRUB" >/tmp/grub.new
+    elif [[ "$LoadNum" -gt '1' ]]; then
+        CFG0="$(awk '/menuentry /{print NR}' "$READGRUB" | head -n 1)"
+        CFG2="$(awk '/menuentry /{print NR}' "$READGRUB" | head -n 2 | tail -n 1)"
+        CFG1=""
+        for tmpCFG in $(awk '/}/{print NR}' "$READGRUB"); do
+            [ "$tmpCFG" -gt "$CFG0" -a "$tmpCFG" -lt "$CFG2" ] && CFG1="$tmpCFG"
+        done
+        [[ -z "$CFG1" ]] && { echo "Error! read $GRUBFILE. "; return 1; }
+        sed -n "$CFG0,$CFG1"p "$READGRUB" >/tmp/grub.new
+        [[ -f /tmp/grub.new ]] && [[ "$(grep -c '{' /tmp/grub.new)" -eq "$(grep -c '}' /tmp/grub.new)" ]] || {
+            echo -ne "\033[31mError! \033[0mNot configure $GRUBFILE. \n"; return 1
+        }
+    fi
+    [ ! -f /tmp/grub.new ] && echo "Error! $GRUBFILE. " && return 1
+    sed -i "/menuentry.*/c\menuentry\ \'Install OS \[$DIST\ amd64\]\'\ --class debian\ --class\ gnu-linux\ --class\ gnu\ --class\ os\ \{" /tmp/grub.new
+    sed -i "/echo.*Loading/d" /tmp/grub.new
+    INSERTGRUB="$(awk '/menuentry /{print NR}' "$GRUBDIR/$GRUBFILE" | head -n 1)"
+    [[ -z "$INSERTGRUB" || "$INSERTGRUB" -le 0 ]] && echo "Error! read grub insert position failed." && return 1
+
+    [[ -n "$(grep -E 'linux(efi|16)?[[:space:]].*/|kernel.*/' /tmp/grub.new | awk '{print $2}' | tail -n 1 | grep '^/boot/')" ]] && Type='InBoot' || Type='NoBoot'
+    LinuxKernel="$(grep -E 'linux(efi|16)?[[:space:]].*/|kernel.*/' /tmp/grub.new | awk '{print $1}' | head -n 1)"
+    [[ -z "$LinuxKernel" ]] && echo "Error! read grub config! " && return 1
+    LinuxIMG="$(grep 'initrd.*/' /tmp/grub.new | awk '{print $1}' | tail -n 1)"
+    [ -z "$LinuxIMG" ] && sed -i "/$LinuxKernel.*\//a\\\tinitrd\ \/" /tmp/grub.new && LinuxIMG='initrd'
+    Add_OPTION=""
+    lowMem || Add_OPTION=" lowmem=+0"
+    BOOT_OPTION="auto=true${Add_OPTION} hostname=debian domain= quiet"
+    [[ "$Type" == 'InBoot' ]] && {
+        sed -i "/$LinuxKernel.*\//c\\\t$LinuxKernel\\t\/boot\/vmlinuz $BOOT_OPTION" /tmp/grub.new
+        sed -i "/$LinuxIMG.*\//c\\\t$LinuxIMG\\t\/boot\/initrd.img" /tmp/grub.new
+    }
+    [[ "$Type" == 'NoBoot' ]] && {
+        sed -i "/$LinuxKernel.*\//c\\\t$LinuxKernel\\t\/vmlinuz $BOOT_OPTION" /tmp/grub.new
+        sed -i "/$LinuxIMG.*\//c\\\t$LinuxIMG\\t\/initrd.img" /tmp/grub.new
+    }
+    sed -i '$a\\n' /tmp/grub.new
+    GRUB_TMP="$(mktemp)"
+    head -n $((INSERTGRUB-1)) "$GRUBDIR/$GRUBFILE" >"$GRUB_TMP"
+    cat /tmp/grub.new >>"$GRUB_TMP"
+    tail -n +"$INSERTGRUB" "$GRUBDIR/$GRUBFILE" >>"$GRUB_TMP"
+    cp -f "$GRUB_TMP" "$GRUBDIR/$GRUBFILE"
+    rm -f "$GRUB_TMP"
+
+    if ! validate_grub_config "$GRUBDIR/$GRUBFILE"; then
+        cp -f "$GRUB_BACKUP" "$GRUBDIR/$GRUBFILE"
+        echo "Error! GRUB syntax check failed, rollback done. log: /tmp/grub-script-check.log"
+        return 1
+    fi
+    [[ -f "$GRUBDIR/grubenv" ]] && sed -i 's/saved_entry/#saved_entry/g' "$GRUBDIR/grubenv"
+
+    rm -rf /tmp/boot
+    mkdir -p /tmp/boot
+    cd /tmp/boot || return 1
+
+    mv -f /tmp/initrd.img /tmp/initrd.img.gz
+    gzip -d < /tmp/initrd.img.gz | cpio --extract --verbose --make-directories --no-absolute-filenames >>/dev/null 2>&1
+
+    partman_early_command="debconf-set partman-auto/disk ${IncDisk}"
+    late_command="sed -ri 's/^#?Port.*/Port ${ssh_port}/g' /target/etc/ssh/sshd_config; sed -ri 's/^#?PermitRootLogin.*/PermitRootLogin yes/g' /target/etc/ssh/sshd_config; sed -ri 's/^#?PasswordAuthentication.*/PasswordAuthentication yes/g' /target/etc/ssh/sshd_config"
+cat >/tmp/boot/preseed.cfg<<EOF
+d-i debian-installer/locale string en_US
+d-i console-setup/layoutcode string us
+d-i keyboard-configuration/xkb-keymap string us
+d-i netcfg/choose_interface select auto
+d-i netcfg/disable_autoconfig boolean true
+d-i netcfg/dhcp_failed note
+d-i netcfg/dhcp_options select Configure network manually
+d-i netcfg/get_ipaddress string $ipAddr
+d-i netcfg/get_netmask string $ipMask
+d-i netcfg/get_gateway string $ipGate
+d-i netcfg/get_nameservers string $ipDNS
+d-i netcfg/confirm_static boolean true
+d-i hw-detect/load_firmware boolean true
+d-i mirror/country string manual
+d-i mirror/http/hostname string $MirrorHost
+d-i mirror/http/directory string $MirrorFolder
+d-i mirror/http/proxy string
+d-i passwd/root-login boolean true
+d-i passwd/make-user boolean false
+d-i passwd/root-password-crypted password $myPASSWORD
+d-i clock-setup/utc boolean true
+d-i time/zone string Etc/UTC
+d-i clock-setup/ntp boolean false
+d-i partman/early_command string $partman_early_command
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/mount_style select uuid
+d-i partman/choose_partition select finish
+d-i partman-auto/method string regular
+d-i partman-auto/init_automatically_partition select Guided - use entire disk
+d-i partman-auto/choose_recipe select All files in one partition (recommended for new users)
+d-i partman-md/device_remove_md boolean true
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-lvm/confirm_nooverwrite boolean true
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+tasksel tasksel/first multiselect standard
+d-i pkgsel/include string openssh-server
+d-i pkgsel/upgrade select none
+popularity-contest popularity-contest/participate boolean false
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean true
+d-i grub-installer/bootdev string $IncDisk
+d-i grub-installer/force-efi-extra-removable boolean true
+d-i finish-install/reboot_in_progress note
+d-i debian-installer/exit/reboot boolean true
+d-i preseed/late_command string $late_command
+EOF
+
+    find . | cpio -H newc --create --verbose | gzip -9 > /tmp/initrd.img
+    cp -f /tmp/initrd.img /boot/initrd.img
+    cp -f /tmp/vmlinuz /boot/vmlinuz
+    chown root:root "$GRUBDIR/$GRUBFILE"
+    chmod 444 "$GRUBDIR/$GRUBFILE"
+    echo -e "${YELLOW}安装引导已写入，系统将在 3 秒后自动重启继续安装。${PLAIN}"
+    sleep 3 && reboot || sudo reboot >/dev/null 2>&1
+}
+
+reinstall_debian() {
+    local debian_version="$1"
+    local ssh_port target_disk confirm pw pw2
+    read -r -s -p " 请设置 root 密码: " pw
+    echo
+    if [[ -z "$pw" ]]; then
+        echo -e "${RED}密码不能为空。${PLAIN}"
+        return
+    fi
+    read -r -s -p " 请再次输入 root 密码: " pw2
+    echo
+    if [[ "$pw" != "$pw2" ]]; then
+        echo -e "${RED}两次输入密码不一致。${PLAIN}"
+        return
+    fi
+
+    ssh_port="$(detect_current_ssh_port)"
+    target_disk="$(getDisk)"
+    if [[ -z "$target_disk" ]]; then
+        echo -e "${RED}未检测到目标磁盘。${PLAIN}"
+        return
+    fi
+
+    echo -e "${YELLOW} 将使用 Debian ${debian_version} 执行重装${PLAIN}"
+    echo -e "${YELLOW} 目标磁盘: ${target_disk}${PLAIN}"
+    echo -e "${YELLOW} 重装后「SSH」端口将保持为: ${ssh_port}${PLAIN}"
+    echo -e "${YELLOW} 确认后会写入安装引导并在完成后自动重启${PLAIN}"
+    read -r -p " 输入「YES」确认开始重装,其它键取消: " confirm
+    [[ "$confirm" == "YES" ]] || { echo -e "${YELLOW} 已取消重装 ${PLAIN}"; return; }
+
+    installnet_main "${debian_version}" "${pw}" "${ssh_port}"
+}
+
+reinstall_debian11() {
+    reinstall_debian 11
+}
+
+reinstall_debian12() {
+    reinstall_debian 12
+}
+
+reinstall_debian13() {
+    reinstall_debian 13
+}
+
+start_menu() {
+    clear
+    echo -e "${BLUE}一键网络重装管理脚本${PLAIN}"
+    echo
+    echo -e "${BLUE}————————————重装系统————————————${PLAIN}"
+    echo -e " ${GREEN}1.${PLAIN} 重装 Debian 11"
+    echo -e " ${GREEN}2.${PLAIN} 重装 Debian 12"
+    echo -e " ${GREEN}3.${PLAIN} 重装 Debian 13"
+    echo -e " ${YELLOW}0.${PLAIN} 返回菜单"
+    echo
+}
+
+main_loop() {
+    while true; do
+        start_menu
+        read -p " 请输入数字 [0-3]: " num
+        num=$(echo "$num" | grep -oE '^[0-9]+$')
+        case "$num" in
+            1) reinstall_debian11 ;;
+            2) reinstall_debian12 ;;
+            3) reinstall_debian13 ;;
+            0) break ;;
+            *)
+                clear
+                echo -e "${RED}请输入正确数字 [0-3]${PLAIN}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+reinstall_menu() {
+    PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+    export PATH
+    check_sys
+    [[ "$EUID" -ne '0' ]] && echo -e "${RED}请使用 root 权限运行此脚本${PLAIN}" && return
+    [[ -z "${release:-}" ]] && echo -e "${RED}暂不支持当前系统${PLAIN}" && press_any_key_to_continue && return
+    first_job
+    main_loop
+}
+
 acme_exec() {
     [[ -f "$ACME_BIN" ]] || return 1
     bash "$ACME_BIN" "$@"
@@ -2522,7 +2989,7 @@ run_install_script() {
 
 install_snell()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/snell.sh"; }
 install_mihomo()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh"; }
-install_system()    { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Install.sh"; }
+install_system()    { reinstall_menu; }
 install_shoes()     { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/shoes.sh"; }
 install_warp()      { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh"; }
 install_wireproxy() { run_install_script "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/wireproxy.sh"; }
@@ -4027,7 +4494,7 @@ main_menu() {
         echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
         echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
         echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
-        read -p "$(echo -e "${BLUE}✦ Choice [0-18] ✦ : ${PLAIN}")" choice
+        read -p "$(echo -e "${BLUE}✦ Choice [0-17] ✦ : ${PLAIN}")" choice
         choice=$(echo "$choice" | xargs)
         if [[ "$choice" =~ ^[0-9]+$ ]]; then
             choice=$((10#$choice))
