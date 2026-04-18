@@ -149,19 +149,6 @@ check_dependencies() {
     command -v curl &>/dev/null || err "curl 不可用，无法继续"
 }
 
-enable_bbr() {
-    local cc; cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
-    if [[ "$cc" != "bbr" ]]; then
-        info "启用 BBR ..."
-        grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf 2>/dev/null || echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-        grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf 2>/dev/null || echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-        sysctl -p &>/dev/null
-        ok "BBR 已启用"
-    else
-        ok "BBR 已处于启用状态"
-    fi
-}
-
 determine_install_mode() {
     detect_network
     case "$NET_MODE" in
@@ -266,7 +253,6 @@ show_result() {
         echo -e "  IPv4: ${CYAN}${v4a}${NC} (原生)"
         echo -e "  IPv6: ${GREEN}${v6a}${NC} (WARP)"
     fi
-    echo -e "  BBR:       $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
     echo -e "  自启:      ${AUTOSTART_STATUS}"
     echo -e "  配置:      ${YELLOW}${WG_CONF}${NC}"
     echo ""
@@ -325,7 +311,7 @@ install_free() {
     ENDPOINT="$ep"
     info "Endpoint: $ENDPOINT"
     write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$pub" "$ENDPOINT" "$INSTALL_MODE" "free"
-    enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
+    start_and_enable; show_result "$INSTALL_MODE"
 }
 
 install_team() {
@@ -413,7 +399,7 @@ install_team() {
     info "Endpoint: $ENDPOINT"
 
     write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$ENDPOINT" "$INSTALL_MODE" "team($org)"
-    enable_bbr; start_and_enable; show_result "$INSTALL_MODE"
+    start_and_enable; show_result "$INSTALL_MODE"
 }
 
 modify_config() {
