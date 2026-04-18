@@ -115,7 +115,6 @@ show_network_status() {
     else
         echo -e "  WARP: ${YELLOW}未运行${NC}"
     fi
-    echo ""
 }
 
 install_wireguard_tools() {
@@ -237,7 +236,6 @@ start_and_enable() {
 
 show_result() {
     local mode="$1"
-    echo ""
     ok "配置完成"
 
     local v4a v6a
@@ -253,14 +251,11 @@ show_result() {
         echo -e "  IPv4: ${CYAN}${v4a}${NC} (原生)"
         echo -e "  IPv6: ${GREEN}${v6a}${NC} (WARP)"
     fi
-    echo -e "  自启:      ${AUTOSTART_STATUS}"
-    echo -e "  配置:      ${YELLOW}${WG_CONF}${NC}"
-    echo ""
+    echo -e "  自启: ${AUTOSTART_STATUS}"
+    echo -e "  配置: ${YELLOW}${WG_CONF}${NC}"
 }
 
 install_free() {
-    echo ""; info "免费账户安装"; echo ""
-
     check_dependencies
     determine_install_mode || return
     check_wg0_exists; detect_arch; install_wireguard_tools
@@ -268,12 +263,19 @@ install_free() {
     local wgcf_downloaded=false
     if [[ ! -x "$WGCF_BIN" ]]; then
         info "获取 wgcf 最新版本 ..."
-        local wgcf_ver
-        wgcf_ver=$(curl -sI "https://github.com/ViRb3/wgcf/releases/latest" | grep -i '^location:' | grep -oP 'v[\d.]+')
+        local wgcf_ver wgcf_host
+        wgcf_host="https://github.com/ViRb3/wgcf"
+        if [[ "$NET_MODE" == "v6_only" ]]; then
+            wgcf_host="https://cdn-wgcf.pages.dev/ViRb3/wgcf"
+            info "检测到纯 IPv6，wgcf 下载改用镜像: $wgcf_host"
+            wgcf_ver=$(curl -fsSL "${wgcf_host}/releases/latest" | grep -oE '/releases/tag/v[0-9.]+' | sed 's#.*/##' | head -n1)
+        else
+            wgcf_ver=$(curl -fsSI "${wgcf_host}/releases/latest" | sed -nE 's/^[Ll]ocation:.*(v[0-9.]+).*/\1/p' | head -n1)
+        fi
         [[ -z "$wgcf_ver" ]] && err "无法获取 wgcf 最新版本号"
-        local url="https://github.com/ViRb3/wgcf/releases/download/${wgcf_ver}/wgcf_${wgcf_ver#v}_linux_${WGCF_ARCH}"
+        local url="${wgcf_host}/releases/download/${wgcf_ver}/wgcf_${wgcf_ver#v}_linux_${WGCF_ARCH}"
         info "下载 wgcf ${wgcf_ver} ..."
-        wget -qO "$WGCF_BIN" "$url" || curl -sLo "$WGCF_BIN" "$url" || err "wgcf 下载失败"
+        wget -qO "$WGCF_BIN" "$url" || curl -fsSL -o "$WGCF_BIN" "$url" || err "wgcf 下载失败"
         chmod +x "$WGCF_BIN"; ok "wgcf ${wgcf_ver} 已下载"
         wgcf_downloaded=true
     fi
@@ -315,7 +317,6 @@ install_free() {
 }
 
 install_team() {
-    echo ""; info "团队账户安装"; echo ""
     check_dependencies
     determine_install_mode || return
     check_wg0_exists; install_wireguard_tools
@@ -326,7 +327,7 @@ install_team() {
     echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
     echo -e "  ${YELLOW}⚠ Token 有效期 60 秒，复制后立即粘贴${NC}"
     read -rsp "请粘贴 JWT Token（直接回车取消）: " JWT_TOKEN
-    echo ""
+    printf '\n'
     [[ -z "$JWT_TOKEN" ]] && { warn "已取消"; return; }
 
     info "生成 WireGuard 密钥对 ..."
@@ -403,18 +404,18 @@ install_team() {
 }
 
 modify_config() {
-    echo ""; info "修改 WARP 配置"; echo ""
+    clear
+    info "修改 WARP 配置"
     [[ ! -f "$WG_CONF" ]] && { warn "未找到 ${WG_CONF}，请先安装"; return; }
 
     echo -e "  Endpoint: $(grep '^Endpoint = ' "$WG_CONF" | awk -F' = ' '{print $2}')"
-    echo -e "  MTU:      $(grep '^MTU = ' "$WG_CONF" | awk -F' = ' '{print $2}')"
+    echo -e "  MTU: $(grep '^MTU = ' "$WG_CONF" | awk -F' = ' '{print $2}')"
     echo -e "  1) 改 Endpoint  2) 改 MTU  3) 编辑配置  0) 返回"
-    echo ""
     read -rp "请选择 [0-3]: " sub
 
     case "$sub" in
         1)
-            echo -e "\n  当前: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')\n"
+            echo -e "  当前 Endpoint: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')"
             read -rp "新 Endpoint: " new_ep
             if [[ -n "$new_ep" ]]; then
                 if ! is_valid_endpoint "$new_ep"; then
@@ -429,7 +430,7 @@ modify_config() {
             fi
             ;;
         2)
-            echo -e "\n  当前: $(grep 'MTU' "$WG_CONF" | awk -F' = ' '{print $2}')  建议: 1280 或 1420\n"
+            echo -e "  当前 MTU: $(grep 'MTU' "$WG_CONF" | awk -F' = ' '{print $2}')  建议: 1280 或 1420"
             read -rp "新 MTU [1280-1500]: " mtu
             if [[ "$mtu" =~ ^[0-9]+$ ]] && [[ "$mtu" -ge 1280 ]] && [[ "$mtu" -le 1500 ]]; then
                 sed -i "s|^MTU = .*|MTU = ${mtu}|" "$WG_CONF"; ok "已更新"; restart_wg
@@ -442,7 +443,7 @@ modify_config() {
             read -rp "重启 wg0？[y/N]: " yn
             [[ "$yn" =~ ^[Yy]$ ]] && restart_wg
             ;;
-        0) return ;;
+        0) return 10 ;;
         *) warn "无效选择" ;;
     esac
 }
@@ -457,7 +458,8 @@ restart_wg() {
 }
 
 show_ip() {
-    echo ""; info "当前出口 IP"; echo ""
+    clear
+    info "当前出口 IP"
     local t4="/tmp/.warp_ip4_$$" t6="/tmp/.warp_ip6_$$"
     curl -s -4 --max-time 5 ip.gs > "$t4" 2>/dev/null &
     curl -s -6 --max-time 5 ip.gs > "$t6" 2>/dev/null &
@@ -467,14 +469,14 @@ show_ip() {
     rm -f "$t4" "$t6"
     echo -e "  IPv4: ${CYAN}${v4}${NC}"
     echo -e "  IPv6: ${CYAN}${v6}${NC}"
-    echo ""
 }
 
 uninstall_warp() {
-    echo ""; info "删除 WARP 服务"; echo ""
-    echo -e "  ${RED}将删除 wg0 与配置文件${NC}\n"
+    clear
+    info "删除 WARP 服务"
+    echo -e "  ${RED}将删除 wg0 与配置文件${NC}"
     read -rp "确认删除 [y/N]: " yn
-    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return; }
+    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return 10; }
 
     ip link show wg0 &>/dev/null 2>&1 && { wg-quick down wg0 2>/dev/null || true; ok "隧道已关闭"; }
     if command -v systemctl &>/dev/null; then
@@ -483,7 +485,7 @@ uninstall_warp() {
         warn "未检测到 systemctl，跳过取消自启"
     fi
     rm -f "$WG_CONF"; ok "已删除 $WG_CONF"
-    echo -e "\n${GREEN}WARP 服务已完全删除${NC}\n"
+    ok "WARP 服务已完全删除"
 }
 
 show_menu() {
@@ -497,7 +499,7 @@ show_menu() {
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  5) 查看 IP    0) 退出脚本\n"
+    echo -e "  5) 查看 IP    0) 退出脚本"
 }
 
 main() {
@@ -509,10 +511,11 @@ main() {
             1) install_free ;; 2) install_team ;;
             3) modify_config ;; 4) uninstall_warp ;;
             5) show_ip ;;
-            0) echo ""; info "再见！"; exit 0 ;;
+            0) info "再见！"; exit 0 ;;
             *) warn "无效选项" ;;
         esac
-        echo ""; read -rp "回车继续..." _
+        [[ $? -eq 10 ]] && continue
+        read -rp "回车继续..." _
     done
 }
 
