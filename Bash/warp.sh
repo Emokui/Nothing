@@ -499,11 +499,11 @@ uninstall_warp() {
 
 show_menu() {
     clear
-    echo -e "${BOLD}  ╔════════════════════════════╗"
-    echo -e "  ║     WARP 出口管理 v2.0  ║"
-    echo -e "  ╚════════════════════════════╝${NC}"
+    echo -e "${BOLD}  ╔══════════════════════════╗"
+    echo -e "  ║    WARP 出口管理 v2.0 ║"
+    echo -e "  ╚══════════════════════════╝${NC}"
     show_network_status
-    echo "  ════════════════════════════"
+    echo "  ══════════════════════════"
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 管理服务   ${RED}4)${NC} 删除服务"
@@ -518,7 +518,7 @@ main() {
     check_root
     while true; do
         show_menu
-        echo "  ════════════════════════════"
+        echo "  ══════════════════════════"
         read -rp "  请输入选项 [0-5]: " choice
         case "$choice" in
             1) install_free; pause ;;
