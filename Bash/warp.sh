@@ -492,7 +492,8 @@ uninstall_warp() {
     [[ ! "$yn" =~ ^[Yy]$ ]] && return 1
 
     if ip link show wg0 &>/dev/null 2>&1; then
-        down_wg && ok "隧道已关闭" || warn "隧道关闭失败"
+        down_wg || err "隧道关闭失败，请先处理后再删除"
+        ok "隧道已关闭"
     fi
     if command -v systemctl &>/dev/null; then
         systemctl disable wg-quick@wg0 &>/dev/null 2>&1 && ok "已取消自启" || warn "取消自启失败"
