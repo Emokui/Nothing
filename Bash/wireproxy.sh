@@ -20,14 +20,13 @@ SERVICE_NAME="wireproxy-warp"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 WGCF_REPO="ViRb3/wgcf"
-WIREPROXY_REPO="windtf/wireproxy"
+WIREPROXY_BASE_URL="https://cdn-wireproxy.pages.dev/windtf/wireproxy"
 
 WGCF_PATH="/usr/local/bin/wgcf"
 WGCF_TMP=""
-PKG_MANAGER=""
-APT_UPDATED=0
 WIREPROXY_ARCH=""
 WGCF_ARCH=""
+NET_MODE=""
 
 DEFAULT_SOCKS_BIND="127.0.0.1:40000"
 SOCKS_BIND="$DEFAULT_SOCKS_BIND"
@@ -36,50 +35,20 @@ SOCKS_PASS=""
 
 check_root() { [[ $EUID -ne 0 ]] && err "请使用 root 用户运行此脚本"; }
 
-detect_pkg_manager() {
-    [[ -n "$PKG_MANAGER" ]] && return
-    if command -v apt-get >/dev/null 2>&1; then
-        PKG_MANAGER="apt"
-    elif command -v yum >/dev/null 2>&1; then
-        PKG_MANAGER="yum"
-    elif command -v dnf >/dev/null 2>&1; then
-        PKG_MANAGER="dnf"
-    else
-        PKG_MANAGER="none"
-    fi
-}
-
-install_pkg() {
-    local pkg="$1"
-    detect_pkg_manager
-    case "$PKG_MANAGER" in
-        apt)
-            if [[ "$APT_UPDATED" -eq 0 ]]; then
-                apt-get update -qq || return 1
-                APT_UPDATED=1
-            fi
-            apt-get install -y -qq "$pkg"
-            ;;
-        yum) yum install -y "$pkg" ;;
-        dnf) dnf install -y "$pkg" ;;
-        *) return 1 ;;
-    esac
+require_apt() {
+    command -v apt-get >/dev/null 2>&1 || err "仅支持 Debian/Ubuntu（未找到 apt-get）"
 }
 
 check_dependencies() {
     local cmd
+    require_apt
     for cmd in curl tar systemctl; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            install_pkg "$cmd" || err "安装依赖失败: $cmd"
-        fi
+        command -v "$cmd" >/dev/null 2>&1 || err "缺少依赖: $cmd"
     done
 }
 
 ensure_wireguard_tools() {
-    command -v wg >/dev/null 2>&1 && return
-    info "安装 wireguard-tools ..."
-    install_pkg wireguard-tools || err "wireguard-tools 安装失败"
-    command -v wg >/dev/null 2>&1 || err "wireguard-tools 安装后仍不可用"
+    command -v wg >/dev/null 2>&1 || err "缺少依赖: wg（请先安装 wireguard-tools）"
 }
 
 detect_arch() {
@@ -102,9 +71,37 @@ detect_arch() {
     esac
 }
 
+detect_network() {
+    local has_v4=false has_v6=false
+
+    if command -v ip >/dev/null 2>&1; then
+        ip -4 addr show scope global 2>/dev/null | grep -q inet &&
+            curl -4 --connect-timeout 3 --max-time 5 -s http://1.1.1.1/cdn-cgi/trace &>/dev/null &&
+            has_v4=true
+        ip -6 addr show scope global 2>/dev/null | grep -q inet6 &&
+            curl -6 -g --connect-timeout 3 --max-time 5 -s "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null &&
+            has_v6=true
+    else
+        curl -4 --connect-timeout 3 --max-time 5 -s http://1.1.1.1/cdn-cgi/trace &>/dev/null &&
+            has_v4=true
+        curl -6 -g --connect-timeout 3 --max-time 5 -s "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null &&
+            has_v6=true
+    fi
+
+    if $has_v4 && $has_v6; then
+        NET_MODE="dual"
+    elif $has_v6; then
+        NET_MODE="v6_only"
+    elif $has_v4; then
+        NET_MODE="v4_only"
+    else
+        NET_MODE="none"
+    fi
+}
+
 latest_release_tag() {
     local repo="$1"
-    curl -fsSI "https://github.com/${repo}/releases/latest" \
+    curl --connect-timeout 5 --max-time 20 -fsSI "https://github.com/${repo}/releases/latest" \
         | awk 'tolower($1)=="location:" {print $2}' \
         | tail -n1 \
         | tr -d '\r' \
@@ -120,15 +117,19 @@ download_wireproxy() {
     fi
 
     detect_arch
-    version="$(latest_release_tag "$WIREPROXY_REPO")"
+    info "获取 wireproxy 最新版本 ..."
+    version="$(curl --connect-timeout 5 --max-time 20 -fsSL "${WIREPROXY_BASE_URL}/releases/latest" \
+        | grep -oE '/releases/tag/v[0-9.]+' \
+        | sed 's#.*/##' \
+        | head -n1)"
     [[ -n "$version" ]] || err "无法获取 wireproxy 最新版本"
 
     asset="wireproxy_linux_${WIREPROXY_ARCH}.tar.gz"
-    url="https://github.com/${WIREPROXY_REPO}/releases/download/${version}/${asset}"
+    url="${WIREPROXY_BASE_URL}/releases/download/${version}/${asset}"
     tmpdir="$(mktemp -d)" || err "创建临时目录失败"
 
     info "下载 wireproxy ${version} ..."
-    if ! curl -fL "$url" -o "${tmpdir}/wireproxy.tar.gz"; then
+    if ! curl --connect-timeout 5 --max-time 120 -fL "$url" -o "${tmpdir}/wireproxy.tar.gz"; then
         rm -rf "$tmpdir"
         err "wireproxy 下载失败"
     fi
@@ -150,22 +151,34 @@ download_wireproxy() {
 }
 
 ensure_wgcf() {
-    local version url tmpdir
+    local version url tmpdir wgcf_base_url
 
     if [[ -x "$WGCF_PATH" ]]; then
         return 0
     fi
 
     detect_arch
-    version="$(latest_release_tag "$WGCF_REPO")"
+    detect_network
+    wgcf_base_url="https://github.com/${WGCF_REPO}"
+    info "获取 wgcf 最新版本 ..."
+    if [[ "$NET_MODE" == "v6_only" ]]; then
+        wgcf_base_url="https://cdn-wgcf.pages.dev/ViRb3/wgcf"
+        info "检测到纯 IPv6，wgcf 下载改用镜像: $wgcf_base_url"
+        version="$(curl --connect-timeout 5 --max-time 20 -fsSL "${wgcf_base_url}/releases/latest" \
+            | grep -oE '/releases/tag/v[0-9.]+' \
+            | sed 's#.*/##' \
+            | head -n1)"
+    else
+        version="$(latest_release_tag "$WGCF_REPO")"
+    fi
     [[ -n "$version" ]] || err "无法获取 wgcf 最新版本"
 
-    url="https://github.com/${WGCF_REPO}/releases/download/${version}/wgcf_${version#v}_linux_${WGCF_ARCH}"
+    url="${wgcf_base_url}/releases/download/${version}/wgcf_${version#v}_linux_${WGCF_ARCH}"
     tmpdir="$(mktemp -d)" || err "创建临时目录失败"
     WGCF_TMP="${tmpdir}/wgcf"
 
     info "下载 wgcf ${version} ..."
-    if ! curl -fL "$url" -o "$WGCF_TMP"; then
+    if ! curl --connect-timeout 5 --max-time 120 -fL "$url" -o "$WGCF_TMP"; then
         rm -rf "$tmpdir"
         WGCF_TMP=""
         err "wgcf 下载失败"
@@ -210,6 +223,94 @@ extract_ini_value() {
         /^\[/ { in_section=0 }
         in_section && $1 == key { print $2; exit }
     ' "$file"
+}
+
+endpoint_host() {
+    local value="$1"
+    if [[ "$value" =~ ^\[([0-9a-fA-F:]+)\]:[0-9]{1,5}$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$value" =~ ^([^:]+):[0-9]{1,5}$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$value"
+    fi
+}
+
+endpoint_port() {
+    local value="$1"
+    if [[ "$value" =~ ^\[[0-9a-fA-F:]+\]:([0-9]{1,5})$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$value" =~ ^[^:]+:([0-9]{1,5})$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
+}
+
+is_ipv4_literal() {
+    local host="$1"
+    [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+is_ipv6_literal() {
+    local host="$1"
+    [[ "$host" == *:* ]]
+}
+
+resolve_host_by_family() {
+    local host="$1" family="$2"
+    command -v getent >/dev/null 2>&1 || err "缺少 getent，无法解析 Endpoint"
+    case "$family" in
+        4) getent ahostsv4 "$host" | awk 'NR==1 { print $1; exit }' ;;
+        6) getent ahostsv6 "$host" | awk 'NR==1 { print $1; exit }' ;;
+        *) return 1 ;;
+    esac
+}
+
+select_endpoint_for_network() {
+    local current="$1" preferred_v4="$2" preferred_v6="$3" preferred_port="$4"
+    local host port resolved
+
+    [[ -n "$NET_MODE" ]] || detect_network
+    port="${preferred_port:-$(endpoint_port "$current")}"
+    [[ -z "$port" ]] && port="2408"
+
+    case "$NET_MODE" in
+        v6_only)
+            if [[ -n "$preferred_v6" ]]; then
+                printf '[%s]:%s\n' "$preferred_v6" "$port"
+                return 0
+            fi
+            host="$(endpoint_host "$current")"
+            [[ -n "$host" ]] || err "无法确定 IPv6 Endpoint"
+            if is_ipv6_literal "$host" && ! is_ipv4_literal "$host"; then
+                printf '[%s]:%s\n' "$host" "$port"
+                return 0
+            fi
+            resolved="$(resolve_host_by_family "$host" 6)"
+            [[ -n "$resolved" ]] || err "无法解析 IPv6 Endpoint: $host"
+            printf '[%s]:%s\n' "$resolved" "$port"
+            ;;
+        dual|v4_only)
+            if [[ -n "$preferred_v4" ]]; then
+                printf '%s:%s\n' "$preferred_v4" "$port"
+                return 0
+            fi
+            host="$(endpoint_host "$current")"
+            [[ -n "$host" ]] || err "无法确定 IPv4 Endpoint"
+            if is_ipv4_literal "$host"; then
+                printf '%s:%s\n' "$host" "$port"
+                return 0
+            fi
+            resolved="$(resolve_host_by_family "$host" 4)"
+            [[ -n "$resolved" ]] || err "无法解析 IPv4 Endpoint: $host"
+            printf '%s:%s\n' "$resolved" "$port"
+            ;;
+        none)
+            err "当前服务器无可用网络，无法确定 Endpoint"
+            ;;
+        *)
+            err "未知网络模式: $NET_MODE"
+            ;;
+    esac
 }
 
 load_socks_settings() {
@@ -387,6 +488,23 @@ restart_service_with_backup() {
     return 1
 }
 
+prepare_install() {
+    local account_type="$1"
+    check_dependencies
+    detect_arch
+    prompt_socks_settings
+    download_wireproxy
+    [[ "$account_type" == "free" ]] && ensure_wgcf || ensure_wireguard_tools
+}
+
+finish_install() {
+    local priv="$1" v4="$2" v6="$3" pub="$4" endpoint="$5" account="$6"
+    info "Endpoint: $endpoint"
+    write_wg_conf "$priv" "$v4" "$v6" "$pub" "$endpoint" "$account"
+    write_wireproxy_conf
+    restart_service
+}
+
 service_running() {
     systemctl is-active --quiet "$SERVICE_NAME"
 }
@@ -401,15 +519,14 @@ show_proxy_status() {
     fi
 
     if service_running; then
-        echo -e "  服务: ${GREEN}运行中${NC}"
+        echo -e "  WARP: ${GREEN}运行中${NC}"
     else
-        echo -e "  服务: ${YELLOW}未运行${NC}"
+        echo -e "  WARP: ${YELLOW}未运行${NC}"
     fi
-    echo ""
 }
 
 show_proxy_trace() {
-    local trace attempt
+    local trace="" v4_trace="" ip="" ip4="" ip6="" loc="" warp="" attempt
     load_socks_settings
 
     [[ -f "$WIREPROXY_CONF" ]] || { warn "未找到配置文件"; return; }
@@ -433,9 +550,40 @@ show_proxy_trace() {
         return
     fi
 
-    echo -e "  IP:   ${GREEN}$(printf '%s\n' "$trace" | awk -F= '/^ip=/{print $2}')${NC}"
-    echo -e "  Loc:  ${CYAN}$(printf '%s\n' "$trace" | awk -F= '/^loc=/{print $2}')${NC}"
-    echo -e "  Warp: ${YELLOW}$(printf '%s\n' "$trace" | awk -F= '/^warp=/{print $2}')${NC}"
+    ip="$(trace_value "$trace" "ip")"
+    if [[ -n "$ip" ]]; then
+        if is_ipv6_literal "$ip" && ! is_ipv4_literal "$ip"; then
+            ip6="$ip"
+        else
+            ip4="$ip"
+        fi
+    fi
+
+    for attempt in 1 2 3; do
+        v4_trace="$(fetch_trace_via_proxy_v4 || true)"
+        [[ -n "$v4_trace" ]] && break
+        sleep 1
+    done
+
+    [[ -n "$v4_trace" ]] && ip4="$(trace_value "$v4_trace" "ip")"
+
+    if [[ -z "$ip6" ]]; then
+        for attempt in 1 2 3; do
+            ip6="$(fetch_ipv6_ip_via_proxy || true)"
+            [[ -n "$ip6" ]] && break
+            sleep 1
+        done
+    fi
+
+    [[ -z "$ip4" ]] && ip4="无"
+    [[ -z "$ip6" ]] && ip6="无"
+    loc="$(trace_value "$trace" "loc")"
+    warp="$(trace_value "$trace" "warp")"
+
+    echo -e "  IPv4: ${GREEN}${ip4}${NC}"
+    echo -e "  IPv6: ${CYAN}${ip6}${NC}"
+    [[ -n "$loc" ]] && echo -e "  Loc:  ${CYAN}${loc}${NC}"
+    [[ -n "$warp" ]] && echo -e "  Warp: ${YELLOW}${warp}${NC}"
     echo ""
 }
 
@@ -445,7 +593,7 @@ fetch_trace_via_proxy() {
     local trace=""
 
     proxy_url="${scheme}://${SOCKS_BIND}"
-    curl_args=(--proxy "$proxy_url" --max-time 10 -s)
+    curl_args=(--proxy "$proxy_url" --connect-timeout 5 --max-time 10 -s)
     if [[ -n "$SOCKS_USER" ]]; then
         curl_args+=(--proxy-user "${SOCKS_USER}:${SOCKS_PASS}")
     fi
@@ -455,6 +603,41 @@ fetch_trace_via_proxy() {
     printf '%s\n' "$trace"
 }
 
+fetch_trace_via_proxy_v4() {
+    local proxy_url trace=""
+    local curl_args=()
+
+    proxy_url="socks5://${SOCKS_BIND}"
+    curl_args=(-4 --proxy "$proxy_url" --connect-timeout 5 --max-time 10 -s)
+    if [[ -n "$SOCKS_USER" ]]; then
+        curl_args+=(--proxy-user "${SOCKS_USER}:${SOCKS_PASS}")
+    fi
+
+    trace="$(curl "${curl_args[@]}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
+    printf '%s\n' "$trace"
+}
+
+fetch_ipv6_ip_via_proxy() {
+    local proxy_url ip=""
+    local curl_args=()
+
+    proxy_url="socks5h://${SOCKS_BIND}"
+    curl_args=(--proxy "$proxy_url" --connect-timeout 5 --max-time 10 -s https://api6.ipify.org)
+    if [[ -n "$SOCKS_USER" ]]; then
+        curl_args+=(--proxy-user "${SOCKS_USER}:${SOCKS_PASS}")
+    fi
+
+    ip="$(curl "${curl_args[@]}" 2>/dev/null || true)"
+    [[ -n "$ip" && "$ip" == *:* ]] || return 1
+    printf '%s\n' "$ip"
+}
+
+trace_value() {
+    local trace="$1" key="$2"
+    printf '%s\n' "$trace" | awk -F= -v key="$key" '$1 == key { print $2; exit }'
+}
+
 install_free() {
     local tmpdir priv pub addr endpoint warp_v4 warp_v6 version
 
@@ -462,11 +645,7 @@ install_free() {
     info "免费账户 SOCKS 安装"
     echo ""
 
-    check_dependencies
-    detect_arch
-    prompt_socks_settings
-    download_wireproxy
-    ensure_wgcf
+    prepare_install free
 
     tmpdir="$(mktemp -d)" || err "创建临时目录失败"
     cd "$tmpdir" || err "进入临时目录失败"
@@ -501,13 +680,13 @@ install_free() {
         err "无法从 wgcf-profile.conf 提取 WARP 配置"
     }
 
+    endpoint="$(select_endpoint_for_network "$endpoint" "" "" "")"
+
     cd / || true
     rm -rf "$tmpdir"
     cleanup_wgcf
 
-    write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$pub" "$endpoint" "free"
-    write_wireproxy_conf
-    restart_service
+    finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$endpoint" "free"
 
     echo ""
     ok "WARP SOCKS 配置完成"
@@ -522,11 +701,7 @@ install_team() {
     info "团队账户 SOCKS 安装"
     echo ""
 
-    check_dependencies
-    detect_arch
-    prompt_socks_settings
-    download_wireproxy
-    ensure_wireguard_tools
+    prepare_install team
 
     echo -e "${YELLOW}获取 Token：${NC}"
     echo -e "  打开 ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
@@ -574,19 +749,19 @@ install_team() {
     ep_v4="$(printf '%s' "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1 | sed 's/:0$//g')"
     ep_v6="$(printf '%s' "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1 | sed 's/\[//g; s/\]//g; s/:0$//g')"
 
-    if [[ -n "$ep_v4" && "$ep_v4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ -n "$ep_host" ]]; then
+        endpoint="$ep_host"
+    elif [[ -n "$ep_v4" && "$ep_v4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         endpoint="${ep_v4}:${ep_port}"
-    elif [[ -n "$ep_host" ]]; then
-        endpoint="${ep_host%%:*}:${ep_port}"
     elif [[ -n "$ep_v6" ]]; then
         endpoint="[${ep_v6}]:${ep_port}"
     else
         err "API 未返回可用的 Endpoint"
     fi
 
-    write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint" "team(${org:-unknown})"
-    write_wireproxy_conf
-    restart_service
+    endpoint="$(select_endpoint_for_network "$endpoint" "$ep_v4" "$ep_v6" "$ep_port")"
+
+    finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint" "team(${org:-unknown})"
 
     echo ""
     ok "团队 WARP SOCKS 配置完成"
@@ -596,11 +771,9 @@ install_team() {
 }
 
 modify_config() {
-    local current_endpoint current_mtu new_ep new_bind new_mtu input escaped_value backup_file
+    local current_endpoint current_mtu new_ep new_bind new_mtu input escaped_value backup_file auth_label auth_color service_label service_color
 
-    echo ""
-    info "修改 SOCKS 模式配置"
-    echo ""
+    clear
 
     [[ -f "$WIREPROXY_CONF" && -f "$WG_WARP_CONF" ]] || { warn "未找到配置，请先安装"; return; }
 
@@ -608,16 +781,33 @@ modify_config() {
     current_endpoint="$(extract_ini_value "$WG_WARP_CONF" "Peer" "Endpoint")"
     current_mtu="$(extract_ini_value "$WG_WARP_CONF" "Interface" "MTU")"
     [[ -z "$current_mtu" ]] && current_mtu="1280"
+    if [[ -n "$SOCKS_USER" ]]; then
+        auth_label="$SOCKS_USER"
+        auth_color="$GREEN"
+    else
+        auth_label="无"
+        auth_color="$YELLOW"
+    fi
+    if service_running; then
+        service_label="运行中"
+        service_color="$GREEN"
+    else
+        service_label="未运行"
+        service_color="$YELLOW"
+    fi
 
-    echo -e "  1) 改 Endpoint"
-    echo -e "  2) 改 MTU"
-    echo -e "  3) 改 SOCKS 监听地址"
-    echo -e "  4) 改 SOCKS 认证"
-    echo -e "  5) 编辑 WireGuard 配置"
-    echo -e "  6) 编辑 wireproxy 配置"
-    echo -e "  0) 返回"
-    echo ""
-    read -rp "请选择 [0-6]: " input
+    menu_divider
+    echo -e "  ${CYAN}WARP:${NC} ${service_color}${service_label}${NC}"
+    echo -e "  ${CYAN}Endpoint:${NC} ${current_endpoint}"
+    echo -e "  ${CYAN}MTU:${NC} ${current_mtu}  ${CYAN}SOCKS:${NC} ${SOCKS_BIND}"
+    echo -e "  ${CYAN}认证:${NC} ${auth_color}${auth_label}${NC}"
+    menu_divider
+    echo -e "  ${GREEN}1)${NC} 改 Endpoint  ${CYAN}2)${NC} 改 MTU"
+    echo -e "  ${YELLOW}3)${NC} 改 SOCKS 监听 ${GREEN}4)${NC} 改 SOCKS 认证"
+    echo -e "  ${CYAN}5)${NC} 编辑 WARP 配置 ${YELLOW}6)${NC} 编辑代理配置"
+    echo -e "  ${RED}0)${NC} 返回上级"
+    echo
+    read -rp "  请选择 [0-6]: " input
 
     case "$input" in
         1)
@@ -645,7 +835,7 @@ modify_config() {
             fi
             ;;
         3)
-            echo -e "\n  当前 SOCKS: ${SOCKS_BIND}\n"
+            echo -e "\n  当前 SOCKS 监听: ${SOCKS_BIND}\n"
             read -rp "新 SOCKS 监听地址: " new_bind
             if [[ -n "$new_bind" ]]; then
                 is_valid_host_port "$new_bind" || { warn "监听地址格式无效"; return; }
@@ -657,6 +847,7 @@ modify_config() {
             fi
             ;;
         4)
+            echo -e "\n  当前认证: ${auth_label}\n"
             backup_file="$(make_backup "$WIREPROXY_CONF")"
             prompt_socks_settings
             write_wireproxy_conf
@@ -672,26 +863,42 @@ modify_config() {
             ${EDITOR:-nano} "$WIREPROXY_CONF"
             restart_service_with_backup "$backup_file" "$WIREPROXY_CONF"
             ;;
-        0) return ;;
+        0) return 1 ;;
         *) warn "无效选择" ;;
     esac
 }
 
 show_ip() {
-    echo ""
-    info "当前 WARP SOCKS 出口"
-    echo ""
+    clear
+    load_socks_settings
+    menu_divider
+    echo -e "  ${CYAN}WARP 出口${NC}"
+    echo -e "  ${CYAN}SOCKS:${NC} ${SOCKS_BIND}"
+    menu_divider
     show_proxy_trace
 }
 
 uninstall_warp() {
-    echo ""
-    info "删除 WARP SOCKS 服务"
-    echo ""
-    read -rp "确认删除 [y/N]: " yn
-    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return; }
+    clear
+    menu_divider
+    echo -e "  ${RED}删除 WARP SOCKS 服务${NC}"
+    if service_running; then
+        echo -e "  ${CYAN}WARP:${NC} ${GREEN}运行中${NC}"
+    else
+        echo -e "  ${CYAN}WARP:${NC} ${YELLOW}未运行${NC}"
+    fi
+    menu_divider
+    echo -e "  ${RED}将停止服务并删除配置与程序文件${NC}"
+    echo
+    read -rp "  确认删除 [y/N]: " yn
+    [[ ! "$yn" =~ ^[Yy]$ ]] && return 1
 
-    systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    if service_running; then
+        systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || err "服务停止失败，请先处理后再删除"
+        service_running && err "服务仍在运行，请先处理后再删除"
+        ok "服务已停止"
+    fi
+
     systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
     rm -f "$SERVICE_FILE"
     rm -f "$WIREPROXY_BIN"
@@ -703,35 +910,40 @@ uninstall_warp() {
 
 show_menu() {
     clear
-    echo -e "${BOLD}"
-    echo "  ╔══════════════════════════════════════╗"
-    echo "  ║        WARP SOCKS 管理脚本 v3.0     ║"
-    echo "  ╚══════════════════════════════════════╝"
-    echo -e "${NC}"
+    echo -e "${BOLD}  ╔══════════════════════════╗"
+    echo -e "  ║    WARP SOCKS 管理 v3.0 ║"
+    echo -e "  ╚══════════════════════════╝${NC}"
     show_proxy_status
+    menu_divider
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  5) 查看出口   0) 退出脚本"
-    echo ""
+    echo -e "  ${GREEN}5)${NC} 查看出口   ${RED}0)${NC} 退出脚本"
+}
+
+pause() {
+    read -rp "回车继续..." _
+}
+
+menu_divider() {
+    echo "  ══════════════════════════"
 }
 
 main() {
     check_root
     while true; do
         show_menu
+        menu_divider
         read -rp "  请输入选项 [0-5]: " choice
         case "$choice" in
-            1) install_free ;;
-            2) install_team ;;
-            3) modify_config ;;
-            4) uninstall_warp ;;
-            5) show_ip ;;
-            0) echo ""; info "再见！"; exit 0 ;;
-            *) warn "无效选项" ;;
+            1) install_free; pause ;;
+            2) install_team; pause ;;
+            3) modify_config && pause ;;
+            4) uninstall_warp && pause ;;
+            5) show_ip; pause ;;
+            0) info "再见！"; exit 0 ;;
+            *) warn "无效选项"; pause ;;
         esac
-        echo ""
-        read -rp "回车继续..." _
     done
 }
 
