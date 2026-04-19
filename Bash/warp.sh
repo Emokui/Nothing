@@ -489,7 +489,7 @@ uninstall_warp() {
     info "删除 WARP 服务"
     echo -e "  ${RED}将删除 wg0 与配置文件${NC}"
     read -rp "确认删除 [y/N]: " yn
-    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return 1; }
+    [[ ! "$yn" =~ ^[Yy]$ ]] && return 1
 
     if ip link show wg0 &>/dev/null 2>&1; then
         down_wg && ok "隧道已关闭" || warn "隧道关闭失败"
