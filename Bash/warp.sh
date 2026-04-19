@@ -374,7 +374,7 @@ install_team() {
 
 modify_config() {
     clear
-    info "${BOLD}${CYAN}修改 WARP 配置${NC}"
+    menu_divider
     [[ ! -f "$WG_CONF" ]] && { warn "未找到 ${WG_CONF}，请先安装"; return; }
 
     local current_ep current_mtu
@@ -383,8 +383,11 @@ modify_config() {
 
     echo -e "  ${CYAN}Endpoint:${NC} ${current_ep}"
     echo -e "  ${CYAN}MTU:${NC} ${current_mtu}"
-    echo -e "  ${GREEN}1)${NC} 改 Endpoint  ${CYAN}2)${NC} 改 MTU  ${YELLOW}3)${NC} 编辑配置  ${RED}0)${NC} 返回"
-    read -rp "请选择 [0-3]: " sub
+    menu_divider
+    echo -e "  ${GREEN}1)${NC} 改 Endpoint  ${CYAN}2)${NC} 改 MTU"
+    echo -e "  ${YELLOW}3)${NC} 编辑配置     ${RED}0)${NC} 返回上级"
+    echo
+    read -rp "  请选择 [0-3]: " sub
 
     case "$sub" in
         1)
@@ -449,14 +452,17 @@ restart_wg() {
 manage_service() {
     while true; do
         clear
-        info "${BOLD}${CYAN}管理 WARP 服务${NC}"
+        menu_divider
         if ip link show wg0 &>/dev/null 2>&1; then
-            echo -e "  ${CYAN}状态:${NC} ${GREEN}运行中${NC}"
+            echo -e "  ${CYAN}WARP 状态:${NC} ${GREEN}运行中${NC}"
         else
-            echo -e "  ${CYAN}状态:${NC} ${YELLOW}未运行${NC}"
+            echo -e "  ${CYAN}WARP 状态:${NC} ${YELLOW}未运行${NC}"
         fi
-        echo -e "  ${GREEN}1)${NC} 修改配置  ${CYAN}2)${NC} 暂停服务  ${YELLOW}3)${NC} 重启服务  ${RED}0)${NC} 返回"
-        read -rp "请选择 [0-3]: " sub
+        menu_divider
+        echo -e "  ${GREEN}1)${NC} 修改配置  ${CYAN}2)${NC} 暂停服务"
+        echo -e "  ${YELLOW}3)${NC} 重启服务  ${RED}0)${NC} 返回上级"
+        echo
+        read -rp "  请选择 [0-3]: " sub
 
         case "$sub" in
             1) modify_config && pause ;;
@@ -503,7 +509,7 @@ show_menu() {
     echo -e "  ║    WARP 出口管理 v2.0 ║"
     echo -e "  ╚══════════════════════════╝${NC}"
     show_network_status
-    echo "  ══════════════════════════"
+    menu_divider
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 管理服务   ${RED}4)${NC} 删除服务"
@@ -514,11 +520,15 @@ pause() {
     read -rp "回车继续..." _
 }
 
+menu_divider() {
+    echo "  ══════════════════════════"
+}
+
 main() {
     check_root
     while true; do
         show_menu
-        echo "  ══════════════════════════"
+        menu_divider
         read -rp "  请输入选项 [0-5]: " choice
         case "$choice" in
             1) install_free; pause ;;
