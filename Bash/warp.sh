@@ -11,39 +11,18 @@ err()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 WG_CONF="/etc/wireguard/wg0.conf"
 WGCF_BIN="/usr/local/bin/wgcf"
 APT_UPDATED=0
-PKG_MANAGER=""
 AUTOSTART_STATUS="未设置"
 
 check_root() { [[ $EUID -ne 0 ]] && err "请使用 root 用户运行此脚本"; }
 
-detect_pkg_manager() {
-    [[ -n "$PKG_MANAGER" ]] && return
-    if command -v apt-get &>/dev/null; then
-        PKG_MANAGER="apt"
-    elif command -v yum &>/dev/null; then
-        PKG_MANAGER="yum"
-    elif command -v dnf &>/dev/null; then
-        PKG_MANAGER="dnf"
-    else
-        PKG_MANAGER="none"
-    fi
-}
-
 install_pkg() {
     local pkg="$1"
-    detect_pkg_manager
-    case "$PKG_MANAGER" in
-        apt)
-            if [[ "$APT_UPDATED" -eq 0 ]]; then
-                apt-get update -qq || return 1
-                APT_UPDATED=1
-            fi
-            apt-get install -y -qq "$pkg"
-            ;;
-        yum) yum install -y "$pkg" ;;
-        dnf) dnf install -y "$pkg" ;;
-        *) return 1 ;;
-    esac
+    command -v apt-get &>/dev/null || err "仅支持 Debian/Ubuntu（未找到 apt-get）"
+    if [[ "$APT_UPDATED" -eq 0 ]]; then
+        apt-get update -qq || return 1
+        APT_UPDATED=1
+    fi
+    apt-get install -y -qq "$pkg"
 }
 
 is_valid_endpoint() {
@@ -77,24 +56,12 @@ detect_arch() {
 
 detect_network() {
     HAS_V4=false; HAS_V6=false
-    local tmp4="/tmp/.warp_v4_$$" tmp6="/tmp/.warp_v6_$$"
-    rm -f "$tmp4" "$tmp6"
-    (
-        ip -4 addr show scope global 2>/dev/null | grep -q inet || exit 1
-        ping -4 -c 1 -W 1 1.1.1.1 &>/dev/null && exit 0
-        command -v curl &>/dev/null && curl -4 -s --max-time 2 http://1.1.1.1/cdn-cgi/trace &>/dev/null && exit 0
-        exit 1
-    ) && touch "$tmp4" &
-    (
-        ip -6 addr show scope global 2>/dev/null | grep -q inet6 || exit 1
-        ping -6 -c 1 -W 1 2606:4700:4700::1111 &>/dev/null && exit 0
-        command -v curl &>/dev/null && curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && exit 0
-        exit 1
-    ) && touch "$tmp6" &
-    wait
-    [[ -f "$tmp4" ]] && HAS_V4=true
-    [[ -f "$tmp6" ]] && HAS_V6=true
-    rm -f "$tmp4" "$tmp6"
+    ip -4 addr show scope global 2>/dev/null | grep -q inet &&
+        curl -4 -s --max-time 2 http://1.1.1.1/cdn-cgi/trace &>/dev/null &&
+        HAS_V4=true
+    ip -6 addr show scope global 2>/dev/null | grep -q inet6 &&
+        curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null &&
+        HAS_V6=true
 
     if $HAS_V4 && $HAS_V6; then NET_MODE="dual"
     elif $HAS_V6; then NET_MODE="v6_only"
@@ -120,22 +87,7 @@ show_network_status() {
 install_wireguard_tools() {
     command -v wg &>/dev/null && { ok "wireguard-tools 已安装"; return; }
     info "安装 wireguard-tools ..."
-    detect_pkg_manager
-    case "$PKG_MANAGER" in
-        apt)
-            install_pkg wireguard-tools || err "wireguard-tools 安装失败"
-            ;;
-        yum)
-            install_pkg epel-release >/dev/null 2>&1 || warn "epel-release 安装失败，继续尝试安装 wireguard-tools"
-            install_pkg wireguard-tools || err "wireguard-tools 安装失败"
-            ;;
-        dnf)
-            install_pkg wireguard-tools || err "wireguard-tools 安装失败"
-            ;;
-        *)
-            err "无法识别包管理器，请手动安装 wireguard-tools"
-            ;;
-    esac
+    install_pkg wireguard-tools || err "wireguard-tools 安装失败"
     command -v wg &>/dev/null || err "wireguard-tools 安装后仍未检测到 wg 命令"
     ok "wireguard-tools 已安装"
 }
@@ -146,6 +98,15 @@ check_dependencies() {
         install_pkg curl || err "curl 安装失败"
     fi
     command -v curl &>/dev/null || err "curl 不可用，无法继续"
+}
+
+prepare_install() {
+    local account_type="$1"
+    check_dependencies
+    determine_install_mode || return 1
+    check_wg0_exists
+    [[ "$account_type" == "free" ]] && detect_arch
+    install_wireguard_tools
 }
 
 determine_install_mode() {
@@ -239,8 +200,8 @@ show_result() {
     ok "配置完成"
 
     local v4a v6a
-    v4a=$(curl -s -4 --max-time 5 ip.gs 2>/dev/null || echo "获取失败")
-    v6a=$(curl -s -6 --max-time 5 ip.gs 2>/dev/null || echo "获取失败")
+    v4a=$(public_ip "-4" "获取失败")
+    v6a=$(public_ip "-6" "获取失败")
 
     if [[ "$mode" == "add_v4" ]]; then
         echo -e "  模式: 纯 IPv6 -> 添加 IPv4"
@@ -255,10 +216,27 @@ show_result() {
     echo -e "  配置: ${YELLOW}${WG_CONF}${NC}"
 }
 
+finish_install() {
+    local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5" acct="$6"
+    info "Endpoint: $ep"
+    write_wg_conf "$priv" "$v4" "$v6" "$pub" "$ep" "$INSTALL_MODE" "$acct"
+    start_and_enable
+    show_result "$INSTALL_MODE"
+}
+
+conf_value() {
+    local key="$1"
+    awk -F' = ' -v key="$key" '$1 == key { print $2; exit }' "$WG_CONF"
+}
+
+public_ip() {
+    local family="$1" fallback="$2" ip
+    ip=$(curl -s "$family" --max-time 5 ip.gs 2>/dev/null || true)
+    [[ -n "$ip" ]] && printf '%s' "$ip" || printf '%s' "$fallback"
+}
+
 install_free() {
-    check_dependencies
-    determine_install_mode || return
-    check_wg0_exists; detect_arch; install_wireguard_tools
+    prepare_install free || return 1
 
     local wgcf_downloaded=false
     if [[ ! -x "$WGCF_BIN" ]]; then
@@ -275,7 +253,7 @@ install_free() {
         [[ -z "$wgcf_ver" ]] && err "无法获取 wgcf 最新版本号"
         local url="${wgcf_host}/releases/download/${wgcf_ver}/wgcf_${wgcf_ver#v}_linux_${WGCF_ARCH}"
         info "下载 wgcf ${wgcf_ver} ..."
-        wget -qO "$WGCF_BIN" "$url" || curl -fsSL -o "$WGCF_BIN" "$url" || err "wgcf 下载失败"
+        curl -fsSL -o "$WGCF_BIN" "$url" || err "wgcf 下载失败"
         chmod +x "$WGCF_BIN"; ok "wgcf ${wgcf_ver} 已下载"
         wgcf_downloaded=true
     fi
@@ -310,17 +288,11 @@ install_free() {
         ok "临时文件已清理"
     fi
 
-    ENDPOINT="$ep"
-    info "Endpoint: $ENDPOINT"
-    write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$pub" "$ENDPOINT" "$INSTALL_MODE" "free"
-    start_and_enable; show_result "$INSTALL_MODE"
+    finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$ep" "free"
 }
 
 install_team() {
-    check_dependencies
-    determine_install_mode || return
-    check_wg0_exists; install_wireguard_tools
-    command -v wg &>/dev/null || err "wg 命令不可用"
+    prepare_install team || return 1
     echo -e "${YELLOW}获取 Token：${NC}"
     echo -e "  打开 ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
     echo -e "  登陆后按 F12 → Console 输入:"
@@ -397,25 +369,26 @@ install_team() {
             err "API 未返回可用的 Endpoint"
         fi
     fi
-    info "Endpoint: $ENDPOINT"
-
-    write_wg_conf "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$ENDPOINT" "$INSTALL_MODE" "team($org)"
-    start_and_enable; show_result "$INSTALL_MODE"
+    finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$ENDPOINT" "team($org)"
 }
 
 modify_config() {
     clear
-    info "修改 WARP 配置"
+    info "${BOLD}${CYAN}修改 WARP 配置${NC}"
     [[ ! -f "$WG_CONF" ]] && { warn "未找到 ${WG_CONF}，请先安装"; return; }
 
-    echo -e "  Endpoint: $(grep '^Endpoint = ' "$WG_CONF" | awk -F' = ' '{print $2}')"
-    echo -e "  MTU: $(grep '^MTU = ' "$WG_CONF" | awk -F' = ' '{print $2}')"
-    echo -e "  1) 改 Endpoint  2) 改 MTU  3) 编辑配置  0) 返回"
+    local current_ep current_mtu
+    current_ep=$(conf_value "Endpoint")
+    current_mtu=$(conf_value "MTU")
+
+    echo -e "  ${CYAN}Endpoint:${NC} ${current_ep}"
+    echo -e "  ${CYAN}MTU:${NC} ${current_mtu}"
+    echo -e "  ${GREEN}1)${NC} 改 Endpoint  ${CYAN}2)${NC} 改 MTU  ${YELLOW}3)${NC} 编辑配置  ${RED}0)${NC} 返回"
     read -rp "请选择 [0-3]: " sub
 
     case "$sub" in
         1)
-            echo -e "  当前 Endpoint: $(grep 'Endpoint' "$WG_CONF" | awk -F' = ' '{print $2}')"
+            echo -e "  ${CYAN}当前 Endpoint:${NC} ${current_ep}"
             read -rp "新 Endpoint: " new_ep
             if [[ -n "$new_ep" ]]; then
                 if ! is_valid_endpoint "$new_ep"; then
@@ -430,7 +403,7 @@ modify_config() {
             fi
             ;;
         2)
-            echo -e "  当前 MTU: $(grep 'MTU' "$WG_CONF" | awk -F' = ' '{print $2}')  建议: 1280 或 1420"
+            echo -e "  ${CYAN}当前 MTU:${NC} ${current_mtu}  建议: 1280 或 1420"
             read -rp "新 MTU [1280-1500]: " mtu
             if [[ "$mtu" =~ ^[0-9]+$ ]] && [[ "$mtu" -ge 1280 ]] && [[ "$mtu" -le 1500 ]]; then
                 sed -i "s|^MTU = .*|MTU = ${mtu}|" "$WG_CONF"; ok "已更新"; restart_wg
@@ -443,30 +416,64 @@ modify_config() {
             read -rp "重启 wg0？[y/N]: " yn
             [[ "$yn" =~ ^[Yy]$ ]] && restart_wg
             ;;
-        0) return 10 ;;
+        0) return 1 ;;
         *) warn "无效选择" ;;
     esac
 }
 
+stop_wg() {
+    if ip link show wg0 &>/dev/null 2>&1; then
+        info "暂停 wg0 ..."
+        down_wg || err "wg0 暂停失败"
+        ok "wg0 已暂停"
+    else
+        warn "wg0 未运行"
+    fi
+}
+
+down_wg() {
+    wg-quick down wg0 2>/dev/null || true
+    ! ip link show wg0 &>/dev/null 2>&1
+}
+
 restart_wg() {
     if ip link show wg0 &>/dev/null 2>&1; then
-        info "重启 wg0 ..."; wg-quick down wg0 2>/dev/null || true
+        info "重启 wg0 ..."
+        down_wg || err "wg0 停止失败"
         wg-quick up wg0 || err "wg0 重启失败"; ok "wg0 已重启"
     else
         info "启动 wg0 ..."; wg-quick up wg0 || err "wg0 启动失败"; ok "wg0 已启动"
     fi
 }
 
+manage_service() {
+    while true; do
+        clear
+        info "${BOLD}${CYAN}管理 WARP 服务${NC}"
+        if ip link show wg0 &>/dev/null 2>&1; then
+            echo -e "  ${CYAN}状态:${NC} ${GREEN}运行中${NC}"
+        else
+            echo -e "  ${CYAN}状态:${NC} ${YELLOW}未运行${NC}"
+        fi
+        echo -e "  ${GREEN}1)${NC} 修改配置  ${CYAN}2)${NC} 暂停服务  ${YELLOW}3)${NC} 重启服务  ${RED}0)${NC} 返回"
+        read -rp "请选择 [0-3]: " sub
+
+        case "$sub" in
+            1) modify_config && pause ;;
+            2) stop_wg; pause ;;
+            3) restart_wg; pause ;;
+            0) return 0 ;;
+            *) warn "无效选择"; pause ;;
+        esac
+    done
+}
+
 show_ip() {
     clear
     info "当前出口 IP"
-    local t4="/tmp/.warp_ip4_$$" t6="/tmp/.warp_ip6_$$"
-    curl -s -4 --max-time 5 ip.gs > "$t4" 2>/dev/null &
-    curl -s -6 --max-time 5 ip.gs > "$t6" 2>/dev/null &
-    wait
-    local v4; v4=$(cat "$t4" 2>/dev/null); [[ -z "$v4" ]] && v4="无"
-    local v6; v6=$(cat "$t6" 2>/dev/null); [[ -z "$v6" ]] && v6="无"
-    rm -f "$t4" "$t6"
+    local v4 v6
+    v4=$(public_ip "-4" "无")
+    v6=$(public_ip "-6" "无")
     echo -e "  IPv4: ${CYAN}${v4}${NC}"
     echo -e "  IPv6: ${CYAN}${v6}${NC}"
 }
@@ -476,9 +483,11 @@ uninstall_warp() {
     info "删除 WARP 服务"
     echo -e "  ${RED}将删除 wg0 与配置文件${NC}"
     read -rp "确认删除 [y/N]: " yn
-    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return 10; }
+    [[ ! "$yn" =~ ^[Yy]$ ]] && { warn "已取消"; return 1; }
 
-    ip link show wg0 &>/dev/null 2>&1 && { wg-quick down wg0 2>/dev/null || true; ok "隧道已关闭"; }
+    if ip link show wg0 &>/dev/null 2>&1; then
+        down_wg && ok "隧道已关闭" || warn "隧道关闭失败"
+    fi
     if command -v systemctl &>/dev/null; then
         systemctl disable wg-quick@wg0 &>/dev/null 2>&1 && ok "已取消自启" || warn "取消自启失败"
     else
@@ -490,32 +499,36 @@ uninstall_warp() {
 
 show_menu() {
     clear
-    echo -e "${BOLD}"
-    echo "  ╔══════════════════════════════════════╗"
-    echo "  ║       WARP 双栈管理脚本  v2.0       ║"
-    echo "  ╚══════════════════════════════════════╝"
-    echo -e "${NC}"
+    echo -e "${BOLD}  ╔════════════════════════════╗"
+    echo -e "  ║     WARP 出口管理 v2.0  ║"
+    echo -e "  ╚════════════════════════════╝${NC}"
     show_network_status
+    echo "  ════════════════════════════"
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
-    echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  5) 查看 IP    0) 退出脚本"
+    echo -e "  ${YELLOW}3)${NC} 管理服务   ${RED}4)${NC} 删除服务"
+    echo -e "  ${GREEN}5)${NC} 查看出口   ${RED}0)${NC} 退出脚本"
+}
+
+pause() {
+    read -rp "回车继续..." _
 }
 
 main() {
     check_root
     while true; do
         show_menu
+        echo "  ════════════════════════════"
         read -rp "  请输入选项 [0-5]: " choice
         case "$choice" in
-            1) install_free ;; 2) install_team ;;
-            3) modify_config ;; 4) uninstall_warp ;;
-            5) show_ip ;;
+            1) install_free; pause ;;
+            2) install_team; pause ;;
+            3) manage_service ;;
+            4) uninstall_warp && pause ;;
+            5) show_ip; pause ;;
             0) info "再见！"; exit 0 ;;
-            *) warn "无效选项" ;;
+            *) warn "无效选项"; pause ;;
         esac
-        [[ $? -eq 10 ]] && continue
-        read -rp "回车继续..." _
     done
 }
 
