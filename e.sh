@@ -2545,9 +2545,13 @@ reinstall_debian() {
     [[ "$confirm" == "YES" ]] || { echo -e "${YELLOW} 已取消重装 ${PLAIN}"; return; }
 
     local install_runner install_rc install_log="/tmp/zero-installnet.log"
-    local install_script="/Users/sukurain/Downloads/Install.sh"
+    local self_path script_dir install_script
+    self_path="${BASH_SOURCE[0]:-$0}"
+    script_dir="$(cd -- "$(dirname -- "$self_path")" && pwd -P)"
+    install_script="${script_dir}/Install.sh"
     if [[ ! -f "$install_script" ]]; then
         echo -e "${RED}未找到 Install.sh: ${install_script}${PLAIN}"
+        press_any_key_to_continue
         return
     fi
 
