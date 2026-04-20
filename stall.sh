@@ -12,7 +12,9 @@ Info="${Green_font_prefix}[信息]${Font_color_suffix}"
 Error="${Red_font_prefix}[错误]${Font_color_suffix}"
 Tip="${Yellow_font_prefix}[注意]${Font_color_suffix}"
 
-DNS_LIST='8.8.8.8 1.1.1.1 2001:4860:4860::8888 2606:4700:4700::1111'
+DNS_V4_LIST='8.8.8.8 1.1.1.1'
+DNS_V6_LIST='2001:4860:4860::8888 2606:4700:4700::1111'
+DNS_LIST="${DNS_V4_LIST} ${DNS_V6_LIST}"
 
 check_sys() {
     release=''
@@ -66,7 +68,32 @@ cidr_to_netmask() {
 }
 
 get_default_interface() {
-    ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}'
+    local iface=''
+    iface=$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    if [[ -z "$iface" ]]; then
+        iface=$(ip -6 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    fi
+    echo "$iface"
+}
+
+ipv6_prefix_to_netmask() {
+    local n="${1:-128}" mask='' i='' bits='' value=''
+    for ((i = 0; i < 8; i++)); do
+        bits=$((n - i * 16))
+        if ((bits >= 16)); then
+            value='ffff'
+        elif ((bits <= 0)); then
+            value='0'
+        else
+            value=$(printf '%x' $(((0xffff << (16 - bits)) & 0xffff)))
+        fi
+        if [[ -z "$mask" ]]; then
+            mask="$value"
+        else
+            mask="${mask}:$value"
+        fi
+    done
+    echo "$mask"
 }
 
 get_target_disk() {
@@ -168,26 +195,30 @@ gather_network_state() {
         exit 1
     }
 
-    iaddr=$(ip -4 addr show dev "$NETWORK_INTERFACE" | awk '/inet / {print $2; exit}')
-    IPV4_ADDR="${iaddr%/*}"
-    IPV4_PREFIX="${iaddr#*/}"
-    IPV4_MASK=$(cidr_to_netmask "$IPV4_PREFIX")
-    IPV4_GATE=$(ip -4 route show default | awk '/^default/ {print $3; exit}')
-
-    [[ -n "$IPV4_ADDR" && -n "$IPV4_MASK" && -n "$IPV4_GATE" ]] || {
-        echo -e "${Error} 当前 IPv4 信息不完整，无法执行重装。"
-        exit 1
-    }
+    IPV4_ADDR=''
+    IPV4_PREFIX=''
+    IPV4_MASK=''
+    IPV4_GATE=''
+    iaddr=$(ip -4 addr show dev "$NETWORK_INTERFACE" 2>/dev/null | awk '/inet / {print $2; exit}')
+    if [[ -n "$iaddr" ]]; then
+        IPV4_ADDR="${iaddr%/*}"
+        IPV4_PREFIX="${iaddr#*/}"
+        IPV4_MASK=$(cidr_to_netmask "$IPV4_PREFIX")
+        IPV4_GATE=$(ip -4 route show default dev "$NETWORK_INTERFACE" 2>/dev/null | awk '/^default/ {print $3; exit}')
+        [[ -n "$IPV4_GATE" ]] || IPV4_GATE=$(ip -4 route show default 2>/dev/null | awk '/^default/ {print $3; exit}')
+    fi
 
     IPV6_MODE='none'
     IPV6_ADDR=''
     IPV6_PREFIX=''
     IPV6_GATE=''
+    IPV6_NETMASK=''
 
     ip6_line=$(ip -6 addr show dev "$NETWORK_INTERFACE" scope global 2>/dev/null | awk '/inet6 / && $0 !~ / temporary / && $0 !~ / deprecated / {print; exit}')
     if [[ -n "$ip6_line" ]]; then
         IPV6_ADDR=$(echo "$ip6_line" | awk '{print $2}' | cut -d/ -f1)
         IPV6_PREFIX=$(echo "$ip6_line" | awk '{print $2}' | cut -d/ -f2)
+        IPV6_NETMASK=$(ipv6_prefix_to_netmask "$IPV6_PREFIX")
         ip6_route=$(ip -6 route show default dev "$NETWORK_INTERFACE" 2>/dev/null | head -n1)
         IPV6_GATE=$(echo "$ip6_route" | awk '/^default/ {print $3; exit}')
         if echo "$ip6_line $ip6_route" | grep -Eq 'proto[[:space:]]+ra|(^|[[:space:]])dynamic([[:space:]]|$)|(^|[[:space:]])mngtmpaddr([[:space:]]|$)'; then
@@ -198,26 +229,52 @@ gather_network_state() {
             IPV6_MODE='auto'
         fi
     fi
+
+    if [[ -n "$IPV4_ADDR" && "$IPV6_MODE" != 'none' ]]; then
+        NETWORK_STACK='dual-stack'
+    elif [[ -n "$IPV4_ADDR" ]]; then
+        NETWORK_STACK='ipv4-only'
+    elif [[ "$IPV6_MODE" != 'none' ]]; then
+        NETWORK_STACK='ipv6-only'
+    else
+        echo -e "${Error} 当前既未检测到可用 IPv4，也未检测到可用 IPv6。"
+        exit 1
+    fi
+}
+
+build_ipv4_block() {
+    [[ "$NETWORK_STACK" != 'ipv6-only' ]] || return
+    cat <<EOF
+iface \$iface inet static
+    address ${IPV4_ADDR}
+    netmask ${IPV4_MASK}
+    gateway ${IPV4_GATE}
+    dns-nameservers ${DNS_V4_LIST}
+EOF
 }
 
 build_ipv6_block() {
+    local gateway_line=''
     case "$IPV6_MODE" in
         auto)
-            cat <<'EOF'
-cat >> /etc/network/interfaces <<EOF_IPV6
-iface $iface inet6 dhcp
+            cat <<EOF
+iface \$iface inet6 dhcp
     accept_ra 2
     autoconf 1
-EOF_IPV6
+    dns-nameservers ${DNS_V6_LIST}
 EOF
             ;;
         static)
+            if [[ -n "$IPV6_GATE" ]]; then
+                gateway_line="    gateway ${IPV6_GATE}"
+            else
+                gateway_line=''
+            fi
             cat <<EOF
-cat >> /etc/network/interfaces <<EOF_IPV6
 iface \$iface inet6 static
     address ${IPV6_ADDR}/${IPV6_PREFIX}
-    gateway ${IPV6_GATE}
-EOF_IPV6
+${gateway_line}
+    dns-nameservers ${DNS_V6_LIST}
 EOF
             ;;
         *)
@@ -225,8 +282,49 @@ EOF
     esac
 }
 
+build_preseed_network_block() {
+    case "$NETWORK_STACK" in
+        dual-stack|ipv4-only)
+            cat <<EOF
+d-i netcfg/choose_interface select auto
+d-i netcfg/disable_autoconfig boolean true
+d-i netcfg/dhcp_failed note
+d-i netcfg/dhcp_options select Configure network manually
+d-i netcfg/get_ipaddress string ${IPV4_ADDR}
+d-i netcfg/get_netmask string ${IPV4_MASK}
+d-i netcfg/get_gateway string ${IPV4_GATE}
+d-i netcfg/get_nameservers string ${DNS_V4_LIST}
+d-i netcfg/confirm_static boolean true
+EOF
+            ;;
+        ipv6-only)
+            if [[ "$IPV6_MODE" == 'auto' ]]; then
+                cat <<EOF
+d-i netcfg/choose_interface select auto
+d-i netcfg/disable_autoconfig boolean false
+d-i netcfg/use_autoconfig boolean true
+d-i netcfg/dhcpv6_timeout string 60
+EOF
+            else
+                cat <<EOF
+d-i netcfg/choose_interface select auto
+d-i netcfg/disable_autoconfig boolean true
+d-i netcfg/dhcp_failed note
+d-i netcfg/dhcp_options select Configure network manually
+d-i netcfg/get_ipaddress string ${IPV6_ADDR}
+d-i netcfg/get_netmask string ${IPV6_NETMASK}
+d-i netcfg/get_gateway string ${IPV6_GATE:-none}
+d-i netcfg/get_nameservers string ${DNS_V6_LIST}
+d-i netcfg/confirm_static boolean true
+EOF
+            fi
+            ;;
+    esac
+}
+
 write_post_install_script() {
-    local ipv6_block=''
+    local ipv4_block='' ipv6_block=''
+    ipv4_block=$(build_ipv4_block)
     ipv6_block=$(build_ipv6_block)
 
     cat > /tmp/boot/post-install.sh <<EOF
@@ -253,12 +351,8 @@ auto lo
 iface lo inet loopback
 
 auto \$iface
-iface \$iface inet static
-    address ${IPV4_ADDR}
-    netmask ${IPV4_MASK}
-    gateway ${IPV4_GATE}
-    dns-nameservers ${DNS_LIST}
 EOF_INTERFACES
+${ipv4_block}
 ${ipv6_block}
 
 update_sshd_option Port ${SSH_PORT}
@@ -275,7 +369,7 @@ install_target_system() {
     local mirror='' mirror_host='' mirror_folder='' target_disk=''
     local read_grub='' load_num='' cfg0='' cfg1='' cfg2='' insert_grub=''
     local type='' linux_kernel='' linux_img='' add_option='' boot_option='' grub_tmp=''
-    local root_password_hash='' partman_early_command='' late_command=''
+    local root_password_hash='' partman_early_command='' late_command='' network_preseed=''
 
     case "$debian_version" in
         11) dist='bullseye' ;;
@@ -321,7 +415,16 @@ install_target_system() {
     echo -e "\n${Blue_font_prefix}# Install${Font_color_suffix}\n"
     echo -e "${Tip} 目标系统: Debian ${debian_version} (${dist})"
     echo -e "${Tip} 目标磁盘: ${target_disk}"
-    echo -e "${Tip} IPv4: ${IPV4_ADDR}/${IPV4_PREFIX} gw ${IPV4_GATE}"
+    case "$NETWORK_STACK" in
+        dual-stack) echo -e "${Tip} 网络类型: 双栈" ;;
+        ipv4-only) echo -e "${Tip} 网络类型: 仅 IPv4" ;;
+        ipv6-only) echo -e "${Tip} 网络类型: 仅 IPv6" ;;
+    esac
+    if [[ -n "$IPV4_ADDR" ]]; then
+        echo -e "${Tip} IPv4: ${IPV4_ADDR}/${IPV4_PREFIX} gw ${IPV4_GATE}"
+    else
+        echo -e "${Tip} IPv4: 当前未检测到"
+    fi
     case "$IPV6_MODE" in
         auto) echo -e "${Tip} IPv6: 自动继承（当前环境检测为自动下发）" ;;
         static) echo -e "${Tip} IPv6: 静态继承 ${IPV6_ADDR}/${IPV6_PREFIX} gw ${IPV6_GATE}" ;;
@@ -454,21 +557,14 @@ install_target_system() {
 
     partman_early_command='debconf-set partman-auto/disk "$(list-devices disk | head -n1)"'
     late_command='cp /post-install.sh /target/root/reinstall-post.sh; chmod 700 /target/root/reinstall-post.sh; in-target /bin/sh /root/reinstall-post.sh; rm -f /target/root/reinstall-post.sh'
+    network_preseed=$(build_preseed_network_block)
 
     cat > /tmp/boot/preseed.cfg <<EOF
 d-i debian-installer/locale string en_US
 d-i console-setup/layoutcode string us
 d-i keyboard-configuration/xkb-keymap string us
 
-d-i netcfg/choose_interface select auto
-d-i netcfg/disable_autoconfig boolean true
-d-i netcfg/dhcp_failed note
-d-i netcfg/dhcp_options select Configure network manually
-d-i netcfg/get_ipaddress string ${IPV4_ADDR}
-d-i netcfg/get_netmask string ${IPV4_MASK}
-d-i netcfg/get_gateway string ${IPV4_GATE}
-d-i netcfg/get_nameservers string ${DNS_LIST}
-d-i netcfg/confirm_static boolean true
+${network_preseed}
 
 d-i hw-detect/load_firmware boolean true
 
