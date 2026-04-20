@@ -2453,7 +2453,7 @@ installnet_main() {
     mv -f /tmp/initrd.img /tmp/initrd.img.gz
     gzip -d < /tmp/initrd.img.gz | cpio --extract --verbose --make-directories --no-absolute-filenames >>/dev/null 2>&1
 
-    partman_early_command="debconf-set partman-auto/disk ${IncDisk}"
+    partman_early_command='debconf-set partman-auto/disk "$(list-devices disk | head -n1)"'
     late_command="sed -ri 's/^#?Port.*/Port ${ssh_port}/g' /target/etc/ssh/sshd_config; sed -ri 's/^#?PermitRootLogin.*/PermitRootLogin yes/g' /target/etc/ssh/sshd_config; sed -ri 's/^#?PasswordAuthentication.*/PasswordAuthentication yes/g' /target/etc/ssh/sshd_config"
 cat >/tmp/boot/preseed.cfg<<EOF
 d-i debian-installer/locale string en_US
@@ -2476,6 +2476,8 @@ d-i mirror/http/proxy string
 d-i passwd/root-login boolean true
 d-i passwd/make-user boolean false
 d-i passwd/root-password-crypted password $myPASSWORD
+d-i user-setup/allow-password-weak boolean true
+d-i user-setup/encrypt-home boolean false
 d-i clock-setup/utc boolean true
 d-i time/zone string Etc/UTC
 d-i clock-setup/ntp boolean false
@@ -2493,6 +2495,7 @@ d-i partman-lvm/confirm_nooverwrite boolean true
 d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
 tasksel tasksel/first multiselect standard
+d-i pkgsel/update-policy select none
 d-i pkgsel/include string openssh-server
 d-i pkgsel/upgrade select none
 popularity-contest popularity-contest/participate boolean false
