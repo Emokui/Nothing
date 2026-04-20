@@ -943,49 +943,101 @@ bbr_check_and_prepare_swap() {
     esac
 }
 
-bbr_ensure_speedtest() {
-    if command -v speedtest >/dev/null 2>&1; then
-        return 0
+bbr_fetch_text_url() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$url"
+    else
+        return 1
     fi
+}
 
-    echo -e "${YELLOW}speedtest 未安装，正在安装...${PLAIN}" >&2
-    local cpu_arch download_url speedtest_tmp
+bbr_download_url_to_file() {
+    local url="$1" output_file="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url" -o "$output_file"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$url" -O "$output_file"
+    else
+        return 1
+    fi
+}
+
+bbr_extract_speedtest_version() {
+    local input="$1"
+    printf '%s\n' "$input" | sed -nE 's#.*ookla-speedtest-([0-9.]+)-linux-x86_64\.tgz.*#\1#p'
+}
+
+bbr_get_speedtest_download_url() {
+    local page_content download_url
+    page_content=$(bbr_fetch_text_url "https://speedtest-static-dev.speedtest.dev/apps/cli") || return 1
+    download_url=$(printf '%s\n' "$page_content" | grep -Eo 'https://install\.speedtest\.net/app/cli/ookla-speedtest-[0-9.]+-linux-x86_64\.tgz' | head -n 1)
+    [[ -n "$download_url" ]] || return 1
+    echo "$download_url"
+}
+
+bbr_get_installed_speedtest_version() {
+    speedtest --version 2>/dev/null | sed -nE 's/^Speedtest by Ookla ([0-9]+\.[0-9]+\.[0-9]+)(\.[0-9]+)?.*/\1/p'
+}
+
+bbr_install_speedtest_from_url() {
+    local download_url="$1" speedtest_tmp
+    speedtest_tmp=$(mktemp -d) || return 1
+
+    bbr_download_url_to_file "$download_url" "${speedtest_tmp}/speedtest.tgz" || {
+        rm -rf "$speedtest_tmp"
+        return 1
+    }
+
+    tar -xzf "${speedtest_tmp}/speedtest.tgz" -C "$speedtest_tmp" || {
+        rm -rf "$speedtest_tmp"
+        return 1
+    }
+
+    install -m 0755 "${speedtest_tmp}/speedtest" /usr/local/bin/speedtest || {
+        rm -rf "$speedtest_tmp"
+        return 1
+    }
+
+    rm -rf "$speedtest_tmp"
+}
+
+bbr_ensure_speedtest() {
+    local cpu_arch download_url latest_version installed_version
     cpu_arch=$(uname -m)
 
     case "$cpu_arch" in
-        x86_64) download_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz" ;;
+        x86_64) ;;
         *)
             echo -e "${RED}错误: 不支持的架构 ${cpu_arch}${PLAIN}" >&2
             return 1
             ;;
     esac
 
-    speedtest_tmp=$(mktemp -d) || return 1
-    if command -v wget >/dev/null 2>&1; then
-        wget -q "$download_url" -O "${speedtest_tmp}/speedtest.tgz" || {
-            rm -rf "$speedtest_tmp"
-            return 1
-        }
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$download_url" -o "${speedtest_tmp}/speedtest.tgz" || {
-            rm -rf "$speedtest_tmp"
-            return 1
-        }
+    download_url=$(bbr_get_speedtest_download_url 2>/dev/null || true)
+    if [[ -z "$download_url" ]]; then
+        download_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz"
+    fi
+    latest_version=$(bbr_extract_speedtest_version "$download_url")
+
+    if command -v speedtest >/dev/null 2>&1; then
+        installed_version=$(bbr_get_installed_speedtest_version)
+        if [[ -n "$installed_version" && -n "$latest_version" && "$installed_version" == "$latest_version" ]]; then
+            return 0
+        fi
+
+        if [[ -n "$installed_version" && -n "$latest_version" ]]; then
+            echo -e "${YELLOW}检测到 speedtest 新版本 ${latest_version}，正在更新...${PLAIN}" >&2
+        else
+            return 0
+        fi
     else
-        rm -rf "$speedtest_tmp"
-        return 1
+        echo -e "${YELLOW}speedtest 未安装，正在安装...${PLAIN}" >&2
     fi
 
-    tar -xzf "${speedtest_tmp}/speedtest.tgz" -C "$speedtest_tmp" || {
-        rm -rf "$speedtest_tmp"
-        return 1
-    }
-    mv "${speedtest_tmp}/speedtest" /usr/local/bin/speedtest || {
-        rm -rf "$speedtest_tmp"
-        return 1
-    }
-    chmod +x /usr/local/bin/speedtest
-    rm -rf "$speedtest_tmp"
+    bbr_install_speedtest_from_url "$download_url" || return 1
 }
 
 bbr_detect_bandwidth() {
@@ -1271,10 +1323,14 @@ bbr_apply_mss_clamp() {
     fi
 
     if [[ "$action" == "enable" ]]; then
-        iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 \
-            || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+        while iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; do
+            iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || break
+        done
+        iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     else
-        iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
+        while iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; do
+            iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || break
+        done
     fi
 }
 
