@@ -1009,7 +1009,7 @@ bbr_detect_bandwidth() {
             }
 
             local servers_list server_count
-            servers_list=$(speedtest --accept-license --servers 2>/dev/null | sed -nE 's/^[[:space:]]*([0-9]+).*/\1/p' | head -n 10)
+            servers_list=$(speedtest --accept-license --accept-gdpr --servers 2>/dev/null | sed -nE 's/^[[:space:]]*([0-9]+).*/\1/p' | head -n 10)
             if [[ -n "$servers_list" ]]; then
                 server_count=$(echo "$servers_list" | wc -l | tr -d ' ')
                 echo -e "${GREEN}已找到 ${server_count} 个附近节点${PLAIN}" >&2
@@ -1018,17 +1018,16 @@ bbr_detect_bandwidth() {
                 echo -e "${YELLOW}未获取到节点列表，将自动选择最近服务器${PLAIN}" >&2
             fi
 
-            local speedtest_output="" upload_speed="" upload_mbps="" success_server="" failed_server="" attempt=0 max_attempts=5 server_id
+            local speedtest_output="" upload_speed="" upload_mbps="" success_server="" failed_server="" attempt=0 server_id
             for server_id in $servers_list; do
                 attempt=$((attempt + 1))
-                (( attempt <= max_attempts )) || break
 
                 if [[ "$server_id" == "auto" ]]; then
                     echo -e "${YELLOW}[尝试 ${attempt}] 自动选择最近服务器...${PLAIN}" >&2
-                    speedtest_output=$(speedtest --accept-license 2>&1)
+                    speedtest_output=$(speedtest --accept-license --accept-gdpr 2>&1)
                 else
                     echo -e "${YELLOW}[尝试 ${attempt}] 测试服务器 #${server_id}...${PLAIN}" >&2
-                    speedtest_output=$(speedtest --accept-license --server-id="$server_id" 2>&1)
+                    speedtest_output=$(speedtest --accept-license --accept-gdpr --server-id="$server_id" 2>&1)
                 fi
 
                 echo "$speedtest_output" >&2
