@@ -2133,110 +2133,65 @@ change_timezone() {
     done
 }
 
-check_sys() {
-    if [[ -f /etc/redhat-release ]]; then
-        release="centos"
-    elif grep -qi "debian" /etc/issue; then
-        release="debian"
-    elif grep -qi "ubuntu" /etc/issue; then
-        release="ubuntu"
-    elif grep -qiE "centos|red hat|redhat" /etc/issue; then
-        release="centos"
-    elif grep -qi "debian" /proc/version; then
-        release="debian"
-    elif grep -qi "ubuntu" /proc/version; then
-        release="ubuntu"
-    elif grep -qiE "centos|red hat|redhat" /proc/version; then
-        release="centos"
+REINSTALL_DNS_LIST='8.8.8.8 1.1.1.1 2001:4860:4860::8888 2606:4700:4700::1111'
+
+reinstall_check_sys() {
+    reinstall_release=''
+    if [[ -r /etc/os-release ]]; then
+        . /etc/os-release
+        case "${ID:-}" in
+            debian|ubuntu) reinstall_release="$ID" ;;
+        esac
     fi
 }
 
-first_job() {
-    if [[ "${release}" == "centos" ]]; then
-        yum install -y xz openssl gawk file wget cpio gzip iproute util-linux
-    elif [[ "${release}" == "debian" || "${release}" == "ubuntu" ]]; then
-        apt-get update
-        apt-get install -y xz-utils openssl gawk file wget cpio gzip iproute2 util-linux
-    fi
+reinstall_install_dependencies() {
+    apt-get update
+    apt-get install -y xz-utils openssl gawk file wget cpio gzip iproute2 util-linux
 }
 
-dependence() {
-    Full='0'
-    for BIN_DEP in $(echo "$1" | sed 's/,/\n/g'); do
-        if [[ -n "$BIN_DEP" ]]; then
-            Found='0'
-            for BIN_PATH in $(echo "$PATH" | sed 's/:/\n/g'); do
-                ls "$BIN_PATH/$BIN_DEP" >/dev/null 2>&1
-                if [ $? == '0' ]; then
-                    Found='1'
-                    break
-                fi
-            done
-            if [ "$Found" == '1' ]; then
-                echo -en "[\033[32mok\033[0m]\t"
-            else
-                Full='1'
-                echo -en "[\033[31mNot Install\033[0m]"
-            fi
-            echo -en "\t$BIN_DEP\n"
+reinstall_require_commands() {
+    local missing=0 cmd=''
+    for cmd in "$@"; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "[${GREEN}ok${PLAIN}]\t${cmd}"
+        else
+            echo -e "[${RED}missing${PLAIN}]\t${cmd}"
+            missing=1
         fi
     done
-    if [ "$Full" == '1' ]; then
-        echo -ne "\n\033[31mError! \033[0mPlease use '\033[33mapt-get\033[0m' or '\033[33myum\033[0m' install it.\n\n\n"
+    [[ "$missing" -eq 0 ]] || {
+        echo -e "${RED}缺少依赖，请先修复环境。${PLAIN}"
         exit 1
-    fi
+    }
 }
 
-selectMirror() {
-    local dist="$1"
-    local ver="${2:-amd64}"
-    local temp mirror_url current
-    local -a mirrors
-
-    [[ -n "$dist" && -n "$ver" ]] || return 1
-    temp="SUB_MIRROR/dists/${dist}/main/installer-${ver}/current/images/netboot/debian-installer/${ver}/initrd.gz"
-
-    mirrors+=("https://deb.debian.org/debian" "https://archive.debian.org/debian")
-
-    for current in "${mirrors[@]}"; do
-        mirror_url="${temp/SUB_MIRROR/$current}"
-        if wget --spider --timeout=3 -o /dev/null "$mirror_url"; then
-            echo "$current"
-            return 0
+reinstall_cidr_to_netmask() {
+    local n="${1:-32}" b='' m='' i='' s=''
+    for ((i = 0; i < 32; i++)); do
+        if [[ "$i" -lt "$n" ]]; then
+            b="${b}1"
+        else
+            b="${b}0"
         fi
     done
-
-    return 1
-}
-
-netmask() {
-    n="${1:-32}"
-    b=""
-    m=""
-    for ((i=0;i<32;i++)); do
-        [ $i -lt $n ] && b="${b}1" || b="${b}0"
-    done
-    for ((i=0;i<4;i++)); do
-        s=$(echo "$b" | cut -c$[$[$i*8]+1]-$[$[$i+1]*8])
-        [ "$m" == "" ] && m="$((2#${s}))" || m="${m}.$((2#${s}))"
+    for ((i = 0; i < 4; i++)); do
+        s=$(echo "$b" | cut -c$((i * 8 + 1))-$(((i + 1) * 8)))
+        if [[ -z "$m" ]]; then
+            m="$((2#${s}))"
+        else
+            m="${m}.$((2#${s}))"
+        fi
     done
     echo "$m"
 }
 
-getInterface() {
-    interface=""
-    Interfaces=$(cat /proc/net/dev | grep ':' | cut -d':' -f1 | sed 's/\s//g' | grep -iv '^lo\|^sit\|^stf\|^gif\|^dummy\|^vmnet\|^vir\|^gre\|^ipip\|^ppp\|^bond\|^tun\|^tap\|^ip6gre\|^ip6tnl\|^teql\|^ocserv\|^vpn')
-    defaultRoute=$(ip route show default | grep "^default")
-    for item in $Interfaces; do
-        [ -n "$item" ] || continue
-        echo "$defaultRoute" | grep -q "$item"
-        [ $? -eq 0 ] && interface="$item" && break
-    done
-    echo "$interface"
+reinstall_get_default_interface() {
+    ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}'
 }
 
-getDisk() {
-    local root_source root_disk disks
+reinstall_get_target_disk() {
+    local root_source='' root_disk='' disks=''
     root_source=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
     if [[ -n "$root_source" ]]; then
         root_disk=$(lsblk -ndo PKNAME "$root_source" 2>/dev/null | tail -n1)
@@ -2249,36 +2204,42 @@ getDisk() {
         fi
     fi
     disks=$(lsblk | sed 's/[[:space:]]*$//g' | grep "disk$" | cut -d' ' -f1 | grep -v "fd[0-9]*\|sr[0-9]*" | head -n1)
-    [ -n "$disks" ] || echo ""
-    echo "$disks" | grep -q "/dev"
-    [ $? -eq 0 ] && echo "$disks" || echo "/dev/$disks"
-}
-
-getGrub() {
-    Boot="${1:-/boot}"
-    folder=$(find "$Boot" -type d -name "grub*" 2>/dev/null | head -n1)
-    [ -n "$folder" ] || return
-    fileName=$(ls -1 "$folder" 2>/dev/null | grep '^grub.conf$\|^grub.cfg$')
-    if [ -z "$fileName" ]; then
-        ls -1 "$folder" 2>/dev/null | grep -q '^grubenv$'
-        [ $? -eq 0 ] || return
-        folder=$(find "$Boot" -type f -name "grubenv" 2>/dev/null | xargs dirname | grep -v "^$folder" | head -n1)
-        [ -n "$folder" ] || return
-        fileName=$(ls -1 "$folder" 2>/dev/null | grep '^grub.conf$\|^grub.cfg$')
+    if [[ "$disks" == /dev/* ]]; then
+        echo "$disks"
+    elif [[ -n "$disks" ]]; then
+        echo "/dev/$disks"
     fi
-    [ -n "$fileName" ] || return
-    [ "$fileName" == "grub.cfg" ] && ver="0" || ver="1"
-    echo "${folder}:${fileName}:${ver}"
 }
 
-lowMem() {
+reinstall_get_grub() {
+    local boot_dir="${1:-/boot}" folder='' file_name='' ver=''
+    folder=$(find "$boot_dir" -type d -name "grub*" 2>/dev/null | head -n1)
+    [[ -n "$folder" ]] || return
+    file_name=$(ls -1 "$folder" 2>/dev/null | grep '^grub.conf$\|^grub.cfg$')
+    if [[ -z "$file_name" ]]; then
+        ls -1 "$folder" 2>/dev/null | grep -q '^grubenv$' || return
+        folder=$(find "$boot_dir" -type f -name "grubenv" 2>/dev/null | xargs dirname | grep -v "^$folder" | head -n1)
+        [[ -n "$folder" ]] || return
+        file_name=$(ls -1 "$folder" 2>/dev/null | grep '^grub.conf$\|^grub.cfg$')
+    fi
+    [[ -n "$file_name" ]] || return
+    if [[ "$file_name" == "grub.cfg" ]]; then
+        ver='0'
+    else
+        ver='1'
+    fi
+    echo "${folder}:${file_name}:${ver}"
+}
+
+reinstall_low_mem() {
+    local mem=''
     mem=$(grep "^MemTotal:" /proc/meminfo 2>/dev/null | grep -o "[0-9]*")
-    [ -n "$mem" ] || return 0
-    [ "$mem" -le "524288" ] && return 1 || return 0
+    [[ -n "$mem" ]] || return 0
+    [[ "$mem" -le "524288" ]] && return 1 || return 0
 }
 
-validate_grub_config() {
-    local grub_file="$1"
+reinstall_validate_grub_config() {
+    local grub_file="$1" open_count='' close_count=''
     if command -v grub-script-check >/dev/null 2>&1; then
         grub-script-check "$grub_file" >/tmp/grub-script-check.log 2>&1
         return $?
@@ -2286,97 +2247,232 @@ validate_grub_config() {
         grub2-script-check "$grub_file" >/tmp/grub-script-check.log 2>&1
         return $?
     fi
-    local open_count close_count
     open_count=$(grep -o '{' "$grub_file" 2>/dev/null | wc -l | tr -d ' ')
     close_count=$(grep -o '}' "$grub_file" 2>/dev/null | wc -l | tr -d ' ')
     if grep -q 'menuentry ' "$grub_file" && [[ "$open_count" == "$close_count" ]]; then
-        echo "Warning: grub-script-check/grub2-script-check not found, fallback to basic GRUB sanity check."
         : >/tmp/grub-script-check.log
         return 0
     fi
-    echo "Error! grub-script-check/grub2-script-check not found and fallback GRUB check failed."
     return 1
 }
 
-detect_current_ssh_port() {
+reinstall_detect_current_ssh_port() {
     local port=''
     if command -v sshd >/dev/null 2>&1; then
-        port=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2; exit}')
+        port=$(sshd -T 2>/dev/null | awk '$1 == "port" {print $2; exit}')
     fi
     if [[ ! "$port" =~ ^[0-9]+$ ]] && [[ -f /etc/ssh/sshd_config ]]; then
-        port=$(awk 'tolower($1)=="port"{print $2}' /etc/ssh/sshd_config 2>/dev/null | tail -n1)
+        port=$(awk 'tolower($1) == "port" {print $2}' /etc/ssh/sshd_config 2>/dev/null | tail -n1)
     fi
     [[ "$port" =~ ^[0-9]+$ ]] || port='22'
     echo "$port"
 }
 
-installnet_main() {
-    local debian_version="$1"
-    local root_password="$2"
-    local ssh_port="${3:-22}"
-    local ipAddr='' ipMask='' ipGate='' ipDNS='' interface='' iAddr=''
-    local IncDisk='' DIST='' LinuxMirror='' MirrorHost='' MirrorFolder=''
-    local Grub='' GRUBDIR='' GRUBFILE='' GRUBVER='' GRUB_BACKUP=''
-    local myPASSWORD='' READGRUB='' LoadNum='' CFG0='' CFG1='' CFG2='' INSERTGRUB=''
-    local Type='' LinuxKernel='' LinuxIMG='' Add_OPTION='' BOOT_OPTION='' GRUB_TMP=''
-    local partman_early_command='' late_command=''
+reinstall_select_debian_mirror() {
+    local dist="$1" current='' url=''
+    for current in "https://deb.debian.org/debian" "https://archive.debian.org/debian"; do
+        url="${current}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz"
+        if wget --spider --timeout=3 -o /dev/null "$url"; then
+            echo "$current"
+            return 0
+        fi
+    done
+    return 1
+}
 
-    [[ "$EUID" -ne '0' ]] && echo "Error: This script must be run as root!" && return 1
+reinstall_gather_network_state() {
+    local iaddr='' ip6_line='' ip6_route=''
+
+    REINSTALL_NETWORK_INTERFACE=$(reinstall_get_default_interface)
+    [[ -n "$REINSTALL_NETWORK_INTERFACE" ]] || {
+        echo -e "${RED}未检测到默认网卡。${PLAIN}"
+        exit 1
+    }
+
+    iaddr=$(ip -4 addr show dev "$REINSTALL_NETWORK_INTERFACE" | awk '/inet / {print $2; exit}')
+    REINSTALL_IPV4_ADDR="${iaddr%/*}"
+    REINSTALL_IPV4_PREFIX="${iaddr#*/}"
+    REINSTALL_IPV4_MASK=$(reinstall_cidr_to_netmask "$REINSTALL_IPV4_PREFIX")
+    REINSTALL_IPV4_GATE=$(ip -4 route show default | awk '/^default/ {print $3; exit}')
+
+    [[ -n "$REINSTALL_IPV4_ADDR" && -n "$REINSTALL_IPV4_MASK" && -n "$REINSTALL_IPV4_GATE" ]] || {
+        echo -e "${RED}当前 IPv4 信息不完整，无法执行重装。${PLAIN}"
+        exit 1
+    }
+
+    REINSTALL_IPV6_MODE='none'
+    REINSTALL_IPV6_ADDR=''
+    REINSTALL_IPV6_PREFIX=''
+    REINSTALL_IPV6_GATE=''
+
+    ip6_line=$(ip -6 addr show dev "$REINSTALL_NETWORK_INTERFACE" scope global 2>/dev/null | awk '/inet6 / && $0 !~ / temporary / && $0 !~ / deprecated / {print; exit}')
+    if [[ -n "$ip6_line" ]]; then
+        REINSTALL_IPV6_ADDR=$(echo "$ip6_line" | awk '{print $2}' | cut -d/ -f1)
+        REINSTALL_IPV6_PREFIX=$(echo "$ip6_line" | awk '{print $2}' | cut -d/ -f2)
+        ip6_route=$(ip -6 route show default dev "$REINSTALL_NETWORK_INTERFACE" 2>/dev/null | head -n1)
+        REINSTALL_IPV6_GATE=$(echo "$ip6_route" | awk '/^default/ {print $3; exit}')
+        if echo "$ip6_line $ip6_route" | grep -Eq 'proto[[:space:]]+ra|(^|[[:space:]])dynamic([[:space:]]|$)|(^|[[:space:]])mngtmpaddr([[:space:]]|$)'; then
+            REINSTALL_IPV6_MODE='auto'
+        elif [[ -n "$REINSTALL_IPV6_GATE" ]]; then
+            REINSTALL_IPV6_MODE='static'
+        else
+            REINSTALL_IPV6_MODE='auto'
+        fi
+    fi
+}
+
+reinstall_build_ipv6_block() {
+    case "$REINSTALL_IPV6_MODE" in
+        auto)
+            cat <<'EOF'
+cat >> /etc/network/interfaces <<EOF_IPV6
+iface $iface inet6 dhcp
+    accept_ra 2
+    autoconf 1
+EOF_IPV6
+EOF
+            ;;
+        static)
+            cat <<EOF
+cat >> /etc/network/interfaces <<EOF_IPV6
+iface \$iface inet6 static
+    address ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX}
+    gateway ${REINSTALL_IPV6_GATE}
+EOF_IPV6
+EOF
+            ;;
+        *)
+            ;;
+    esac
+}
+
+reinstall_write_post_install_script() {
+    local ipv6_block=''
+    ipv6_block=$(reinstall_build_ipv6_block)
+
+    cat > /tmp/boot/post-install.sh <<EOF
+#!/bin/sh
+set -eu
+
+iface=\$(awk '/^(auto|allow-hotplug)[[:space:]]+/ {for (i = 2; i <= NF; i++) if (\$i != "lo") {print \$i; exit}}' /etc/network/interfaces 2>/dev/null || true)
+[ -n "\$iface" ] || iface='${REINSTALL_NETWORK_INTERFACE}'
+
+update_sshd_option() {
+    key="\$1"
+    value="\$2"
+    if grep -Eiq "^[#[:space:]]*\${key}[[:space:]]+" /etc/ssh/sshd_config; then
+        sed -ri "s@^[#[:space:]]*\${key}[[:space:]].*@\${key} \${value}@I" /etc/ssh/sshd_config
+    else
+        echo "\${key} \${value}" >> /etc/ssh/sshd_config
+    fi
+}
+
+cat > /etc/network/interfaces <<EOF_INTERFACES
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+auto \$iface
+iface \$iface inet static
+    address ${REINSTALL_IPV4_ADDR}
+    netmask ${REINSTALL_IPV4_MASK}
+    gateway ${REINSTALL_IPV4_GATE}
+    dns-nameservers ${REINSTALL_DNS_LIST}
+EOF_INTERFACES
+${ipv6_block}
+
+update_sshd_option Port ${REINSTALL_SSH_PORT}
+update_sshd_option PermitRootLogin yes
+update_sshd_option PasswordAuthentication yes
+update_sshd_option PubkeyAuthentication yes
+EOF
+    chmod 700 /tmp/boot/post-install.sh
+}
+
+reinstall_install_target_system() {
+    local debian_version="$1"
+    local dist='' grub='' grub_dir='' grub_file='' grub_ver='' grub_backup=''
+    local mirror='' mirror_host='' mirror_folder='' target_disk=''
+    local read_grub='' load_num='' cfg0='' cfg1='' cfg2='' insert_grub=''
+    local type='' linux_kernel='' linux_img='' add_option='' boot_option='' grub_tmp=''
+    local root_password_hash='' partman_early_command='' late_command=''
 
     case "$debian_version" in
-        11) DIST='bullseye' ;;
-        12) DIST='bookworm' ;;
-        13) DIST='trixie' ;;
-        *) echo "Error! Unsupported Debian version: ${debian_version}"; return 1 ;;
+        11) dist='bullseye' ;;
+        12) dist='bookworm' ;;
+        13) dist='trixie' ;;
+        *)
+            echo -e "${RED}不支持的 Debian 版本: ${debian_version}${PLAIN}"
+            exit 1
+            ;;
     esac
 
-    Grub=$(getGrub "/boot")
-    [[ -n "$Grub" ]] || { echo "Error! Not Found grub."; return 1; }
-    GRUBDIR=$(echo "$Grub" | cut -d':' -f1)
-    GRUBFILE=$(echo "$Grub" | cut -d':' -f2)
-    GRUBVER=$(echo "$Grub" | cut -d':' -f3)
-    [[ "$GRUBVER" == "0" ]] || { echo "Error! Only GRUB2 is supported in safe mode."; return 1; }
+    reinstall_require_commands ip wget awk grep sed cut cat lsblk cpio gzip find dirname basename openssl findmnt xargs
+    reinstall_gather_network_state
 
-    clear && echo -e "\n${BLUE}# Check Dependence${PLAIN}\n"
-    dependence ip,wget,awk,grep,sed,cut,cat,lsblk,cpio,gzip,find,dirname,basename,openssl
-
-    interface=$(getInterface)
-    [[ -n "$interface" ]] || { echo "Error! Network interface not found."; return 1; }
-    iAddr=$(ip -4 addr show dev "$interface" | awk '/inet /{print $2; exit}')
-    ipAddr="${iAddr%/*}"
-    ipMask=$(netmask "${iAddr#*/}")
-    ipGate=$(ip route show default | awk '/^default/{print $3; exit}')
-    ipDNS=$(awk '/^nameserver /{print $2; exit}' /etc/resolv.conf 2>/dev/null)
-    [[ -n "$ipDNS" ]] || ipDNS='8.8.8.8'
-    [[ -n "$ipAddr" && -n "$ipMask" && -n "$ipGate" ]] || { echo "Error! Invalid network config."; return 1; }
-
-    IncDisk=$(getDisk)
-    [[ -n "$IncDisk" ]] || { echo "Error! Target disk not found."; return 1; }
-
-    myPASSWORD="$(openssl passwd -1 "$root_password")"
-    LinuxMirror=$(selectMirror "$DIST" "amd64")
-    [[ -n "$LinuxMirror" ]] || { echo "Error! Invalid Debian mirror."; return 1; }
-    clear && echo -e "\n${BLUE}# Install${PLAIN}\n"
-    echo -e "\n${YELLOW}[Debian] [${DIST}] [amd64] Downloading...${PLAIN}"
-
-    MirrorHost="$(echo "$LinuxMirror" | awk -F'://|/' '{print $2}')"
-    MirrorFolder="$(echo "$LinuxMirror" | awk -F"${MirrorHost}" '{print $2}')"
-    [[ -n "$MirrorFolder" ]] || MirrorFolder="/"
-
-    wget -qO '/tmp/initrd.img' "${LinuxMirror}/dists/${DIST}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz" || {
-        echo "Error! Download 'initrd.img' failed."
-        return 1
-    }
-    wget -qO '/tmp/vmlinuz' "${LinuxMirror}/dists/${DIST}/main/installer-amd64/current/images/netboot/debian-installer/amd64/linux" || {
-        echo "Error! Download 'vmlinuz' failed."
-        return 1
+    target_disk=$(reinstall_get_target_disk)
+    [[ -n "$target_disk" ]] || {
+        echo -e "${RED}未检测到目标磁盘。${PLAIN}"
+        exit 1
     }
 
-    [[ -f "${GRUBDIR}/${GRUBFILE}" ]] || { echo "Error! Not Found ${GRUBFILE}."; return 1; }
-    GRUB_BACKUP="${GRUBDIR}/${GRUBFILE}.installnet.$(date +%Y%m%d%H%M%S).bak"
-    cp -f "${GRUBDIR}/${GRUBFILE}" "$GRUB_BACKUP" || { echo "Error! Backup grub file failed."; return 1; }
+    grub=$(reinstall_get_grub "/boot")
+    [[ -n "$grub" ]] || {
+        echo -e "${RED}未找到 GRUB 配置。${PLAIN}"
+        exit 1
+    }
+    grub_dir=$(echo "$grub" | cut -d: -f1)
+    grub_file=$(echo "$grub" | cut -d: -f2)
+    grub_ver=$(echo "$grub" | cut -d: -f3)
+    [[ "$grub_ver" == "0" ]] || {
+        echo -e "${RED}当前仅支持 GRUB2。${PLAIN}"
+        exit 1
+    }
 
-    READGRUB='/tmp/grub.read'
+    mirror=$(reinstall_select_debian_mirror "$dist")
+    [[ -n "$mirror" ]] || {
+        echo -e "${RED}未找到可用 Debian 镜像。${PLAIN}"
+        exit 1
+    }
+
+    root_password_hash=$(openssl passwd -1 "$REINSTALL_ROOT_PASSWORD")
+
+    clear
+    echo -e "\n${BLUE}# Install${PLAIN}\n"
+    echo -e "${YELLOW}目标系统: Debian ${debian_version} (${dist})${PLAIN}"
+    echo -e "${YELLOW}目标磁盘: ${target_disk}${PLAIN}"
+    echo -e "${YELLOW}IPv4: ${REINSTALL_IPV4_ADDR}/${REINSTALL_IPV4_PREFIX} gw ${REINSTALL_IPV4_GATE}${PLAIN}"
+    case "$REINSTALL_IPV6_MODE" in
+        auto) echo -e "${YELLOW}IPv6: 自动继承（当前环境检测为自动下发）${PLAIN}" ;;
+        static) echo -e "${YELLOW}IPv6: 静态继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX} gw ${REINSTALL_IPV6_GATE}${PLAIN}" ;;
+        none) echo -e "${YELLOW}IPv6: 当前未检测到可继承配置${PLAIN}" ;;
+    esac
+
+    mirror_host=$(echo "$mirror" | awk -F'://|/' '{print $2}')
+    mirror_folder=$(echo "$mirror" | awk -F"${mirror_host}" '{print $2}')
+    [[ -n "$mirror_folder" ]] || mirror_folder='/'
+
+    wget -qO /tmp/initrd.img "${mirror}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz" || {
+        echo -e "${RED}下载 initrd 失败。${PLAIN}"
+        exit 1
+    }
+    wget -qO /tmp/vmlinuz "${mirror}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/linux" || {
+        echo -e "${RED}下载内核失败。${PLAIN}"
+        exit 1
+    }
+
+    [[ -f "${grub_dir}/${grub_file}" ]] || {
+        echo -e "${RED}找不到 ${grub_file}。${PLAIN}"
+        exit 1
+    }
+    grub_backup="${grub_dir}/${grub_file}.installnet.$(date +%Y%m%d%H%M%S).bak"
+    cp -f "${grub_dir}/${grub_file}" "$grub_backup" || {
+        echo -e "${RED}备份 GRUB 失败。${PLAIN}"
+        exit 1
+    }
+
+    read_grub='/tmp/grub.read'
     awk '
     /^[[:space:]]*menuentry[[:space:]]/ {
       if (found) exit
@@ -2392,162 +2488,200 @@ installnet_main() {
       }
       if (depth == 0) exit
     }
-    ' "$GRUBDIR/$GRUBFILE" > "$READGRUB"
-    LoadNum="$(grep -c 'menuentry ' "$READGRUB")"
-    if [[ "$LoadNum" -eq '1' ]]; then
-        sed '/^$/d' "$READGRUB" >/tmp/grub.new
-    elif [[ "$LoadNum" -gt '1' ]]; then
-        CFG0="$(awk '/menuentry /{print NR}' "$READGRUB" | head -n 1)"
-        CFG2="$(awk '/menuentry /{print NR}' "$READGRUB" | head -n 2 | tail -n 1)"
-        CFG1=""
-        for tmpCFG in $(awk '/}/{print NR}' "$READGRUB"); do
-            [ "$tmpCFG" -gt "$CFG0" -a "$tmpCFG" -lt "$CFG2" ] && CFG1="$tmpCFG"
+    ' "${grub_dir}/${grub_file}" > "$read_grub"
+
+    load_num=$(grep -c 'menuentry ' "$read_grub")
+    if [[ "$load_num" -eq '1' ]]; then
+        sed '/^$/d' "$read_grub" > /tmp/grub.new
+    elif [[ "$load_num" -gt '1' ]]; then
+        cfg0=$(awk '/menuentry / {print NR}' "$read_grub" | head -n1)
+        cfg2=$(awk '/menuentry / {print NR}' "$read_grub" | head -n2 | tail -n1)
+        cfg1=''
+        for tmp_cfg in $(awk '/}/ {print NR}' "$read_grub"); do
+            [[ "$tmp_cfg" -gt "$cfg0" && "$tmp_cfg" -lt "$cfg2" ]] && cfg1="$tmp_cfg"
         done
-        [[ -z "$CFG1" ]] && { echo "Error! read $GRUBFILE. "; return 1; }
-        sed -n "$CFG0,$CFG1"p "$READGRUB" >/tmp/grub.new
-        [[ -f /tmp/grub.new ]] && [[ "$(grep -c '{' /tmp/grub.new)" -eq "$(grep -c '}' /tmp/grub.new)" ]] || {
-            echo -ne "\033[31mError! \033[0mNot configure $GRUBFILE. \n"; return 1
+        [[ -n "$cfg1" ]] || {
+            echo -e "${RED}解析 GRUB 菜单失败。${PLAIN}"
+            exit 1
         }
+        sed -n "${cfg0},${cfg1}p" "$read_grub" > /tmp/grub.new
+    else
+        echo -e "${RED}未找到可复用的 GRUB 菜单项。${PLAIN}"
+        exit 1
     fi
-    [ ! -f /tmp/grub.new ] && echo "Error! $GRUBFILE. " && return 1
-    sed -i "/menuentry.*/c\menuentry\ \'Install OS \[$DIST\ amd64\]\'\ --class debian\ --class\ gnu-linux\ --class\ gnu\ --class\ os\ \{" /tmp/grub.new
+
+    sed -i "/menuentry.*/c\\menuentry\\ 'Install OS [${dist} amd64]' --class debian --class gnu-linux --class gnu --class os {" /tmp/grub.new
     sed -i "/echo.*Loading/d" /tmp/grub.new
-    INSERTGRUB="$(awk '/menuentry /{print NR}' "$GRUBDIR/$GRUBFILE" | head -n 1)"
-    [[ -z "$INSERTGRUB" || "$INSERTGRUB" -le 0 ]] && echo "Error! read grub insert position failed." && return 1
-
-    [[ -n "$(grep -E 'linux(efi|16)?[[:space:]].*/|kernel.*/' /tmp/grub.new | awk '{print $2}' | tail -n 1 | grep '^/boot/')" ]] && Type='InBoot' || Type='NoBoot'
-    LinuxKernel="$(grep -E 'linux(efi|16)?[[:space:]].*/|kernel.*/' /tmp/grub.new | awk '{print $1}' | head -n 1)"
-    [[ -z "$LinuxKernel" ]] && echo "Error! read grub config! " && return 1
-    LinuxIMG="$(grep 'initrd.*/' /tmp/grub.new | awk '{print $1}' | tail -n 1)"
-    [ -z "$LinuxIMG" ] && sed -i "/$LinuxKernel.*\//a\\\tinitrd\ \/" /tmp/grub.new && LinuxIMG='initrd'
-    Add_OPTION=""
-    lowMem || Add_OPTION=" lowmem=+0"
-    BOOT_OPTION="auto=true${Add_OPTION} hostname=debian domain= quiet"
-    [[ "$Type" == 'InBoot' ]] && {
-        sed -i "/$LinuxKernel.*\//c\\\t$LinuxKernel\\t\/boot\/vmlinuz $BOOT_OPTION" /tmp/grub.new
-        sed -i "/$LinuxIMG.*\//c\\\t$LinuxIMG\\t\/boot\/initrd.img" /tmp/grub.new
+    insert_grub=$(awk '/menuentry / {print NR}' "${grub_dir}/${grub_file}" | head -n1)
+    [[ -n "$insert_grub" && "$insert_grub" -gt 0 ]] || {
+        echo -e "${RED}定位 GRUB 插入位置失败。${PLAIN}"
+        exit 1
     }
-    [[ "$Type" == 'NoBoot' ]] && {
-        sed -i "/$LinuxKernel.*\//c\\\t$LinuxKernel\\t\/vmlinuz $BOOT_OPTION" /tmp/grub.new
-        sed -i "/$LinuxIMG.*\//c\\\t$LinuxIMG\\t\/initrd.img" /tmp/grub.new
-    }
-    sed -i '$a\\n' /tmp/grub.new
-    GRUB_TMP="$(mktemp)"
-    head -n $((INSERTGRUB-1)) "$GRUBDIR/$GRUBFILE" >"$GRUB_TMP"
-    cat /tmp/grub.new >>"$GRUB_TMP"
-    tail -n +"$INSERTGRUB" "$GRUBDIR/$GRUBFILE" >>"$GRUB_TMP"
-    cp -f "$GRUB_TMP" "$GRUBDIR/$GRUBFILE"
-    rm -f "$GRUB_TMP"
 
-    if ! validate_grub_config "$GRUBDIR/$GRUBFILE"; then
-        cp -f "$GRUB_BACKUP" "$GRUBDIR/$GRUBFILE"
-        echo "Error! GRUB syntax check failed, rollback done. log: /tmp/grub-script-check.log"
-        return 1
+    if grep -E 'linux(efi|16)?[[:space:]].*/|kernel.*/' /tmp/grub.new | awk '{print $2}' | tail -n1 | grep -q '^/boot/'; then
+        type='InBoot'
+    else
+        type='NoBoot'
     fi
-    [[ -f "$GRUBDIR/grubenv" ]] && sed -i 's/saved_entry/#saved_entry/g' "$GRUBDIR/grubenv"
+    linux_kernel=$(grep -E 'linux(efi|16)?[[:space:]].*/|kernel.*/' /tmp/grub.new | awk '{print $1}' | head -n1)
+    [[ -n "$linux_kernel" ]] || {
+        echo -e "${RED}读取 GRUB 内核项失败。${PLAIN}"
+        exit 1
+    }
+    linux_img=$(grep 'initrd.*/' /tmp/grub.new | awk '{print $1}' | tail -n1)
+    if [[ -z "$linux_img" ]]; then
+        sed -i "/$linux_kernel.*\//a\\\tinitrd /" /tmp/grub.new
+        linux_img='initrd'
+    fi
+
+    add_option=''
+    reinstall_low_mem || add_option=' lowmem=+0'
+    boot_option="auto=true${add_option} hostname=debian domain= quiet"
+
+    if [[ "$type" == 'InBoot' ]]; then
+        sed -i "/$linux_kernel.*\//c\\\t$linux_kernel\t/boot/vmlinuz $boot_option" /tmp/grub.new
+        sed -i "/$linux_img.*\//c\\\t$linux_img\t/boot/initrd.img" /tmp/grub.new
+    else
+        sed -i "/$linux_kernel.*\//c\\\t$linux_kernel\t/vmlinuz $boot_option" /tmp/grub.new
+        sed -i "/$linux_img.*\//c\\\t$linux_img\t/initrd.img" /tmp/grub.new
+    fi
+    sed -i '$a\\n' /tmp/grub.new
+
+    grub_tmp=$(mktemp)
+    head -n $((insert_grub - 1)) "${grub_dir}/${grub_file}" > "$grub_tmp"
+    cat /tmp/grub.new >> "$grub_tmp"
+    tail -n +"$insert_grub" "${grub_dir}/${grub_file}" >> "$grub_tmp"
+    cp -f "$grub_tmp" "${grub_dir}/${grub_file}"
+    rm -f "$grub_tmp"
+
+    if ! reinstall_validate_grub_config "${grub_dir}/${grub_file}"; then
+        cp -f "$grub_backup" "${grub_dir}/${grub_file}"
+        echo -e "${RED}GRUB 语法校验失败，已回滚。${PLAIN}"
+        exit 1
+    fi
+
+    if [[ -f "${grub_dir}/grubenv" ]]; then
+        sed -i 's/saved_entry/#saved_entry/g' "${grub_dir}/grubenv"
+    fi
 
     rm -rf /tmp/boot
     mkdir -p /tmp/boot
-    cd /tmp/boot || return 1
+    cd /tmp/boot || exit 1
 
     mv -f /tmp/initrd.img /tmp/initrd.img.gz
-    gzip -d < /tmp/initrd.img.gz | cpio --extract --verbose --make-directories --no-absolute-filenames >>/dev/null 2>&1
+    gzip -d < /tmp/initrd.img.gz | cpio --extract --verbose --make-directories --no-absolute-filenames >/dev/null 2>&1
+
+    reinstall_write_post_install_script
 
     partman_early_command='debconf-set partman-auto/disk "$(list-devices disk | head -n1)"'
-    late_command="sed -ri 's/^#?Port.*/Port ${ssh_port}/g' /target/etc/ssh/sshd_config; sed -ri 's/^#?PermitRootLogin.*/PermitRootLogin yes/g' /target/etc/ssh/sshd_config; sed -ri 's/^#?PasswordAuthentication.*/PasswordAuthentication yes/g' /target/etc/ssh/sshd_config"
-cat >/tmp/boot/preseed.cfg<<EOF
+    late_command='cp /post-install.sh /target/root/reinstall-post.sh; chmod 700 /target/root/reinstall-post.sh; in-target /bin/sh /root/reinstall-post.sh; rm -f /target/root/reinstall-post.sh'
+
+    cat > /tmp/boot/preseed.cfg <<EOF
 d-i debian-installer/locale string en_US
 d-i console-setup/layoutcode string us
 d-i keyboard-configuration/xkb-keymap string us
+
 d-i netcfg/choose_interface select auto
 d-i netcfg/disable_autoconfig boolean true
 d-i netcfg/dhcp_failed note
 d-i netcfg/dhcp_options select Configure network manually
-d-i netcfg/get_ipaddress string $ipAddr
-d-i netcfg/get_netmask string $ipMask
-d-i netcfg/get_gateway string $ipGate
-d-i netcfg/get_nameservers string $ipDNS
+d-i netcfg/get_ipaddress string ${REINSTALL_IPV4_ADDR}
+d-i netcfg/get_netmask string ${REINSTALL_IPV4_MASK}
+d-i netcfg/get_gateway string ${REINSTALL_IPV4_GATE}
+d-i netcfg/get_nameservers string ${REINSTALL_DNS_LIST}
 d-i netcfg/confirm_static boolean true
+
 d-i hw-detect/load_firmware boolean true
+
 d-i mirror/country string manual
-d-i mirror/http/hostname string $MirrorHost
-d-i mirror/http/directory string $MirrorFolder
+d-i mirror/http/hostname string ${mirror_host}
+d-i mirror/http/directory string ${mirror_folder}
 d-i mirror/http/proxy string
+d-i apt-setup/contrib boolean true
+d-i apt-setup/non-free boolean true
+d-i apt-setup/non-free-firmware boolean true
+
 d-i passwd/root-login boolean true
 d-i passwd/make-user boolean false
-d-i passwd/root-password-crypted password $myPASSWORD
-d-i user-setup/allow-password-weak boolean true
-d-i user-setup/encrypt-home boolean false
+d-i passwd/root-password-crypted password ${root_password_hash}
+
 d-i clock-setup/utc boolean true
 d-i time/zone string Etc/UTC
 d-i clock-setup/ntp boolean false
-d-i partman/early_command string $partman_early_command
+
+d-i partman/early_command string ${partman_early_command}
 d-i partman-partitioning/confirm_write_new_label boolean true
 d-i partman/mount_style select uuid
 d-i partman/choose_partition select finish
 d-i partman-auto/method string regular
 d-i partman-auto/init_automatically_partition select Guided - use entire disk
-d-i partman-auto/choose_recipe select All files in one partition (recommended for new users)
+d-i partman-auto/choose_recipe select atomic
 d-i partman-md/device_remove_md boolean true
 d-i partman-lvm/device_remove_lvm boolean true
 d-i partman-lvm/confirm boolean true
 d-i partman-lvm/confirm_nooverwrite boolean true
 d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
+
 tasksel tasksel/first multiselect standard
-d-i pkgsel/update-policy select none
-d-i pkgsel/include string openssh-server
+d-i pkgsel/include string openssh-server isc-dhcp-client
 d-i pkgsel/upgrade select none
+
 popularity-contest popularity-contest/participate boolean false
+
 d-i grub-installer/only_debian boolean true
 d-i grub-installer/with_other_os boolean true
-d-i grub-installer/bootdev string $IncDisk
+d-i grub-installer/bootdev string ${target_disk}
 d-i grub-installer/force-efi-extra-removable boolean true
 d-i finish-install/reboot_in_progress note
 d-i debian-installer/exit/reboot boolean true
-d-i preseed/late_command string $late_command
+d-i preseed/late_command string ${late_command}
 EOF
 
     find . | cpio -H newc --create --verbose | gzip -9 > /tmp/initrd.img
     cp -f /tmp/initrd.img /boot/initrd.img
     cp -f /tmp/vmlinuz /boot/vmlinuz
-    chown root:root "$GRUBDIR/$GRUBFILE"
-    chmod 444 "$GRUBDIR/$GRUBFILE"
-    echo -e "${YELLOW}安装引导已写入，系统将在 3 秒后自动重启继续安装。${PLAIN}"
-    sleep 3 && reboot || sudo reboot >/dev/null 2>&1
+    chown root:root "${grub_dir}/${grub_file}"
+    chmod 444 "${grub_dir}/${grub_file}"
+
+    echo -e "${GREEN}[信息]${PLAIN} 安装引导已写入，系统将在 3 秒后自动重启继续安装。"
+    sleep 3
+    reboot || sudo reboot >/dev/null 2>&1
 }
 
 reinstall_debian() {
-    local debian_version="$1"
-    local ssh_port target_disk confirm pw pw2
+    local debian_version="$1" pw='' pw2='' confirm='' target_disk=''
+
     read -r -s -p " 请设置 root 密码: " pw
     echo
-    if [[ -z "$pw" ]]; then
+    [[ -n "$pw" ]] || {
         echo -e "${RED}密码不能为空。${PLAIN}"
         return
-    fi
+    }
+
     read -r -s -p " 请再次输入 root 密码: " pw2
     echo
-    if [[ "$pw" != "$pw2" ]]; then
+    [[ "$pw" == "$pw2" ]] || {
         echo -e "${RED}两次输入密码不一致。${PLAIN}"
         return
-    fi
+    }
 
-    ssh_port="$(detect_current_ssh_port)"
-    target_disk="$(getDisk)"
-    if [[ -z "$target_disk" ]]; then
-        echo -e "${RED}未检测到目标磁盘。${PLAIN}"
+    REINSTALL_SSH_PORT=$(reinstall_detect_current_ssh_port)
+    REINSTALL_ROOT_PASSWORD="$pw"
+    target_disk=$(reinstall_get_target_disk)
+
+    echo -e "${YELLOW} 将使用 Debian ${debian_version} 执行重装。${PLAIN}"
+    echo -e "${YELLOW} 目标磁盘: ${target_disk:-未检测到}${PLAIN}"
+    echo -e "${YELLOW} 重装后 SSH 端口将保持为: ${REINSTALL_SSH_PORT}${PLAIN}"
+    echo -e "${YELLOW} 默认 DNS: ${REINSTALL_DNS_LIST}${PLAIN}"
+    echo -e "${YELLOW} 输入 YES 后将写入安装引导并自动重启。${PLAIN}"
+    read -r -p " 输入「YES」确认开始重装，其它键取消: " confirm
+    [[ "$confirm" == "YES" ]] || {
+        echo -e "${YELLOW} 已取消重装。${PLAIN}"
         return
-    fi
+    }
 
-    echo -e "${YELLOW} 将使用 Debian ${debian_version} 执行重装${PLAIN}"
-    echo -e "${YELLOW} 目标磁盘: ${target_disk}${PLAIN}"
-    echo -e "${YELLOW} 重装后「SSH」端口将保持为: ${ssh_port}${PLAIN}"
-    echo -e "${YELLOW} 确认后会写入安装引导并在完成后自动重启${PLAIN}"
-    read -r -p " 输入「YES」确认开始重装,其它键取消: " confirm
-    [[ "$confirm" == "YES" ]] || { echo -e "${YELLOW} 已取消重装 ${PLAIN}"; return; }
-
-    installnet_main "${debian_version}" "${pw}" "${ssh_port}"
+    reinstall_install_target_system "$debian_version"
 }
 
 reinstall_debian11() {
@@ -2562,7 +2696,7 @@ reinstall_debian13() {
     reinstall_debian 13
 }
 
-start_menu() {
+reinstall_start_menu() {
     clear
     echo -e "${BLUE}一键网络重装管理脚本${PLAIN}"
     echo
@@ -2574,10 +2708,11 @@ start_menu() {
     echo
 }
 
-main_loop() {
+reinstall_main_loop() {
+    local num=''
     while true; do
-        start_menu
-        read -p " 请输入数字 [0-3]: " num
+        reinstall_start_menu
+        read -r -p " 请输入数字 [0-3]: " num
         num=$(echo "$num" | grep -oE '^[0-9]+$')
         case "$num" in
             1) reinstall_debian11 ;;
@@ -2585,7 +2720,6 @@ main_loop() {
             3) reinstall_debian13 ;;
             0) break ;;
             *)
-                clear
                 echo -e "${RED}请输入正确数字 [0-3]${PLAIN}"
                 sleep 1
                 ;;
@@ -2596,11 +2730,11 @@ main_loop() {
 reinstall_menu() {
     PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
     export PATH
-    check_sys
+    reinstall_check_sys
     [[ "$EUID" -ne '0' ]] && echo -e "${RED}请使用 root 权限运行此脚本${PLAIN}" && return
-    [[ -z "${release:-}" ]] && echo -e "${RED}暂不支持当前系统${PLAIN}" && press_any_key_to_continue && return
-    first_job
-    main_loop
+    [[ -z "${reinstall_release:-}" ]] && echo -e "${RED}暂不支持当前系统${PLAIN}" && press_any_key_to_continue && return
+    reinstall_install_dependencies
+    reinstall_main_loop
 }
 
 acme_exec() {
