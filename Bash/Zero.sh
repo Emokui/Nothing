@@ -892,23 +892,7 @@ bbr_resolve_xanmod_payload_packages() {
 
 bbr_fetch_xanmod_key() {
     local output_file="$1" log_file="$2"
-    local ua="Mozilla/5.0"
-
-    : > "$log_file"
-
-    if command -v curl >/dev/null 2>&1; then
-        if curl -fsSL -A "$ua" "https://gitlab.com/afrd.gpg" -o "$output_file" >>"$log_file" 2>&1 && [[ -s "$output_file" ]]; then
-            return 0
-        fi
-    fi
-
-    if command -v wget >/dev/null 2>&1; then
-        if wget -U "$ua" -O "$output_file" "https://gitlab.com/afrd.gpg" >>"$log_file" 2>&1 && [[ -s "$output_file" ]]; then
-            return 0
-        fi
-    fi
-
-    return 1
+    curl -fsSL "https://gitlab.com/afrd.gpg" -o "$output_file" >"$log_file" 2>&1 && [[ -s "$output_file" ]]
 }
 
 bbr_check_disk_space() {
@@ -1494,7 +1478,7 @@ bbr_install_xanmod_kernel() {
         press_any_key_to_continue
         return 1
     }
-    bbr_ensure_apt_packages wget curl gnupg ca-certificates || {
+    bbr_ensure_apt_packages curl gnupg ca-certificates || {
         echo -e "${RED}依赖安装失败${PLAIN}"
         press_any_key_to_continue
         return 1
@@ -1625,6 +1609,7 @@ bbr_uninstall_xanmod_kernel() {
             update-grub 2>/dev/null || true
             rm -f "$BBR_REPO_FILE" "$BBR_KEYRING" /usr/share/keyrings/xanmod-archive-keyring.gpg
             rm -f "$BBR_SYSCTL_CONF" /etc/sysctl.d/99-zero-bbr.conf /etc/modules-load.d/bbr.conf
+            bbr_apply_mss_clamp disable
             bbr_cleanup_persist
             echo -e "${GREEN}XanMod 内核已卸载${PLAIN}"
             bbr_prompt_reboot
