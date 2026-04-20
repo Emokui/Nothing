@@ -2544,7 +2544,8 @@ reinstall_debian() {
     read -r -p " 输入「YES」确认开始重装,其它键取消: " confirm
     [[ "$confirm" == "YES" ]] || { echo -e "${YELLOW} 已取消重装 ${PLAIN}"; return; }
 
-    local install_runner install_script="/Users/sukurain/Downloads/Install.sh"
+    local install_runner install_rc install_log="/tmp/zero-installnet.log"
+    local install_script="/Users/sukurain/Downloads/Install.sh"
     if [[ ! -f "$install_script" ]]; then
         echo -e "${RED}未找到 Install.sh: ${install_script}${PLAIN}"
         return
@@ -2565,12 +2566,20 @@ installnet_main -d "${REINSTALL_DEBIAN_VERSION}" -v 64 -a -p "${REINSTALL_ROOT_P
 EOF
 
     chmod +x "$install_runner"
+    : > "$install_log"
     REINSTALL_DEBIAN_VERSION="${debian_version}" \
     REINSTALL_ROOT_PASSWORD="${pw}" \
     REINSTALL_SSH_PORT="${ssh_port}" \
-    bash "$install_runner"
-    local install_rc=$?
+    bash "$install_runner" 2>&1 | tee "$install_log"
+    install_rc=${PIPESTATUS[0]}
     rm -f "$install_runner"
+
+    if [[ "$install_rc" -ne 0 ]]; then
+        echo -e "${RED}重装引导写入失败，日志已保存到: ${install_log}${PLAIN}"
+        [[ -s "$install_log" ]] && tail -n 20 "$install_log"
+        press_any_key_to_continue
+    fi
+
     return "$install_rc"
 }
 
