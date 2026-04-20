@@ -327,12 +327,17 @@ d-i netcfg/confirm_static boolean true
 EOF
             ;;
         ipv6-only)
-            if [[ "$IPV6_MODE" == 'auto' ]]; then
+            if [[ -n "$IPV6_ADDR" && -n "$IPV6_NETMASK" ]]; then
                 cat <<EOF
 d-i netcfg/choose_interface select auto
-d-i netcfg/disable_autoconfig boolean false
-d-i netcfg/use_autoconfig boolean true
-d-i netcfg/dhcpv6_timeout string 60
+d-i netcfg/disable_autoconfig boolean true
+d-i netcfg/dhcp_failed note
+d-i netcfg/dhcp_options select Configure network manually
+d-i netcfg/get_ipaddress string ${IPV6_ADDR}
+d-i netcfg/get_netmask string ${IPV6_NETMASK}
+d-i netcfg/get_gateway string ${IPV6_GATE:-none}
+d-i netcfg/get_nameservers string ${DNS_V6_LIST}
+d-i netcfg/confirm_static boolean true
 EOF
             else
                 cat <<EOF
