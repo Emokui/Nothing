@@ -96,6 +96,26 @@ ipv6_prefix_to_netmask() {
     echo "$mask"
 }
 
+is_private_or_special_ipv4() {
+    local ip="$1"
+    case "$ip" in
+        10.*|127.*|169.254.*|172.16.*|172.17.*|172.18.*|172.19.*|172.2[0-9].*|172.3[0-1].*|192.168.*|100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+get_public_ipv4_from_imds() {
+    local value=''
+    value=$(wget -qO- --timeout=1 --tries=1 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null | tr -d '\r' | head -n1)
+    if [[ "$value" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "$value"
+    fi
+}
+
 get_target_disk() {
     local root_source='' root_disk='' disks=''
     root_source=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
@@ -199,6 +219,7 @@ gather_network_state() {
     IPV4_PREFIX=''
     IPV4_MASK=''
     IPV4_GATE=''
+    PUBLIC_IPV4_ADDR=''
     iaddr=$(ip -4 addr show dev "$NETWORK_INTERFACE" 2>/dev/null | awk '/inet / {print $2; exit}')
     if [[ -n "$iaddr" ]]; then
         IPV4_ADDR="${iaddr%/*}"
@@ -206,6 +227,12 @@ gather_network_state() {
         IPV4_MASK=$(cidr_to_netmask "$IPV4_PREFIX")
         IPV4_GATE=$(ip -4 route show default dev "$NETWORK_INTERFACE" 2>/dev/null | awk '/^default/ {print $3; exit}')
         [[ -n "$IPV4_GATE" ]] || IPV4_GATE=$(ip -4 route show default 2>/dev/null | awk '/^default/ {print $3; exit}')
+        if ! is_private_or_special_ipv4 "$IPV4_ADDR"; then
+            PUBLIC_IPV4_ADDR="$IPV4_ADDR"
+        fi
+    fi
+    if [[ -z "$PUBLIC_IPV4_ADDR" ]]; then
+        PUBLIC_IPV4_ADDR=$(get_public_ipv4_from_imds)
     fi
 
     IPV6_MODE='none'
@@ -230,12 +257,14 @@ gather_network_state() {
         fi
     fi
 
-    if [[ -n "$IPV4_ADDR" && "$IPV6_MODE" != 'none' ]]; then
+    if [[ -n "$PUBLIC_IPV4_ADDR" && "$IPV6_MODE" != 'none' ]]; then
         NETWORK_STACK='dual-stack'
-    elif [[ -n "$IPV4_ADDR" ]]; then
+    elif [[ -n "$PUBLIC_IPV4_ADDR" ]]; then
         NETWORK_STACK='ipv4-only'
     elif [[ "$IPV6_MODE" != 'none' ]]; then
         NETWORK_STACK='ipv6-only'
+    elif [[ -n "$IPV4_ADDR" ]]; then
+        NETWORK_STACK='private-ipv4-only'
     else
         echo -e "${Error} 当前既未检测到可用 IPv4，也未检测到可用 IPv6。"
         exit 1
@@ -243,7 +272,7 @@ gather_network_state() {
 }
 
 build_ipv4_block() {
-    [[ "$NETWORK_STACK" != 'ipv6-only' ]] || return
+    [[ -n "$IPV4_ADDR" ]] || return
     cat <<EOF
 iface \$iface inet static
     address ${IPV4_ADDR}
@@ -284,7 +313,7 @@ EOF
 
 build_preseed_network_block() {
     case "$NETWORK_STACK" in
-        dual-stack|ipv4-only)
+        dual-stack|ipv4-only|private-ipv4-only)
             cat <<EOF
 d-i netcfg/choose_interface select auto
 d-i netcfg/disable_autoconfig boolean true
@@ -418,10 +447,21 @@ install_target_system() {
     case "$NETWORK_STACK" in
         dual-stack) echo -e "${Tip} 网络类型: 双栈" ;;
         ipv4-only) echo -e "${Tip} 网络类型: 仅 IPv4" ;;
-        ipv6-only) echo -e "${Tip} 网络类型: 仅 IPv6" ;;
+        ipv6-only)
+            if [[ -n "$IPV4_ADDR" ]]; then
+                echo -e "${Tip} 网络类型: 仅 IPv6（带私有 IPv4）"
+            else
+                echo -e "${Tip} 网络类型: 仅 IPv6"
+            fi
+            ;;
+        private-ipv4-only) echo -e "${Tip} 网络类型: 仅私有 IPv4" ;;
     esac
     if [[ -n "$IPV4_ADDR" ]]; then
-        echo -e "${Tip} IPv4: ${IPV4_ADDR}/${IPV4_PREFIX} gw ${IPV4_GATE}"
+        if [[ -n "$PUBLIC_IPV4_ADDR" ]]; then
+            echo -e "${Tip} IPv4: ${IPV4_ADDR}/${IPV4_PREFIX} gw ${IPV4_GATE} (公网 IPv4: ${PUBLIC_IPV4_ADDR})"
+        else
+            echo -e "${Tip} IPv4: ${IPV4_ADDR}/${IPV4_PREFIX} gw ${IPV4_GATE} (仅私有 IPv4)"
+        fi
     else
         echo -e "${Tip} IPv4: 当前未检测到"
     fi
