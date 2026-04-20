@@ -286,10 +286,15 @@ build_ipv6_block() {
     local gateway_line=''
     case "$IPV6_MODE" in
         auto)
+            if [[ -n "$IPV6_GATE" ]]; then
+                gateway_line="    gateway ${IPV6_GATE}"
+            else
+                gateway_line=''
+            fi
             cat <<EOF
-iface \$iface inet6 dhcp
-    accept_ra 2
-    autoconf 1
+iface \$iface inet6 static
+    address ${IPV6_ADDR}/${IPV6_PREFIX}
+${gateway_line}
     dns-nameservers ${DNS_V6_LIST}
 EOF
             ;;
@@ -357,9 +362,17 @@ EOF
 }
 
 write_post_install_script() {
-    local ipv4_block='' ipv6_block=''
+    local ipv4_block='' ipv6_block='' ipv6_bootstrap_block=''
     ipv4_block=$(build_ipv4_block)
     ipv6_block=$(build_ipv6_block)
+    if [[ "$NETWORK_STACK" == 'ipv6-only' && -n "$IPV6_ADDR" && -n "$IPV6_PREFIX" ]]; then
+        ipv6_bootstrap_block=$(cat <<EOF
+ip -6 addr flush dev "\$iface" scope global 2>/dev/null || true
+ip -6 addr add ${IPV6_ADDR}/${IPV6_PREFIX} dev "\$iface"
+$(if [[ -n "$IPV6_GATE" ]]; then printf 'ip -6 route replace default via %s dev "$iface"\n' "$IPV6_GATE"; fi)
+EOF
+)
+    fi
 
     cat > /tmp/boot/post-install.sh <<EOF
 #!/bin/sh
@@ -377,6 +390,8 @@ update_sshd_option() {
         echo "\${key} \${value}" >> /etc/ssh/sshd_config
     fi
 }
+
+${ipv6_bootstrap_block}
 
 cat > /etc/network/interfaces <<EOF_INTERFACES
 source /etc/network/interfaces.d/*
@@ -471,7 +486,13 @@ install_target_system() {
         echo -e "${Tip} IPv4: 当前未检测到"
     fi
     case "$IPV6_MODE" in
-        auto) echo -e "${Tip} IPv6: 自动继承（当前环境检测为自动下发）" ;;
+        auto)
+            if [[ "$NETWORK_STACK" == 'ipv6-only' ]]; then
+                echo -e "${Tip} IPv6: 当前环境检测为自动下发，安装器阶段将使用当前 IPv6 静态预置，装后继续按自动模式继承"
+            else
+                echo -e "${Tip} IPv6: 自动继承（当前环境检测为自动下发）"
+            fi
+            ;;
         static) echo -e "${Tip} IPv6: 静态继承 ${IPV6_ADDR}/${IPV6_PREFIX} gw ${IPV6_GATE}" ;;
         none) echo -e "${Tip} IPv6: 当前未检测到可继承配置" ;;
     esac
