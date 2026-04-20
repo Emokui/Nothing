@@ -205,7 +205,9 @@ build_ipv6_block() {
         auto)
             cat <<'EOF'
 cat >> /etc/network/interfaces <<EOF_IPV6
-iface $iface inet6 auto
+iface $iface inet6 dhcp
+    accept_ra 2
+    autoconf 1
 EOF_IPV6
 EOF
             ;;
@@ -501,7 +503,7 @@ d-i partman/confirm boolean true
 d-i partman/confirm_nooverwrite boolean true
 
 tasksel tasksel/first multiselect standard
-d-i pkgsel/include string openssh-server
+d-i pkgsel/include string openssh-server isc-dhcp-client
 d-i pkgsel/upgrade select none
 
 popularity-contest popularity-contest/participate boolean false
