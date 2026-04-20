@@ -834,6 +834,83 @@ bbr_ensure_apt_packages() {
     apt-get install -y "${missing_packages[@]}" || return 1
 }
 
+bbr_select_xanmod_package() {
+    local version="$1" package_name package_hint candidate_version
+    local packages=()
+
+    case "$version" in
+        1)
+            packages=("linux-xanmod-lts-x64v1")
+            ;;
+        2)
+            packages=("linux-xanmod-x64v2" "linux-xanmod-lts-x64v2")
+            ;;
+        3|4)
+            packages=("linux-xanmod-x64v3" "linux-xanmod-lts-x64v3")
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    for package_name in "${packages[@]}"; do
+        candidate_version=$(apt-cache policy "$package_name" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+        [[ -z "$candidate_version" || "$candidate_version" == "(none)" ]] && continue
+
+        case "$package_name" in
+            linux-xanmod-lts-x64v1)
+                package_hint="x64v1 仅提供 LTS 包，已自动切换到 LTS"
+                ;;
+            linux-xanmod-lts-x64v2)
+                package_hint="当前仓库仅提供 LTS 分支，已自动切换到 x64v2 LTS"
+                ;;
+            linux-xanmod-lts-x64v3)
+                package_hint="当前仓库仅提供 LTS 分支，已自动切换到 x64v3 LTS"
+                ;;
+            linux-xanmod-x64v2)
+                package_hint="x64v2"
+                ;;
+            linux-xanmod-x64v3)
+                package_hint="x64v${version} 检测结果，按官方建议安装 x64v3"
+                ;;
+        esac
+
+        echo "${package_name}|${package_hint}"
+        return 0
+    done
+
+    return 1
+}
+
+bbr_resolve_xanmod_payload_packages() {
+    local package_name="$1"
+    apt-cache depends --important "$package_name" 2>/dev/null \
+        | awk '/Depends:/ {print $2}' \
+        | grep -E '^linux-(image|headers)-.*xanmod' \
+        | awk '!seen[$0]++'
+}
+
+bbr_fetch_xanmod_key() {
+    local output_file="$1" log_file="$2"
+    local ua="Mozilla/5.0"
+
+    : > "$log_file"
+
+    if command -v curl >/dev/null 2>&1; then
+        if curl -fsSL -A "$ua" "https://gitlab.com/afrd.gpg" -o "$output_file" >>"$log_file" 2>&1 && [[ -s "$output_file" ]]; then
+            return 0
+        fi
+    fi
+
+    if command -v wget >/dev/null 2>&1; then
+        if wget -U "$ua" -O "$output_file" "https://gitlab.com/afrd.gpg" >>"$log_file" 2>&1 && [[ -s "$output_file" ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 bbr_check_disk_space() {
     local required_gb="$1"
     local required_space_mb=$((required_gb * 1024))
@@ -1432,15 +1509,9 @@ bbr_install_xanmod_kernel() {
     }
     key_log="${key_tmp}.log"
 
-    if command -v wget >/dev/null 2>&1; then
-        wget -O "$key_tmp" "https://gitlab.com/afrd.gpg" 2>"$key_log"
-    else
-        curl -fsSL "https://gitlab.com/afrd.gpg" -o "$key_tmp" 2>"$key_log"
-    fi
-
-    if [[ ! -s "$key_tmp" ]] || ! gpg --dearmor -o "$BBR_KEYRING" --yes < "$key_tmp" 2>>"$key_log"; then
+    if ! bbr_fetch_xanmod_key "$key_tmp" "$key_log" || ! gpg --dearmor -o "$BBR_KEYRING" --yes < "$key_tmp" 2>>"$key_log"; then
         echo -e "${RED}错误: XanMod 仓库密钥下载或导入失败${PLAIN}"
-        [[ -s "$key_log" ]] && tail -n 5 "$key_log"
+        [[ -s "$key_log" ]] && tail -n 12 "$key_log"
         rm -f "$key_tmp" "$key_log"
         press_any_key_to_continue
         return 1
@@ -1475,52 +1546,52 @@ bbr_install_xanmod_kernel() {
         return 1
     fi
 
-    case "$version" in
-        1)
-            package_name="linux-xanmod-lts-x64v1"
-            package_hint="x64v1 仅提供 LTS 包，已自动切换到 LTS"
-            ;;
-        2)
-            package_name="linux-xanmod-x64v2"
-            package_hint="x64v2"
-            ;;
-        3|4)
-            package_name="linux-xanmod-x64v3"
-            package_hint="x64v${version} 检测结果，按官方建议安装 x64v3"
-            ;;
-    esac
-
-    echo -e "${GREEN}将安装: ${package_name}${PLAIN}"
-    echo -e "${YELLOW}说明: ${package_hint}${PLAIN}"
     apt-get update || {
         echo -e "${RED}apt-get update 失败${PLAIN}"
         press_any_key_to_continue
         return 1
     }
 
-    local installed_version candidate_version
-    installed_version=$(dpkg-query -W -f='${Version}' "$package_name" 2>/dev/null || true)
-    candidate_version=$(apt-cache policy "$package_name" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+    local package_info package_status install_ok=0 verify_package
+    local install_packages=()
 
-    if [[ -n "$installed_version" && -n "$candidate_version" && "$candidate_version" != "(none)" && "$installed_version" == "$candidate_version" ]]; then
-        echo -e "${YELLOW}${package_name} 已是最新版本 (${installed_version})${PLAIN}"
-        if uname -r | grep -qi 'xanmod'; then
-            echo -e "${GREEN}当前系统已运行 XanMod 内核${PLAIN}"
-        else
-            echo -e "${YELLOW}当前系统尚未运行 XanMod 内核，如刚完成安装请重启后生效${PLAIN}"
-        fi
+    package_info=$(bbr_select_xanmod_package "$version") || {
+        echo -e "${RED}错误: 当前仓库中未找到适配 x64v${version} 的 XanMod 内核包${PLAIN}"
         press_any_key_to_continue
-        return 0
+        return 1
+    }
+
+    package_name="${package_info%%|*}"
+    package_hint="${package_info#*|}"
+    mapfile -t install_packages < <(bbr_resolve_xanmod_payload_packages "$package_name" 2>/dev/null || true)
+
+    if [[ "${#install_packages[@]}" -eq 0 ]]; then
+        echo -e "${RED}错误: 无法解析 ${package_name} 对应的内核安装包${PLAIN}"
+        press_any_key_to_continue
+        return 1
     fi
 
-    if ! apt-get install -y "$package_name"; then
+    echo -e "${GREEN}目标通道: ${package_name}${PLAIN}"
+    echo -e "${YELLOW}说明: ${package_hint}${PLAIN}"
+    echo -e "${YELLOW}实际安装: ${install_packages[*]}${PLAIN}"
+
+    if ! apt-get install -y "${install_packages[@]}"; then
         echo -e "${RED}XanMod 内核安装失败${PLAIN}"
         press_any_key_to_continue
         return 1
     fi
 
-    if ! dpkg -l 2>/dev/null | grep -qE "^ii[[:space:]]+${package_name}"; then
-        echo -e "${RED}未检测到 ${package_name} 安装成功${PLAIN}"
+    install_ok=1
+    for verify_package in "${install_packages[@]}"; do
+        package_status=$(dpkg-query -W -f='${Status}' "$verify_package" 2>/dev/null || true)
+        if [[ "$package_status" != "install ok installed" ]]; then
+            install_ok=0
+            break
+        fi
+    done
+
+    if (( install_ok == 0 )); then
+        echo -e "${RED}未检测到 XanMod 内核安装成功${PLAIN}"
         press_any_key_to_continue
         return 1
     fi
@@ -1571,7 +1642,7 @@ bbr_menu_status_line() {
     cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
     qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
 
-    if dpkg -l 2>/dev/null | grep -q 'linux-.*xanmod'; then
+    if dpkg -l 2>/dev/null | grep -qE '^ii[[:space:]]+linux-image-.*xanmod'; then
         xanmod_state="${GREEN}已安装${PLAIN}"
     else
         xanmod_state="${YELLOW}未安装${PLAIN}"
