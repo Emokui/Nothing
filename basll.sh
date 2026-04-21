@@ -29,6 +29,8 @@ ZERO_PORT_JUMP_CHAIN="ZERO_PORT_JUMP"
 ACME_HOME="$ROOT_HOME/.acme.sh"
 ACME_BIN="$ACME_HOME/acme.sh"
 ACME_CERT_PATH="/etc/cert"
+ACME_PORT80_OPEN_HOOK="/usr/local/bin/zero-acme-port80-open"
+ACME_PORT80_CLOSE_HOOK="/usr/local/bin/zero-acme-port80-close"
 
 get_sshd_effective_option() {
     local option="$1"
@@ -753,7 +755,7 @@ reinstall_install_target_system() {
     local mirror='' mirror_host='' mirror_folder='' target_disk=''
     local read_grub='' load_num='' cfg0='' cfg1='' cfg2='' insert_grub=''
     local type='' linux_kernel='' linux_img='' add_option='' boot_option='' grub_tmp=''
-    local root_password_hash='' partman_early_command='' late_command=''
+    local root_password_hash='' partman_early_command='' late_command='' apt_non_free_firmware_line=''
 
     case "$debian_version" in
         11) dist='bullseye' ;;
@@ -792,6 +794,10 @@ reinstall_install_target_system() {
         echo -e "${RED}未找到可用 Debian 镜像。${PLAIN}"
         exit 1
     }
+
+    if [[ "$debian_version" != '11' ]]; then
+        apt_non_free_firmware_line='d-i apt-setup/non-free-firmware boolean true'
+    fi
 
     root_password_hash=$(openssl passwd -1 "$REINSTALL_ROOT_PASSWORD")
 
@@ -956,7 +962,7 @@ d-i mirror/http/directory string ${mirror_folder}
 d-i mirror/http/proxy string
 d-i apt-setup/contrib boolean true
 d-i apt-setup/non-free boolean true
-d-i apt-setup/non-free-firmware boolean true
+${apt_non_free_firmware_line}
 
 d-i passwd/root-login boolean true
 d-i passwd/make-user boolean false
@@ -3140,6 +3146,121 @@ acme_install_dependencies() {
     pkg_install "${packages[@]}"
 }
 
+acme_install_port80_hook_scripts() {
+    install -d -m 700 /usr/local/bin /run/zero-acme-port80 || return 1
+
+    cat > "$ACME_PORT80_OPEN_HOOK" <<'EOF'
+#!/bin/sh
+set -eu
+
+STATE_DIR="/run/zero-acme-port80"
+STATE_FILE="$STATE_DIR/state"
+ZERO_FW_CHAIN="ZERO_INPUT"
+
+run_cmd() {
+    cmd="$1"
+    shift
+    if "$cmd" -w 3 "$@" >/dev/null 2>&1; then
+        return 0
+    fi
+    "$cmd" "$@" >/dev/null 2>&1
+}
+
+supports_table() {
+    cmd="$1"
+    table="$2"
+    run_cmd "$cmd" -t "$table" -S
+}
+
+rule_exists() {
+    cmd="$1"
+    table="$2"
+    chain="$3"
+    shift 3
+    if "$cmd" -w 3 -t "$table" -C "$chain" "$@" >/dev/null 2>&1; then
+        return 0
+    fi
+    "$cmd" -t "$table" -C "$chain" "$@" >/dev/null 2>&1
+}
+
+ensure_rule_present() {
+    cmd="$1"
+    table="$2"
+    chain="$3"
+    shift 3
+    rule_exists "$cmd" "$table" "$chain" "$@" && return 0
+    run_cmd "$cmd" -t "$table" -I "$chain" 1 "$@"
+}
+
+cleanup_state() {
+    rm -f "$STATE_FILE" "$STATE_DIR/rules.v4" "$STATE_DIR/rules.v6"
+}
+
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+cleanup_state
+
+changed=0
+
+for cmd in iptables ip6tables; do
+    case "$cmd" in
+        iptables|ip6tables) ;;
+        *) continue ;;
+    esac
+
+    command -v "$cmd" >/dev/null 2>&1 || continue
+    supports_table "$cmd" filter || continue
+    rule_exists "$cmd" filter INPUT -j "$ZERO_FW_CHAIN" || continue
+
+    if ! rule_exists "$cmd" filter "$ZERO_FW_CHAIN" -p tcp --dport 80 -j ACCEPT; then
+        if [ "$changed" -eq 0 ]; then
+            command -v iptables-save >/dev/null 2>&1 && iptables-save > "$STATE_DIR/rules.v4" || true
+            command -v ip6tables-save >/dev/null 2>&1 && ip6tables-save > "$STATE_DIR/rules.v6" || true
+        fi
+        ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -p tcp --dport 80 -j ACCEPT
+        changed=1
+    fi
+done
+
+if [ "$changed" -eq 1 ]; then
+    printf 'CHANGED=1\n' > "$STATE_FILE"
+else
+    cleanup_state
+fi
+EOF
+
+    cat > "$ACME_PORT80_CLOSE_HOOK" <<'EOF'
+#!/bin/sh
+set -eu
+
+STATE_DIR="/run/zero-acme-port80"
+STATE_FILE="$STATE_DIR/state"
+
+cleanup_state() {
+    rm -f "$STATE_FILE" "$STATE_DIR/rules.v4" "$STATE_DIR/rules.v6"
+}
+
+[ -f "$STATE_FILE" ] || exit 0
+. "$STATE_FILE"
+
+if [ "${CHANGED:-0}" != "1" ]; then
+    cleanup_state
+    exit 0
+fi
+
+if [ -s "$STATE_DIR/rules.v4" ] && command -v iptables-restore >/dev/null 2>&1; then
+    iptables-restore < "$STATE_DIR/rules.v4" || true
+fi
+if [ -s "$STATE_DIR/rules.v6" ] && command -v ip6tables-restore >/dev/null 2>&1; then
+    ip6tables-restore < "$STATE_DIR/rules.v6" || true
+fi
+
+cleanup_state
+EOF
+
+    chmod 700 "$ACME_PORT80_OPEN_HOOK" "$ACME_PORT80_CLOSE_HOOK" || return 1
+}
+
 acme_enable_cron() {
     systemctl start cron 2>/dev/null || systemctl start cronie 2>/dev/null || true
     systemctl enable cron 2>/dev/null || systemctl enable cronie 2>/dev/null || true
@@ -3238,7 +3359,12 @@ acme_ensure_installed() {
 }
 
 acme_require_installed() {
-    acme_ensure_installed && return 0
+    acme_ensure_installed || {
+        press_any_key_to_continue
+        return 1
+    }
+    acme_install_port80_hook_scripts && return 0
+    echo -e "${RED}ACME 80 端口钩子脚本安装失败${PLAIN}"
     press_any_key_to_continue
     return 1
 }
@@ -3389,11 +3515,10 @@ acme_restore_port_80_firewall_if_needed() {
 acme_finalize_issue() {
     local issue_domain="$1"
     local save_name="$2"
-    local persist_port80="${3:-0}"
+    local restore_port80="${3:-0}"
 
-    if (( persist_port80 == 1 && ACME_PORT80_FIREWALL_CHANGED == 1 )); then
-        firewall_save_rules >/dev/null 2>&1 || true
-        acme_reset_port_80_firewall_state
+    if (( restore_port80 == 1 )); then
+        acme_restore_port_80_firewall_if_needed
     fi
     acme_install_issued_cert "$issue_domain" "$save_name" || echo -e "${RED}证书安装失败${PLAIN}"
     press_any_key_to_continue
@@ -3481,12 +3606,12 @@ acme_issue_standalone() {
 
     acme_ensure_cert_path
     if ! acme_has_ipv4; then
-        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --listen-v6 --insecure; then
+        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --listen-v6 --insecure --pre-hook "$ACME_PORT80_OPEN_HOOK" --post-hook "$ACME_PORT80_CLOSE_HOOK"; then
             acme_issue_failed_cleanup 1
             return
         fi
     else
-        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --insecure; then
+        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --insecure --pre-hook "$ACME_PORT80_OPEN_HOOK" --post-hook "$ACME_PORT80_CLOSE_HOOK"; then
             acme_issue_failed_cleanup 1
             return
         fi
@@ -3714,6 +3839,8 @@ acme_menu() {
 run_app_installer() {
     local app="$1"
     local url=""
+    local tmp_script=''
+    local rc=0
 
     case "$app" in
         snell)     url="https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/snell.sh" ;;
@@ -3728,7 +3855,42 @@ run_app_installer() {
             ;;
     esac
 
-    bash <(curl -sL "$url")
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        echo -e "${YELLOW}未检测到 curl/wget，正在尝试安装...${PLAIN}"
+        pkg_install curl wget >/dev/null 2>&1 || true
+    fi
+
+    tmp_script=$(mktemp /tmp/zero-installer.XXXXXX) || {
+        echo -e "${RED}无法创建临时脚本文件${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    }
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL "$url" -o "$tmp_script"; then
+            rm -f "$tmp_script"
+            echo -e "${RED}下载远程安装脚本失败${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -qO "$tmp_script" "$url"; then
+            rm -f "$tmp_script"
+            echo -e "${RED}下载远程安装脚本失败${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
+    else
+        rm -f "$tmp_script"
+        echo -e "${RED}未找到可用的下载工具（curl/wget）${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+
+    bash "$tmp_script"
+    rc=$?
+    rm -f "$tmp_script"
+    return "$rc"
 }
 
 install_system()    { reinstall_menu; }
