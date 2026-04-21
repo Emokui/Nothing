@@ -474,8 +474,8 @@ reinstall_check_sys() {
 }
 
 reinstall_install_dependencies() {
-    apt-get update
-    apt-get install -y xz-utils openssl gawk file wget cpio gzip iproute2 util-linux
+    apt-get -o Acquire::ForceIPv4=true update
+    apt-get -y -o Acquire::ForceIPv4=true install xz-utils openssl gawk file wget cpio gzip iproute2 util-linux
 }
 
 reinstall_require_commands() {
@@ -515,7 +515,11 @@ reinstall_cidr_to_netmask() {
 }
 
 reinstall_get_default_interface() {
-    ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}'
+    local iface=''
+    iface=$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    [[ -z "$iface" ]] && iface=$(ip -6 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    [[ -z "$iface" ]] && iface=$(ip -o link show 2>/dev/null | awk -F': ' '$2 != "lo" {print $2; exit}')
+    echo "$iface"
 }
 
 reinstall_get_target_disk() {
@@ -600,7 +604,7 @@ reinstall_select_debian_mirror() {
     local dist="$1" current='' url=''
     for current in "https://deb.debian.org/debian" "https://archive.debian.org/debian"; do
         url="${current}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz"
-        if wget --spider --timeout=3 -o /dev/null "$url"; then
+        if wget -4 --spider --timeout=3 -o /dev/null "$url"; then
             echo "$current"
             return 0
         fi
@@ -608,8 +612,22 @@ reinstall_select_debian_mirror() {
     return 1
 }
 
+reinstall_pick_ipv6_line() {
+    local iface="$1" ip6_line='' ip6_src=''
+
+    ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / {print; exit}')
+    if [[ -z "$ip6_line" ]]; then
+        ip6_src=$(ip -6 route get 2001:4860:4860::8888 oif "$iface" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
+        if [[ -n "$ip6_src" ]]; then
+            ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk -v src="$ip6_src" '$4 ~ ("^" src "/") {print; exit}')
+        fi
+    fi
+
+    echo "$ip6_line"
+}
+
 reinstall_gather_network_state() {
-    local iaddr='' ip6_line='' ip6_route=''
+    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt=''
 
     REINSTALL_NETWORK_INTERFACE=$(reinstall_get_default_interface)
     [[ -n "$REINSTALL_NETWORK_INTERFACE" ]] || {
@@ -633,11 +651,22 @@ reinstall_gather_network_state() {
     REINSTALL_IPV6_PREFIX=''
     REINSTALL_IPV6_GATE=''
 
-    ip6_line=$(ip -6 addr show dev "$REINSTALL_NETWORK_INTERFACE" scope global 2>/dev/null | awk '/inet6 / && $0 !~ / temporary / && $0 !~ / deprecated / {print; exit}')
+    ipv6_iface=$(ip -6 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    [[ -n "$ipv6_iface" ]] || ipv6_iface="$REINSTALL_NETWORK_INTERFACE"
+
+    for attempt in 1 2 3; do
+        ip6_line=$(reinstall_pick_ipv6_line "$ipv6_iface")
+        if [[ -z "$ip6_line" && "$ipv6_iface" != "$REINSTALL_NETWORK_INTERFACE" ]]; then
+            ip6_line=$(reinstall_pick_ipv6_line "$REINSTALL_NETWORK_INTERFACE")
+        fi
+        [[ -n "$ip6_line" ]] && break
+        [[ "$attempt" == '3' ]] || sleep 1
+    done
+
     if [[ -n "$ip6_line" ]]; then
-        REINSTALL_IPV6_ADDR=$(echo "$ip6_line" | awk '{print $2}' | cut -d/ -f1)
-        REINSTALL_IPV6_PREFIX=$(echo "$ip6_line" | awk '{print $2}' | cut -d/ -f2)
-        ip6_route=$(ip -6 route show default dev "$REINSTALL_NETWORK_INTERFACE" 2>/dev/null | head -n1)
+        REINSTALL_IPV6_ADDR=$(echo "$ip6_line" | awk '{print $4}' | cut -d/ -f1)
+        REINSTALL_IPV6_PREFIX=$(echo "$ip6_line" | awk '{print $4}' | cut -d/ -f2)
+        ip6_route=$(ip -6 route show default dev "$ipv6_iface" 2>/dev/null | awk '/^default/ {print; exit}')
         REINSTALL_IPV6_GATE=$(echo "$ip6_route" | awk '/^default/ {print $3; exit}')
         if echo "$ip6_line $ip6_route" | grep -Eq 'proto[[:space:]]+ra|(^|[[:space:]])dynamic([[:space:]]|$)|(^|[[:space:]])mngtmpaddr([[:space:]]|$)'; then
             REINSTALL_IPV6_MODE='auto'
@@ -772,7 +801,7 @@ reinstall_install_target_system() {
     echo -e "${YELLOW}目标磁盘: ${target_disk}${PLAIN}"
     echo -e "${YELLOW}IPv4: ${REINSTALL_IPV4_ADDR}/${REINSTALL_IPV4_PREFIX} gw ${REINSTALL_IPV4_GATE}${PLAIN}"
     case "$REINSTALL_IPV6_MODE" in
-        auto) echo -e "${YELLOW}IPv6: 自动继承（当前环境检测为自动下发）${PLAIN}" ;;
+        auto) echo -e "${YELLOW}IPv6: 自动继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX}（当前环境检测为自动下发）${PLAIN}" ;;
         static) echo -e "${YELLOW}IPv6: 静态继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX} gw ${REINSTALL_IPV6_GATE}${PLAIN}" ;;
         none) echo -e "${YELLOW}IPv6: 当前未检测到可继承配置${PLAIN}" ;;
     esac
@@ -781,11 +810,11 @@ reinstall_install_target_system() {
     mirror_folder=$(echo "$mirror" | awk -F"${mirror_host}" '{print $2}')
     [[ -n "$mirror_folder" ]] || mirror_folder='/'
 
-    wget -qO /tmp/initrd.img "${mirror}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz" || {
+    wget -4 -qO /tmp/initrd.img "${mirror}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/initrd.gz" || {
         echo -e "${RED}下载 initrd 失败。${PLAIN}"
         exit 1
     }
-    wget -qO /tmp/vmlinuz "${mirror}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/linux" || {
+    wget -4 -qO /tmp/vmlinuz "${mirror}/dists/${dist}/main/installer-amd64/current/images/netboot/debian-installer/amd64/linux" || {
         echo -e "${RED}下载内核失败。${PLAIN}"
         exit 1
     }
