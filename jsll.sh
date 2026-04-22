@@ -7151,7 +7151,12 @@ wireproxy_check_dependencies() {
 }
 
 wireproxy_ensure_wireguard_tools() {
-    command -v wg >/dev/null 2>&1 || wireproxy_err "缺少依赖: wg（请先安装 wireguard-tools）"
+    command -v wg >/dev/null 2>&1 && return 0
+
+    wireproxy_info "安装 wireguard-tools ..."
+    apt-get update -qq || wireproxy_err "apt update 失败"
+    apt-get install -y -qq --no-install-recommends wireguard-tools || wireproxy_err "wireguard-tools 安装失败"
+    command -v wg >/dev/null 2>&1 || wireproxy_err "wireguard-tools 安装后仍未检测到 wg 命令"
 }
 
 wireproxy_detect_arch() {
@@ -8064,13 +8069,13 @@ WARPSTACK_AUTOSTART_STATUS="未设置"
 warpstack_check_root() { [[ $EUID -ne 0 ]] && warpstack_err "请使用 root 用户运行此脚本"; }
 
 warpstack_install_pkg() {
-    local pkg="$1"
+    local packages=("$@")
     command -v apt-get &>/dev/null || warpstack_err "仅支持 Debian/Ubuntu（未找到 apt-get）"
     if [[ "$WARPSTACK_APT_UPDATED" -eq 0 ]]; then
         apt-get update -qq || return 1
         WARPSTACK_APT_UPDATED=1
     fi
-    apt-get install -y -qq "$pkg"
+    apt-get install -y -qq "${packages[@]}"
 }
 
 warpstack_is_valid_endpoint() {
@@ -8137,7 +8142,7 @@ warpstack_show_network_status() {
 warpstack_install_wireguard_tools() {
     command -v wg &>/dev/null && { warpstack_ok "wireguard-tools 已安装"; return; }
     warpstack_info "安装 wireguard-tools ..."
-    warpstack_install_pkg wireguard-tools || warpstack_err "wireguard-tools 安装失败"
+    warpstack_install_pkg --no-install-recommends wireguard-tools || warpstack_err "wireguard-tools 安装失败"
     command -v wg &>/dev/null || warpstack_err "wireguard-tools 安装后仍未检测到 wg 命令"
     warpstack_ok "wireguard-tools 已安装"
 }
@@ -8596,7 +8601,12 @@ reinstall_system_menu() { reinstall_menu; }
 reboot_system()         { echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps; }
 configure_shoes()       { shoes_check_supported_os || { press_any_key_to_continue; return; }; shoes_menu; }
 configure_mihomo()      { mihomo_menu; }
-configure_wireproxy()   { ( wireproxy_menu ); }
+configure_wireproxy() {
+    local rc
+    ( wireproxy_menu )
+    rc=$?
+    (( rc == 0 )) || press_any_key_to_continue "WireProxy 已退出，按任意键返回菜单..."
+}
 configure_warpstack()   { ( warpstack_menu ); }
 
 FIREWALL_RULE_DIR="/etc/iptables"
