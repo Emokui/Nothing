@@ -7909,9 +7909,9 @@ wireproxy_modify_config() {
     echo -e "  ${CYAN}MTU:${NC} ${current_mtu}  ${CYAN}SOCKS:${NC} ${WIREPROXY_SOCKS_BIND}"
     echo -e "  ${CYAN}认证:${NC} ${auth_color}${auth_label}${NC}"
     wireproxy_menu_divider
-    echo -e "  ${GREEN}1)${NC} 改 Endpoint      ${CYAN}2)${NC} 改 MTU"
-    echo -e "  ${YELLOW}3)${NC} 改 SOCKS 监听   ${GREEN}4)${NC} 改 SOCKS 认证"
-    echo -e "  ${CYAN}5)${NC} 编辑 WARP 配置 ${RED}0)${NC} 返回上级"
+    echo -e "  ${GREEN}1)${NC} 改Endpoint     ${CYAN}2)${NC} 改MTU"
+    echo -e "  ${YELLOW}3)${NC} 改SOCKS监听    ${GREEN}4)${NC} 改SOCKS认证"
+    echo -e "  ${CYAN}5)${NC} 编辑WARP配置 ${RED}  0)${NC} 返回上级"
     echo
     read -rp "  请选择 [0-5]: " input
 
@@ -8430,7 +8430,7 @@ warpstack_modify_config() {
     echo -e "  ${CYAN}Endpoint:${NC} ${current_ep}"
     echo -e "  ${CYAN}MTU:${NC} ${current_mtu}"
     warpstack_menu_divider
-    echo -e "  ${GREEN}1)${NC} 改 Endpoint  ${CYAN}2)${NC} 改 MTU"
+    echo -e "  ${GREEN}1)${NC} 改Endpoint   ${CYAN}2)${NC} 改MTU"
     echo -e "  ${YELLOW}3)${NC} 编辑配置     ${RED}0)${NC} 返回上级"
     echo
     read -rp "  请选择 [0-3]: " sub
