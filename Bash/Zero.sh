@@ -19,32 +19,6 @@ get_root_home() {
 
 ROOT_HOME="$(get_root_home)"
 SSHD_CONFIG="/etc/ssh/sshd_config"
-FIREWALL_RULE_DIR="/etc/iptables"
-FIREWALL_RULES_V4="$FIREWALL_RULE_DIR/zero.rules.v4"
-FIREWALL_RULES_V6="$FIREWALL_RULE_DIR/zero.rules.v6"
-ZERO_FIREWALL_SERVICE="/etc/systemd/system/zero-firewall-persistent.service"
-ZERO_FIREWALL_SERVICE_NAME="zero-firewall-persistent.service"
-ZERO_FW_CHAIN="ZERO_INPUT"
-ZERO_PORT_JUMP_CHAIN="ZERO_PORT_JUMP"
-ACME_HOME="$ROOT_HOME/.acme.sh"
-ACME_BIN="$ACME_HOME/acme.sh"
-ACME_CERT_PATH="/etc/cert"
-ACME_PORT80_OPEN_HOOK="/usr/local/bin/zero-acme-port80-open"
-ACME_PORT80_CLOSE_HOOK="/usr/local/bin/zero-acme-port80-close"
-
-get_sshd_effective_option() {
-    local option="$1"
-    local key value
-    key=$(printf '%s' "$option" | tr '[:upper:]' '[:lower:]')
-
-    if ! command -v sshd >/dev/null 2>&1; then
-        return 1
-    fi
-
-    value=$(sshd -T -f "$SSHD_CONFIG" 2>/dev/null | awk -v key="$key" '$1 == key {print $2; exit}')
-    [[ -n "$value" ]] || return 1
-    echo "$value"
-}
 
 press_any_key_to_continue() {
     if [ -t 0 ]; then
@@ -97,6 +71,20 @@ get_default_interface() {
     [[ -z "$iface" ]] && iface=$(ip -6 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
     [[ -z "$iface" ]] && iface=$(ip -o link show 2>/dev/null | awk -F': ' '$2 != "lo" {print $2; exit}')
     echo "$iface"
+}
+
+get_sshd_effective_option() {
+    local option="$1"
+    local key value
+    key=$(printf '%s' "$option" | tr '[:upper:]' '[:lower:]')
+
+    if ! command -v sshd >/dev/null 2>&1; then
+        return 1
+    fi
+
+    value=$(sshd -T -f "$SSHD_CONFIG" 2>/dev/null | awk -v key="$key" '$1 == key {print $2; exit}')
+    [[ -n "$value" ]] || return 1
+    echo "$value"
 }
 
 update_sshd_option() {
@@ -293,19 +281,6 @@ pkg_clean() {
     command -v apt >/dev/null 2>&1 || return 1
     apt autoremove -y && apt autoclean -y && apt clean
 }
-
-install_wget_if_missing() {
-    if ! command -v wget &>/dev/null; then
-        echo -e "${YELLOW}未检测到 wget，正在自动安装...${PLAIN}"
-        if ! pkg_install wget; then
-            echo -e "${RED}未检测到可用的 apt，wget 安装失败，请手动安装！${PLAIN}"
-            exit 1
-        fi
-        echo -e "${GREEN}wget 安装完成${PLAIN}"
-    fi
-}
-
-install_wget_if_missing
 
 fix_gcp_debian_sources() {(
     local product_name
@@ -1325,6 +1300,13 @@ set_ip_priority() {
     done
 }
 
+BBR_SYSCTL_CONF="/etc/sysctl.d/99-bbr-ultimate.conf"
+BBR_KEYRING="/etc/apt/keyrings/xanmod-archive-keyring.gpg"
+BBR_REPO_FILE="/etc/apt/sources.list.d/xanmod-release.list"
+BBR_PERSIST_SERVICE="/etc/systemd/system/bbr-optimize-persist.service"
+BBR_PERSIST_SERVICE_NAME="bbr-optimize-persist.service"
+BBR_PERSIST_SCRIPT="/usr/local/bin/bbr-optimize-apply.sh"
+
 bbr_confirm() {
     local prompt="$1"
     local default="${2:-N}"
@@ -1981,7 +1963,6 @@ bbr_configure_direct() {
     fi
 
     cat > "$BBR_SYSCTL_CONF" <<EOF
-# BBR Direct/Endpoint Configuration
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 net.core.rmem_max=${buffer_bytes}
@@ -2276,257 +2257,321 @@ bbr_menu_status_line() {
     echo -e "${BLUE}XanMod ${xanmod_state} | BBR ${GREEN}${cc:-unknown}${PLAIN} | Qdisc ${GREEN}${qdisc:-unknown}${PLAIN}"
 }
 
+bbr_show_manage_menu() {
+    clear
+    echo -e "${BLUE}============ BBR管理 ============${PLAIN}"
+    bbr_menu_status_line
+    echo -e "${BLUE}==================================${PLAIN}"
+    echo -e "${GREEN}1.安装XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
+    echo -e "${BLUE}3.BBR调优${PLAIN}      ${YELLOW}0.返回菜单${PLAIN}"
+    echo -e "${BLUE}==================================${PLAIN}"
+}
+
+handle_bbr_manage_choice() {
+    case "$1" in
+        1) clear; bbr_install_xanmod_kernel ;;
+        2) clear; bbr_uninstall_xanmod_kernel ;;
+        3) clear; bbr_configure_direct ;;
+        0) return 1 ;;
+        *) show_invalid_option ;;
+    esac
+
+    return 0
+}
+
 bbr_manage_menu() {
     local opt
     while true; do
-        clear
-        echo -e "${BLUE}============ BBR管理 ============${PLAIN}"
-        bbr_menu_status_line
-        echo -e "${BLUE}==================================${PLAIN}"
-        echo -e "${GREEN}1.安装XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
-        echo -e "${BLUE}3.BBR调优${PLAIN}      ${YELLOW}0.返回菜单${PLAIN}"
-        echo -e "${BLUE}==================================${PLAIN}"
+        bbr_show_manage_menu
         opt=$(read_menu_choice "请输入选项 [0-3]: ")
-
-        case "$opt" in
-            1) clear; bbr_install_xanmod_kernel ;;
-            2) clear; bbr_uninstall_xanmod_kernel ;;
-            3) clear; bbr_configure_direct ;;
-            0) return ;;
-            *) show_invalid_option ;;
-        esac
+        handle_bbr_manage_choice "$opt" || return
     done
+}
+
+DNS_RESOLV_CONF="/etc/resolv.conf"
+DNS_RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
+DNS_RESOLVED_DROPIN_FILE="$DNS_RESOLVED_DROPIN_DIR/99-custom-dns.conf"
+
+dns_read_runtime_status() {
+    local active="0" iface="" dns_list=""
+
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1; then
+        active="1"
+        iface="$(get_default_interface)"
+        if [[ -n "$iface" ]] && command -v resolvectl >/dev/null 2>&1; then
+            dns_list="$(resolvectl status "$iface" 2>/dev/null | awk '/DNS Servers:/ {for (i=3; i<=NF; i++) print $i}')"
+        fi
+    fi
+
+    printf '%s\n' "$active" "$iface"
+    [[ -n "$dns_list" ]] && printf '%s\n' "$dns_list"
+}
+
+dns_show_current() {
+    local iface dns_list resolved_active dns
+    local -a dns_status
+
+    echo -e "${YELLOW}当前DNS配置:${PLAIN}\n"
+
+    echo -e "${BLUE}resolv.conf:${PLAIN}"
+    if [[ -f "$DNS_RESOLV_CONF" ]]; then
+        while read -r dns; do
+            [[ "$dns" =~ ^nameserver ]] || continue
+            echo -e "  ${GREEN}${dns}${PLAIN}"
+        done < "$DNS_RESOLV_CONF"
+    else
+        echo -e "  (不存在)"
+    fi
+    echo
+
+    echo -e "${BLUE}systemd-resolved:${PLAIN}"
+    mapfile -t dns_status < <(dns_read_runtime_status)
+    resolved_active="${dns_status[0]}"
+    iface="${dns_status[1]}"
+    dns_list=$(printf '%s\n' "${dns_status[@]:2}")
+
+    if [[ "$resolved_active" == "1" ]]; then
+        if [[ -n "$iface" ]]; then
+            echo -e "  默认网卡: ${GREEN}${iface}${PLAIN}"
+            if [[ -n "$dns_list" ]]; then
+                echo -e "  DNS Servers:"
+                while read -r dns; do
+                    echo -e "    ${GREEN}- ${dns}${PLAIN}"
+                done <<< "$dns_list"
+            else
+                echo -e "  (systemd-resolved 未接管 DNS)"
+            fi
+        else
+            echo -e "  (未检测到默认网卡)"
+        fi
+    else
+        echo -e "  (systemd-resolved 未运行)"
+    fi
+    echo
+}
+
+dns_is_valid_ipv4() {
+    local ip="$1" IFS=.
+    local o1 o2 o3 o4 o
+
+    [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    read -r o1 o2 o3 o4 <<< "$ip"
+    for o in "$o1" "$o2" "$o3" "$o4"; do
+        [[ "$o" -ge 0 && "$o" -le 255 ]] 2>/dev/null || return 1
+    done
+    return 0
+}
+
+dns_is_valid_ipv6() {
+    local ip="$1"
+    [[ "$ip" =~ ^[0-9A-Fa-f:%.]+$ ]] || return 1
+    [[ "$ip" == *:* ]] || return 1
+    [[ ${#ip} -le 80 ]] || return 1
+    return 0
+}
+
+dns_is_valid_ip() {
+    local ip="$1"
+    [[ "$ip" =~ [[:space:]] ]] && return 1
+    [[ "$ip" == *\"* || "$ip" == *\'* || "$ip" == *\\* ]] && return 1
+    dns_is_valid_ipv4 "$ip" && return 0
+    dns_is_valid_ipv6 "$ip" && return 0
+    return 1
+}
+
+dns_systemd_resolved_active() {
+    command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1
+}
+
+dns_unlock_resolv() {
+    if command -v chattr >/dev/null 2>&1 && [[ -f "$DNS_RESOLV_CONF" ]]; then
+        chattr -i "$DNS_RESOLV_CONF" 2>/dev/null || true
+    fi
+}
+
+dns_write_resolv_conf() {
+    local dns
+    {
+        for dns in "$@"; do
+            echo "nameserver $dns"
+        done
+    } > "$DNS_RESOLV_CONF" 2>/dev/null || true
+}
+
+dns_restart_local_resolvers() {
+    local svc
+    if command -v systemctl >/dev/null 2>&1; then
+        for svc in nscd dnsmasq named; do
+            systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1
+        done
+    fi
+}
+
+dns_apply() {
+    local dns_list=("$@")
+    local ok=() bad=()
+    local dns iface
+
+    for dns in "${dns_list[@]}"; do
+        if dns_is_valid_ip "$dns"; then
+            ok+=("$dns")
+        else
+            bad+=("$dns")
+        fi
+    done
+    dns_list=("${ok[@]}")
+
+    if [[ ${#dns_list[@]} -eq 0 ]]; then
+        echo -e "${RED}未检测到有效的DNS IP（请输入IPv4/IPv6地址）${PLAIN}"
+        return 1
+    fi
+    if [[ ${#bad[@]} -gt 0 ]]; then
+        echo -e "${YELLOW}已忽略无效DNS：${bad[*]}${PLAIN}"
+    fi
+
+    if dns_systemd_resolved_active; then
+        mkdir -p "$DNS_RESOLVED_DROPIN_DIR"
+        {
+            echo "[Resolve]"
+            echo "DNS=${dns_list[*]}"
+            echo "Domains=~."
+        } > "$DNS_RESOLVED_DROPIN_FILE"
+
+        systemctl restart systemd-resolved 2>/dev/null || true
+
+        if command -v resolvectl >/dev/null 2>&1; then
+            resolvectl flush-caches 2>/dev/null || true
+            iface="$(get_default_interface)"
+            if [[ -n "$iface" ]]; then
+                resolvectl dns "$iface" "${dns_list[@]}" 2>/dev/null || true
+                resolvectl domain "$iface" "~." 2>/dev/null || true
+                resolvectl flush-caches 2>/dev/null || true
+            fi
+        fi
+
+        if [[ ! -L "$DNS_RESOLV_CONF" ]]; then
+            dns_unlock_resolv
+            dns_write_resolv_conf "${dns_list[@]}"
+        fi
+    else
+        if [[ -L "$DNS_RESOLV_CONF" ]]; then
+            rm -f "$DNS_RESOLV_CONF" 2>/dev/null || true
+        fi
+        dns_unlock_resolv
+        dns_write_resolv_conf "${dns_list[@]}"
+    fi
+
+    dns_restart_local_resolvers
+    return 0
+}
+
+dns_apply_with_feedback() {
+    if dns_apply "$@"; then
+        echo -e "${GREEN}DNS已修改并立即生效${PLAIN}"
+    else
+        echo -e "${RED}DNS修改失败${PLAIN}"
+    fi
+    press_any_key_to_continue
+}
+
+dns_show_menu() {
+    clear
+    echo -e "${BLUE}======== DNS 配置工具 ========${PLAIN}\n"
+    dns_show_current
+    echo -e "${GREEN}1.${PLAIN}修改DNS为 ${GREEN}8.8.8.8${PLAIN} 和 ${GREEN}1.1.1.1${PLAIN}"
+    echo -e "${GREEN}2.${PLAIN}自定义修改DNS"
+    echo -e "${YELLOW}0.${PLAIN}返回主菜单"
+    echo -e "${BLUE}==============================${PLAIN}"
+}
+
+dns_read_custom_servers() {
+    local dns=""
+
+    echo -e "\n${YELLOW}请输入DNS(每行一个,空行结束):${PLAIN}"
+    while true; do
+        read -r -p "> " dns
+        dns=$(trim_input "$dns")
+        [[ -z "$dns" ]] && break
+        printf '%s\n' "$dns"
+    done
+}
+
+handle_dns_choice() {
+    local choice="$1"
+    local -a custom_dns=()
+
+    case "$choice" in
+        1)
+            dns_apply_with_feedback "8.8.8.8" "1.1.1.1"
+            ;;
+        2)
+            clear
+            mapfile -t custom_dns < <(dns_read_custom_servers)
+            if [[ ${#custom_dns[@]} -eq 0 ]]; then
+                echo -e "${YELLOW}未输入DNS${PLAIN}"
+                press_any_key_to_continue
+            else
+                dns_apply_with_feedback "${custom_dns[@]}"
+            fi
+            ;;
+        0)
+            return 1
+            ;;
+        *)
+            show_invalid_option
+            ;;
+    esac
+
+    return 0
 }
 
 dns_fix() {
-    local RESOLV_CONF="/etc/resolv.conf"
-    local RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
-    local RESOLVED_DROPIN_FILE="$RESOLVED_DROPIN_DIR/99-custom-dns.conf"
-
-    _dns_read_runtime_status() {
-        local active="0" iface="" dns_list=""
-
-        if command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1; then
-            active="1"
-            iface="$(get_default_interface)"
-            if [[ -n "$iface" ]] && command -v resolvectl >/dev/null 2>&1; then
-                dns_list="$(resolvectl status "$iface" 2>/dev/null | awk '/DNS Servers:/ {for (i=3; i<=NF; i++) print $i}')"
-            fi
-        fi
-
-        printf '%s\n' "$active" "$iface"
-        [[ -n "$dns_list" ]] && printf '%s\n' "$dns_list"
-    }
-
-    _dns_show_current() {
-        echo -e "${YELLOW}当前DNS配置:${PLAIN}\n"
-
-        echo -e "${BLUE}resolv.conf:${PLAIN}"
-        if [[ -f "$RESOLV_CONF" ]]; then
-            while read -r line; do
-                [[ "$line" =~ ^nameserver ]] || continue
-                echo -e "  ${GREEN}${line}${PLAIN}"
-            done < "$RESOLV_CONF"
-        else
-            echo -e "  (不存在)"
-        fi
-        echo
-
-        echo -e "${BLUE}systemd-resolved:${PLAIN}"
-        local iface dns_list resolved_active
-        local -a dns_status
-
-        mapfile -t dns_status < <(_dns_read_runtime_status)
-        resolved_active="${dns_status[0]}"
-        iface="${dns_status[1]}"
-        dns_list=$(printf '%s\n' "${dns_status[@]:2}")
-
-        if [[ "$resolved_active" == "1" ]]; then
-            if [[ -n "$iface" ]]; then
-                echo -e "  默认网卡: ${GREEN}${iface}${PLAIN}"
-                if [[ -n "$dns_list" ]]; then
-                    echo -e "  DNS Servers:"
-                    while read -r dns; do
-                        echo -e "    ${GREEN}- ${dns}${PLAIN}"
-                    done <<< "$dns_list"
-                else
-                    echo -e "  (systemd-resolved 未接管 DNS)"
-                fi
-            else
-                echo -e "  (未检测到默认网卡)"
-            fi
-        else
-            echo -e "  (systemd-resolved 未运行)"
-        fi
-        echo
-    }
-
-    _dns_is_valid_ipv4() {
-        local ip="$1" IFS=.
-        [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
-        read -r o1 o2 o3 o4 <<<"$ip"
-        for o in "$o1" "$o2" "$o3" "$o4"; do
-            [[ "$o" -ge 0 && "$o" -le 255 ]] 2>/dev/null || return 1
-        done
-        return 0
-    }
-
-    _dns_is_valid_ipv6() {
-        local ip="$1"
-        [[ "$ip" =~ ^[0-9A-Fa-f:%.]+$ ]] || return 1
-        [[ "$ip" == *:* ]] || return 1
-        [[ ${#ip} -le 80 ]] || return 1
-        return 0
-    }
-
-    _dns_is_valid_ip() {
-        local ip="$1"
-        [[ "$ip" =~ [[:space:]] ]] && return 1
-        [[ "$ip" == *\"* || "$ip" == *\'* || "$ip" == *\\* ]] && return 1
-        _dns_is_valid_ipv4 "$ip" && return 0
-        _dns_is_valid_ipv6 "$ip" && return 0
-        return 1
-    }
-
-    _dns_systemd_resolved_active() {
-        command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1
-    }
-
-    _dns_unlock_resolv() {
-        if command -v chattr >/dev/null 2>&1 && [[ -f "$RESOLV_CONF" ]]; then
-            chattr -i "$RESOLV_CONF" 2>/dev/null || true
-        fi
-    }
-
-    _dns_write_resolv_conf() {
-        local dns
-        {
-            for dns in "$@"; do
-                echo "nameserver $dns"
-            done
-        } > "$RESOLV_CONF" 2>/dev/null || true
-    }
-
-    _dns_apply() {
-        local dns_list=("$@")
-        local ok=() bad=()
-
-        for dns in "${dns_list[@]}"; do
-            if _dns_is_valid_ip "$dns"; then
-                ok+=("$dns")
-            else
-                bad+=("$dns")
-            fi
-        done
-        dns_list=("${ok[@]}")
-
-        if [[ ${#dns_list[@]} -eq 0 ]]; then
-            echo -e "${RED}未检测到有效的DNS IP（请输入IPv4/IPv6地址）${PLAIN}"
-            return 1
-        fi
-        if [[ ${#bad[@]} -gt 0 ]]; then
-            echo -e "${YELLOW}已忽略无效DNS：${bad[*]}${PLAIN}"
-        fi
-
-        if _dns_systemd_resolved_active; then
-            mkdir -p "$RESOLVED_DROPIN_DIR"
-            {
-                echo "[Resolve]"
-                echo "DNS=${dns_list[*]}"
-                echo "Domains=~."
-            } > "$RESOLVED_DROPIN_FILE"
-
-            systemctl restart systemd-resolved 2>/dev/null || true
-
-            if command -v resolvectl >/dev/null 2>&1; then
-                resolvectl flush-caches 2>/dev/null || true
-                local iface
-                iface="$(get_default_interface)"
-                if [[ -n "$iface" ]]; then
-                    resolvectl dns "$iface" "${dns_list[@]}" 2>/dev/null || true
-                    resolvectl domain "$iface" "~." 2>/dev/null || true
-                    resolvectl flush-caches 2>/dev/null || true
-                fi
-            fi
-
-            if [[ ! -L "$RESOLV_CONF" ]]; then
-                _dns_unlock_resolv
-                _dns_write_resolv_conf "${dns_list[@]}"
-            fi
-        else
-            if [[ -L "$RESOLV_CONF" ]]; then
-                rm -f "$RESOLV_CONF" 2>/dev/null || true
-            fi
-            _dns_unlock_resolv
-            _dns_write_resolv_conf "${dns_list[@]}"
-        fi
-
-        if command -v systemctl >/dev/null 2>&1; then
-            for svc in nscd dnsmasq named; do
-                systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1
-            done
-        fi
-        return 0
-    }
-
-    _dns_apply_with_feedback() {
-        if _dns_apply "$@"; then
-            echo -e "${GREEN}DNS已修改并立即生效${PLAIN}"
-        else
-            echo -e "${RED}DNS修改失败${PLAIN}"
-        fi
-        press_any_key_to_continue
-    }
+    local choice
 
     while true; do
-        clear
-        echo -e "${BLUE}======== DNS 配置工具 ========${PLAIN}\n"
-        _dns_show_current
-        echo -e "${GREEN}1.${PLAIN}修改DNS为 ${GREEN}8.8.8.8${PLAIN} 和 ${GREEN}1.1.1.1${PLAIN}"
-        echo -e "${GREEN}2.${PLAIN}自定义修改DNS"
-        echo -e "${YELLOW}0.${PLAIN}返回主菜单"
-        echo -e "${BLUE}==============================${PLAIN}"
+        dns_show_menu
         choice=$(read_menu_choice "请输入选项 [0-2]: ")
-
-        case "$choice" in
-            1)
-                _dns_apply_with_feedback "8.8.8.8" "1.1.1.1"
-                ;;
-            2)
-                clear
-                echo -e "\n${YELLOW}请输入DNS(每行一个,空行结束):${PLAIN}"
-                local custom_dns=()
-                while true; do
-                    read -r -p "> " dns
-                    dns=$(trim_input "$dns")
-                    [[ -z "$dns" ]] && break
-                    custom_dns+=("$dns")
-                done
-
-                if [[ ${#custom_dns[@]} -eq 0 ]]; then
-                    echo -e "${YELLOW}未输入DNS${PLAIN}"
-                    press_any_key_to_continue
-                else
-                    _dns_apply_with_feedback "${custom_dns[@]}"
-                fi
-                ;;
-            0)
-                return
-                ;;
-            *)
-                show_invalid_option
-                ;;
-        esac
+        handle_dns_choice "$choice" || return
     done
 }
 
-ssh_config_menu() {
-    while true; do
-        clear
-        local current_port permit_root_login pass_auth pubkey_auth
-        local root_login_text password_login_text pubkey_login_text
-        local -a ssh_status
+ssh_show_config_menu() {
+    local current_port="$1"
+    local root_login_text="$2"
+    local password_login_text="$3"
+    local pubkey_login_text="$4"
 
+    clear
+    echo -e "${BLUE}======== SSH ========${PLAIN}"
+    echo -e "${BLUE}端口 ${YELLOW}${current_port}${PLAIN} | Root ${root_login_text}"
+    echo -e "${BLUE}密码 ${password_login_text} | 密钥 ${pubkey_login_text}"
+    echo -e "${BLUE}======================${PLAIN}"
+    echo -e "${GREEN}1.设置密码${PLAIN}  ${GREEN}2.设置密钥${PLAIN}"
+    echo -e "${BLUE}3.修改端口${PLAIN}  ${RED}4.修改登录${PLAIN}"
+    echo -e "${YELLOW}0.返回菜单${PLAIN}"
+    echo -e "${BLUE}======================${PLAIN}"
+}
+
+handle_ssh_config_choice() {
+    case "$1" in
+        1) enable_or_change_root_password ;;
+        2) enable_root_key_login ;;
+        3) change_ssh_port ;;
+        4) disable_ssh_login_menu ;;
+        0) return 1 ;;
+        *) show_invalid_option "无效选项，请重试" "0.3" ;;
+    esac
+
+    return 0
+}
+
+ssh_config_menu() {
+    local current_port permit_root_login pass_auth pubkey_auth
+    local root_login_text password_login_text pubkey_login_text
+    local ssh_choice
+    local -a ssh_status
+
+    while true; do
         mapfile -t ssh_status < <(ssh_read_status)
         current_port="${ssh_status[0]}"
         permit_root_login="${ssh_status[1]}"
@@ -2534,27 +2579,12 @@ ssh_config_menu() {
         pubkey_auth="${ssh_status[3]}"
 
         root_login_text=$(ssh_root_login_label "$permit_root_login")
-
         password_login_text=$(ssh_status_label "$pass_auth")
         pubkey_login_text=$(ssh_status_label "$pubkey_auth")
 
-        echo -e "${BLUE}======== SSH ========${PLAIN}"
-        echo -e "${BLUE}端口 ${YELLOW}${current_port}${PLAIN} | Root ${root_login_text}"
-        echo -e "${BLUE}密码 ${password_login_text} | 密钥 ${pubkey_login_text}"
-        echo -e "${BLUE}======================${PLAIN}"
-        echo -e "${GREEN}1.设置密码${PLAIN}  ${GREEN}2.设置密钥${PLAIN}"
-        echo -e "${BLUE}3.修改端口${PLAIN}  ${RED}4.修改登录${PLAIN}"
-        echo -e "${YELLOW}0.返回菜单${PLAIN}"
-        echo -e "${BLUE}======================${PLAIN}"
+        ssh_show_config_menu "$current_port" "$root_login_text" "$password_login_text" "$pubkey_login_text"
         ssh_choice=$(read_menu_choice "请输入选项 [0-4]: ")
-        case "$ssh_choice" in
-            1) enable_or_change_root_password ;;
-            2) enable_root_key_login ;;
-            3) change_ssh_port ;;
-            4) disable_ssh_login_menu ;;
-            0) return ;;
-            *) show_invalid_option "无效选项，请重试" "0.3" ;;
-        esac
+        handle_ssh_config_choice "$ssh_choice" || return
     done
 }
 
@@ -2910,13 +2940,65 @@ create_swap_file() {
     mkswap "$path" >/dev/null || return 1
 }
 
-set_swap_menu() {
-    while true; do
-        clear
-        local current_swap managed_swap total_ram recommend_swap
-        local current_swappiness
-        local -a swap_status
+swap_show_menu() {
+    local current_swap="$1"
+    local managed_swap="$2"
+    local total_ram="$3"
+    local current_swappiness="$4"
 
+    clear
+    echo -e "${BLUE}========= SWAP =========${PLAIN}"
+    echo -e "${YELLOW}内存 ${total_ram}MB | 总Swap ${current_swap}MB${PLAIN}"
+    echo -e "${YELLOW}文件Swap ${managed_swap}MB | Swappiness ${current_swappiness}${PLAIN}"
+    echo -e "${BLUE}========================${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}推荐大小    ${GREEN}2.${PLAIN}自定义"
+    echo -e "${GREEN}3.${PLAIN}Swappiness  ${RED}4.${PLAIN}关闭Swap"
+    echo -e "${YELLOW}0.${PLAIN}返回菜单"
+    echo -e "${BLUE}========================${PLAIN}"
+}
+
+handle_swap_menu_choice() {
+    local opt="$1"
+    local recommend_swap="$2"
+    local custom=""
+
+    case "$opt" in
+        1)
+            set_swap "$recommend_swap"
+            ;;
+        2)
+            read -rp "请输入 Swap 大小 (单位 MB,建议 >=128): " custom
+            custom=$(trim_input "$custom")
+            if swap_is_valid_size_mb "$custom"; then
+                set_swap "$custom"
+            else
+                echo -e "${RED}输入无效！${PLAIN}"
+                sleep 2
+            fi
+            ;;
+        3)
+            set_swappiness
+            ;;
+        4)
+            delete_swap
+            ;;
+        0)
+            return 1
+            ;;
+        *)
+            show_invalid_option "无效选项" "1"
+            ;;
+    esac
+
+    return 0
+}
+
+set_swap_menu() {
+    local current_swap managed_swap total_ram recommend_swap
+    local current_swappiness opt
+    local -a swap_status
+
+    while true; do
         mapfile -t swap_status < <(swap_read_menu_status)
         current_swap="${swap_status[0]}"
         managed_swap="${swap_status[1]}"
@@ -2924,43 +3006,9 @@ set_swap_menu() {
         recommend_swap="${swap_status[3]}"
         current_swappiness="${swap_status[4]}"
 
-        echo -e "${BLUE}========= SWAP =========${PLAIN}"
-        echo -e "${YELLOW}内存 ${total_ram}MB | 总Swap ${current_swap}MB${PLAIN}"
-        echo -e "${YELLOW}文件Swap ${managed_swap}MB | Swappiness ${current_swappiness}${PLAIN}"
-        echo -e "${BLUE}========================${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN}推荐大小    ${GREEN}2.${PLAIN}自定义"
-        echo -e "${GREEN}3.${PLAIN}Swappiness  ${RED}4.${PLAIN}关闭Swap"
-        echo -e "${YELLOW}0.${PLAIN}返回菜单"
-        echo -e "${BLUE}========================${PLAIN}"
-        
+        swap_show_menu "$current_swap" "$managed_swap" "$total_ram" "$current_swappiness"
         opt=$(read_menu_choice "请输入选项 [0-4]: ")
-        case "$opt" in
-            1)
-                set_swap "$recommend_swap"
-                ;;
-            2)
-                read -rp "请输入 Swap 大小 (单位 MB,建议 >=128): " custom
-                custom=$(trim_input "$custom")
-                if swap_is_valid_size_mb "$custom"; then
-                    set_swap "$custom"
-                else
-                    echo -e "${RED}输入无效！${PLAIN}"
-                    sleep 2
-                fi
-                ;;
-            3)
-                set_swappiness
-                ;;
-            4)
-                delete_swap
-                ;;
-            0)
-                return
-                ;;
-            *)
-                show_invalid_option "无效选项" "1"
-                ;;
-        esac
+        handle_swap_menu_choice "$opt" "$recommend_swap" || return
     done
 }
 
@@ -3106,12 +3154,14 @@ set_swappiness() {
     press_any_key_to_continue
 }
 
-BBR_SYSCTL_CONF="/etc/sysctl.d/99-bbr-ultimate.conf"
-BBR_KEYRING="/etc/apt/keyrings/xanmod-archive-keyring.gpg"
-BBR_REPO_FILE="/etc/apt/sources.list.d/xanmod-release.list"
-BBR_PERSIST_SERVICE="/etc/systemd/system/bbr-optimize-persist.service"
-BBR_PERSIST_SERVICE_NAME="bbr-optimize-persist.service"
-BBR_PERSIST_SCRIPT="/usr/local/bin/bbr-optimize-apply.sh"
+ACME_HOME="$ROOT_HOME/.acme.sh"
+ACME_BIN="$ACME_HOME/acme.sh"
+ACME_CERT_PATH="/etc/cert"
+ACME_PORT80_OPEN_HOOK="/usr/local/bin/zero-acme-port80-open"
+ACME_PORT80_CLOSE_HOOK="/usr/local/bin/zero-acme-port80-close"
+
+ACME_PORT80_FIREWALL_BACKUP=""
+ACME_PORT80_FIREWALL_CHANGED=0
 
 acme_exec() {
     [[ -f "$ACME_BIN" ]] || return 1
@@ -3490,9 +3540,6 @@ acme_issue_failed_cleanup() {
     press_any_key_to_continue
 }
 
-ACME_PORT80_FIREWALL_BACKUP=""
-ACME_PORT80_FIREWALL_CHANGED=0
-
 acme_reset_port_80_firewall_state() {
     if [[ -n "$ACME_PORT80_FIREWALL_BACKUP" ]]; then
         firewall_remove_backup "$ACME_PORT80_FIREWALL_BACKUP"
@@ -3798,41 +3845,52 @@ acme_generate_self_signed_cert() {
     press_any_key_to_continue
 }
 
-acme_menu() {
-    while true; do
-        clear
-        echo -e "${BLUE}===============================${PLAIN}"
-        echo -e "         ${RED}证书申请${PLAIN}"
-        echo -e "${BLUE}===============================${PLAIN}"
-        echo -e " ${GREEN}1.${PLAIN}安装Acme"
-        echo -e " ${GREEN}2.${PLAIN}卸载Acme"
-        echo -e "${BLUE}-------------${PLAIN}"
-        echo -e " ${GREEN}3.${PLAIN}申请单域名证书 ${YELLOW}(80 端口申请)${PLAIN}"
-        echo -e " ${GREEN}4.${PLAIN}申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
-        echo -e " ${GREEN}5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
-        echo -e "${BLUE}-------------${PLAIN}"
-        echo -e " ${GREEN}6.${PLAIN}撤销已申请的证书"
-        echo -e " ${GREEN}7.${PLAIN}续期已申请的证书"
-        echo -e " ${GREEN}8.${PLAIN}切换证书颁发机构"
-        echo -e " ${GREEN}9.${PLAIN}生成自签证书"
-        echo -e "${BLUE}-------------${PLAIN}"
-        echo -e " ${YELLOW}0.${PLAIN}返回菜单"
-        echo
-        acme_choice=$(read_menu_choice "请输入选项 [0-9]: ")
+acme_show_menu() {
+    clear
+    echo -e "${BLUE}===============================${PLAIN}"
+    echo -e "         ${RED}证书申请${PLAIN}"
+    echo -e "${BLUE}===============================${PLAIN}"
+    echo -e " ${GREEN}1.${PLAIN}安装Acme"
+    echo -e " ${GREEN}2.${PLAIN}卸载Acme"
+    echo -e "${BLUE}-------------${PLAIN}"
+    echo -e " ${GREEN}3.${PLAIN}申请单域名证书 ${YELLOW}(80 端口申请)${PLAIN}"
+    echo -e " ${GREEN}4.${PLAIN}申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+    echo -e " ${GREEN}5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+    echo -e "${BLUE}-------------${PLAIN}"
+    echo -e " ${GREEN}6.${PLAIN}撤销已申请的证书"
+    echo -e " ${GREEN}7.${PLAIN}续期已申请的证书"
+    echo -e " ${GREEN}8.${PLAIN}切换证书颁发机构"
+    echo -e " ${GREEN}9.${PLAIN}生成自签证书"
+    echo -e "${BLUE}-------------${PLAIN}"
+    echo -e " ${YELLOW}0.${PLAIN}返回菜单"
+    echo
+}
 
-        case "$acme_choice" in
-            1) acme_install_core; press_any_key_to_continue ;;
-            2) acme_uninstall ;;
-            3) acme_issue_standalone ;;
-            4) acme_issue_cf_single ;;
-            5) acme_issue_cf_wildcard ;;
-            6) acme_revoke_cert ;;
-            7) acme_renew_cert ;;
-            8) acme_switch_provider ;;
-            9) acme_generate_self_signed_cert ;;
-            0) return ;;
-            *) show_invalid_option ;;
-        esac
+handle_acme_choice() {
+    case "$1" in
+        1) acme_install_core; press_any_key_to_continue ;;
+        2) acme_uninstall ;;
+        3) acme_issue_standalone ;;
+        4) acme_issue_cf_single ;;
+        5) acme_issue_cf_wildcard ;;
+        6) acme_revoke_cert ;;
+        7) acme_renew_cert ;;
+        8) acme_switch_provider ;;
+        9) acme_generate_self_signed_cert ;;
+        0) return 1 ;;
+        *) show_invalid_option ;;
+    esac
+
+    return 0
+}
+
+acme_menu() {
+    local acme_choice
+
+    while true; do
+        acme_show_menu
+        acme_choice=$(read_menu_choice "请输入选项 [0-9]: ")
+        handle_acme_choice "$acme_choice" || return
     done
 }
 
@@ -4733,23 +4791,27 @@ snell_menu() {
 }
 
 
+get_app_installer_url() {
+    case "$1" in
+        shoes)     echo "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/shoes.sh" ;;
+        mihomo)    echo "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh" ;;
+        wireproxy) echo "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/wireproxy.sh" ;;
+        warp)      echo "https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh" ;;
+        *)         return 1 ;;
+    esac
+}
+
 run_app_installer() {
     local app="$1"
     local url=""
-    local tmp_script=''
+    local tmp_script=""
     local rc=0
 
-    case "$app" in
-        shoes)     url="https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/shoes.sh" ;;
-        mihomo)    url="https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/mihomo.sh" ;;
-        wireproxy) url="https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/wireproxy.sh" ;;
-        warp)      url="https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/warp.sh" ;;
-        *)
-            echo -e "${RED}未知安装项: ${app}${PLAIN}"
-            press_any_key_to_continue
-            return 1
-            ;;
-    esac
+    if ! url=$(get_app_installer_url "$app"); then
+        echo -e "${RED}未知安装项: ${app}${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
 
     if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
         echo -e "${YELLOW}未检测到 curl/wget，正在尝试安装...${PLAIN}"
@@ -4789,7 +4851,22 @@ run_app_installer() {
     return "$rc"
 }
 
-install_system()    { reinstall_menu; }
+reinstall_system_menu() { reinstall_menu; }
+reboot_system()         { echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps; }
+configure_shoes()       { run_app_installer "shoes"; }
+configure_mihomo()      { run_app_installer "mihomo"; }
+configure_wireproxy()   { run_app_installer "wireproxy"; }
+configure_warpstack()   { run_app_installer "warp"; }
+
+FIREWALL_RULE_DIR="/etc/iptables"
+FIREWALL_RULES_V4="$FIREWALL_RULE_DIR/zero.rules.v4"
+FIREWALL_RULES_V6="$FIREWALL_RULE_DIR/zero.rules.v6"
+ZERO_FIREWALL_SERVICE="/etc/systemd/system/zero-firewall-persistent.service"
+ZERO_FIREWALL_SERVICE_NAME="zero-firewall-persistent.service"
+ZERO_FW_CHAIN="ZERO_INPUT"
+ZERO_PORT_JUMP_CHAIN="ZERO_PORT_JUMP"
+
+FIREWALL_LAST_BACKUP=""
 
 firewall_exec_quiet() {
     local cmd="$1"
@@ -5078,8 +5155,6 @@ firewall_remove_backup() {
     IFS='|' read -r v4_backup v6_backup <<< "$backup"
     rm -f "$v4_backup" "$v6_backup"
 }
-
-FIREWALL_LAST_BACKUP=""
 
 firewall_require_backup() {
     local cancel_label="${1:-本次修改}"
@@ -5776,29 +5851,210 @@ port_jump_delete() {
     press_any_key_to_continue
 }
 
-port_jump_menu() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Ports Jump ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}设置跳跃"
-        echo -e "${GREEN}  2.${PLAIN}修改跳跃"
-        echo -e "${GREEN}  3.${PLAIN}查看跳跃"
-        echo -e "${GREEN}  4.${PLAIN}删除跳跃"
-        echo -e "${GREEN}  0.${PLAIN}返回上级"
-        pjopt=$(read_menu_choice "✦ Steins Gate ✦ : ")
+port_jump_show_menu() {
+    clear
+    echo -e "${BLUE}✦ Ports Jump ✦${PLAIN}"
+    echo -e "${GREEN}  1.${PLAIN}设置跳跃"
+    echo -e "${GREEN}  2.${PLAIN}修改跳跃"
+    echo -e "${GREEN}  3.${PLAIN}查看跳跃"
+    echo -e "${GREEN}  4.${PLAIN}删除跳跃"
+    echo -e "${GREEN}  0.${PLAIN}返回上级"
+}
 
-        case "$pjopt" in
-            1) port_jump_set ;;
-            2) port_jump_modify ;;
-            3) port_jump_view ;;
-            4) port_jump_delete ;;
-            0) break ;;
-            *) show_invalid_option "无效选项,请重新输入" ;;
-        esac
+handle_port_jump_choice() {
+    case "$1" in
+        1) port_jump_set ;;
+        2) port_jump_modify ;;
+        3) port_jump_view ;;
+        4) port_jump_delete ;;
+        0) return 1 ;;
+        *) show_invalid_option "无效选项,请重新输入" ;;
+    esac
+
+    return 0
+}
+
+port_jump_menu() {
+    local pjopt
+
+    while true; do
+        port_jump_show_menu
+        pjopt=$(read_menu_choice "✦ Steins Gate ✦ : ")
+        handle_port_jump_choice "$pjopt" || return
     done
 }
 
+firewall_show_menu() {
+    local current_ssh_port="$1"
+    local has_iptables="$2"
+    local has_ip6tables="$3"
+
+    clear
+    echo -e "${BLUE}===== iptables 防火墙管理 =====${PLAIN}"
+    echo -e "${BLUE}SSH端口:  ${YELLOW}${current_ssh_port}${PLAIN}"
+    if [[ "$has_iptables" != "true" || "$has_ip6tables" != "true" ]]; then
+        if [[ "$has_iptables" == "true" && "$has_ip6tables" != "true" ]]; then
+            echo -e "${YELLOW}当前仅支持 IPv4，规则将只写入 IPv4${PLAIN}"
+        elif [[ "$has_iptables" != "true" && "$has_ip6tables" == "true" ]]; then
+            echo -e "${YELLOW}当前仅支持 IPv6，规则将只写入 IPv6${PLAIN}"
+        else
+            echo -e "${RED}未检测到可用的 iptables/ip6tables，部分功能可能不可用${PLAIN}"
+        fi
+    fi
+    echo -e "${BLUE}===============================${PLAIN}"
+    echo -e "${GREEN}1.放行端口${PLAIN}"
+    echo -e "${RED}2.阻断端口${PLAIN}"
+    echo -e "${GREEN}3.清空规则${PLAIN}"
+    echo -e "${RED}4.仅放行SSH${PLAIN}"
+    echo -e "${BLUE}5.查看当前规则${PLAIN}"
+    echo -e "${GREEN}6.配置端口跳跃${PLAIN}"
+    echo -e "${YELLOW}0.返回主菜单${PLAIN}"
+    echo -e "${BLUE}===============================${PLAIN}"
+}
+
+handle_firewall_action_choice() {
+    local action_choice="$1"
+    local current_ssh_port="$2"
+
+    case "$action_choice" in
+        0)
+            return 1
+            ;;
+        1|2)
+            local input_ports protocol_label action_failed port_range start_port end_port port_spec backup
+            protocol_label="TCP+UDP"
+
+            read -r -p "请输入端口（如 443 或 1000-2000，可空格分隔多个）: " input_ports
+            input_ports=$(trim_input "$input_ports")
+            action_failed=0
+            firewall_require_backup "本次操作" || {
+                press_any_key_to_continue
+                return 0
+            }
+            backup="$FIREWALL_LAST_BACKUP"
+
+            for port_range in $input_ports; do
+                local port_failed=0
+                if [[ "$port_range" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                    start_port=${BASH_REMATCH[1]}
+                    end_port=${BASH_REMATCH[2]}
+                elif [[ "$port_range" =~ ^([0-9]+)$ ]]; then
+                    start_port=$port_range
+                    end_port=$port_range
+                else
+                    echo -e "${RED}[!] 无效端口格式: $port_range${PLAIN}"
+                    action_failed=1
+                    continue
+                fi
+
+                if (( start_port < 1 || end_port > 65535 || start_port > end_port )); then
+                    echo -e "${RED}[!] 端口范围无效: $port_range (必须 1-65535 且起始≤结束)${PLAIN}"
+                    action_failed=1
+                    continue
+                fi
+
+                if (( start_port == end_port )); then
+                    port_spec="$start_port"
+                else
+                    port_spec="$start_port:$end_port"
+                fi
+
+                local proto cmd
+                for proto in tcp udp; do
+                    if [[ "$action_choice" == "2" && "$proto" == "tcp" && "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
+                        echo -e "${YELLOW}[!] 跳过 TCP ${port_range}: 不能阻断当前 SSH 端口 ${current_ssh_port}${PLAIN}"
+                        continue
+                    fi
+
+                    for cmd in iptables ip6tables; do
+                        firewall_supports_table "$cmd" filter || continue
+                        if [[ "$action_choice" == "1" ]]; then
+                            firewall_apply_port_rule "$cmd" "open" "$proto" "$port_spec" || {
+                                action_failed=1
+                                port_failed=1
+                            }
+                        else
+                            firewall_apply_port_rule "$cmd" "close" "$proto" "$port_spec" || {
+                                action_failed=1
+                                port_failed=1
+                            }
+                        fi
+                    done
+                done
+
+                if (( port_failed == 0 )); then
+                    if [[ "$action_choice" == "1" ]]; then
+                        echo -e "${GREEN}[✓] 端口 $port_range 已按 ${protocol_label} 规则放行${PLAIN}"
+                    else
+                        echo -e "${RED}[✓] 端口 $port_range 已按 ${protocol_label} 规则阻断${PLAIN}"
+                    fi
+                else
+                    echo -e "${YELLOW}[!] 端口 $port_range 的部分规则写入失败,请查看当前规则${PLAIN}"
+                fi
+            done
+
+            if (( action_failed == 0 )); then
+                firewall_save_rules || true
+            else
+                firewall_restore_with_notice "$backup" "[!] 本次操作存在失败项,已回滚到修改前状态" "[!] 本次操作存在失败项,且回滚失败,请立即检查规则"
+            fi
+            firewall_dispose_backup "$backup"
+            press_any_key_to_continue
+            ;;
+        3)
+            local backup
+            firewall_require_backup "清空" || {
+                press_any_key_to_continue
+                return 0
+            }
+            backup="$FIREWALL_LAST_BACKUP"
+            if firewall_clear_managed_rules; then
+                firewall_save_rules || true
+                echo -e "${GREEN}[✓] 已清空本脚本管理的规则,不再改动系统原有 INPUT/FORWARD/OUTPUT 策略${PLAIN}"
+            else
+                echo -e "${RED}[!] 清空规则失败${PLAIN}"
+                firewall_restore_with_notice "$backup" "已恢复到清空前的状态" "回滚失败,请手动检查当前规则"
+            fi
+            firewall_dispose_backup "$backup"
+            press_any_key_to_continue
+            ;;
+        4)
+            local backup
+            firewall_require_backup "本次操作" || {
+                press_any_key_to_continue
+                return 0
+            }
+            backup="$FIREWALL_LAST_BACKUP"
+            echo -e "${YELLOW}[*] 正在配置仅保留 SSH 的入站策略(SSH: ${current_ssh_port})...${PLAIN}"
+            if firewall_lockdown_all "$current_ssh_port"; then
+                firewall_save_rules || true
+                echo -e "${GREEN}[✓] 已应用仅留 SSH 的入站规则${PLAIN}"
+            else
+                echo -e "${RED}[!] 写入仅保留 SSH 规则失败${PLAIN}"
+                firewall_restore_with_notice "$backup" "已恢复到修改前的状态" "回滚失败,请手动检查当前规则"
+            fi
+            firewall_dispose_backup "$backup"
+            press_any_key_to_continue
+            ;;
+        5)
+            list_firewall_rules
+            press_any_key_to_continue
+            ;;
+        6)
+            port_jump_menu
+            ;;
+        *)
+            show_invalid_option "[!] 无效选项" "1"
+            ;;
+    esac
+
+    return 0
+}
+
 configure_firewall() {
+    local action_choice current_ssh_port has_iptables has_ip6tables
+    local -a firewall_runtime_status
+
     if ! firewall_prepare_tools; then
         press_any_key_to_continue
         return 1
@@ -5813,213 +6069,80 @@ configure_firewall() {
     firewall_setup_persistence || true
 
     while true; do
-        local current_ssh_port has_iptables has_ip6tables
-        local -a firewall_runtime_status
-
         mapfile -t firewall_runtime_status < <(firewall_read_runtime_status)
         current_ssh_port="${firewall_runtime_status[0]}"
         has_iptables="${firewall_runtime_status[1]}"
         has_ip6tables="${firewall_runtime_status[2]}"
-
-        clear
-        echo -e "${BLUE}===== iptables 防火墙管理 =====${PLAIN}"
-        echo -e "${BLUE}SSH端口:  ${YELLOW}${current_ssh_port}${PLAIN}"
-        if [[ "$has_iptables" != "true" || "$has_ip6tables" != "true" ]]; then
-            if [[ "$has_iptables" == "true" && "$has_ip6tables" != "true" ]]; then
-                echo -e "${YELLOW}当前仅支持 IPv4，规则将只写入 IPv4${PLAIN}"
-            elif [[ "$has_iptables" != "true" && "$has_ip6tables" == "true" ]]; then
-                echo -e "${YELLOW}当前仅支持 IPv6，规则将只写入 IPv6${PLAIN}"
-            else
-                echo -e "${RED}未检测到可用的 iptables/ip6tables，部分功能可能不可用${PLAIN}"
-            fi
-        fi
-        echo -e "${BLUE}===============================${PLAIN}"
-        echo -e "${GREEN}1.放行端口${PLAIN}"
-        echo -e "${RED}2.阻断端口${PLAIN}"
-        echo -e "${GREEN}3.清空规则${PLAIN}"
-        echo -e "${RED}4.仅放行SSH${PLAIN}"
-        echo -e "${BLUE}5.查看当前规则${PLAIN}"
-        echo -e "${GREEN}6.配置端口跳跃${PLAIN}"
-        echo -e "${YELLOW}0.返回主菜单${PLAIN}"
-        echo -e "${BLUE}===============================${PLAIN}"
+        firewall_show_menu "$current_ssh_port" "$has_iptables" "$has_ip6tables"
         action_choice=$(read_menu_choice "请输入选项 [0-6]: ")
-
-        [[ "$action_choice" == "0" ]] && return
-        case "$action_choice" in
-            1|2)
-                local input_ports protocol_label action_failed port_range start_port end_port port_spec backup
-                protocol_label="TCP+UDP"
-
-                read -r -p "请输入端口（如 443 或 1000-2000，可空格分隔多个）: " input_ports
-                input_ports=$(trim_input "$input_ports")
-                action_failed=0
-                firewall_require_backup "本次操作" || {
-                    press_any_key_to_continue
-                    continue
-                }
-                backup="$FIREWALL_LAST_BACKUP"
-
-                for port_range in $input_ports; do
-                    local port_failed=0
-                    if [[ "$port_range" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                        start_port=${BASH_REMATCH[1]}
-                        end_port=${BASH_REMATCH[2]}
-                    elif [[ "$port_range" =~ ^([0-9]+)$ ]]; then
-                        start_port=$port_range
-                        end_port=$port_range
-                    else
-                        echo -e "${RED}[!] 无效端口格式: $port_range${PLAIN}"
-                        action_failed=1
-                        continue
-                    fi
-
-                    if (( start_port < 1 || end_port > 65535 || start_port > end_port )); then
-                        echo -e "${RED}[!] 端口范围无效: $port_range (必须 1-65535 且起始≤结束)${PLAIN}"
-                        action_failed=1
-                        continue
-                    fi
-
-                    if (( start_port == end_port )); then
-                        port_spec="$start_port"
-                    else
-                        port_spec="$start_port:$end_port"
-                    fi
-
-                    local proto cmd
-                    for proto in tcp udp; do
-                        if [[ "$action_choice" == "2" && "$proto" == "tcp" && "$start_port" -le "$current_ssh_port" && "$end_port" -ge "$current_ssh_port" ]]; then
-                            echo -e "${YELLOW}[!] 跳过 TCP ${port_range}: 不能阻断当前 SSH 端口 ${current_ssh_port}${PLAIN}"
-                            continue
-                        fi
-
-                        for cmd in iptables ip6tables; do
-                            firewall_supports_table "$cmd" filter || continue
-                            if [[ "$action_choice" == "1" ]]; then
-                                firewall_apply_port_rule "$cmd" "open" "$proto" "$port_spec" || {
-                                    action_failed=1
-                                    port_failed=1
-                                }
-                            else
-                                firewall_apply_port_rule "$cmd" "close" "$proto" "$port_spec" || {
-                                    action_failed=1
-                                    port_failed=1
-                                }
-                            fi
-                        done
-                    done
-
-                    if (( port_failed == 0 )); then
-                        if [[ "$action_choice" == "1" ]]; then
-                            echo -e "${GREEN}[✓] 端口 $port_range 已按 ${protocol_label} 规则放行${PLAIN}"
-                        else
-                            echo -e "${RED}[✓] 端口 $port_range 已按 ${protocol_label} 规则阻断${PLAIN}"
-                        fi
-                    else
-                        echo -e "${YELLOW}[!] 端口 $port_range 的部分规则写入失败,请查看当前规则${PLAIN}"
-                    fi
-                done
-
-                if (( action_failed == 0 )); then
-                    firewall_save_rules || true
-                else
-                    firewall_restore_with_notice "$backup" "[!] 本次操作存在失败项,已回滚到修改前状态" "[!] 本次操作存在失败项,且回滚失败,请立即检查规则"
-                fi
-                firewall_dispose_backup "$backup"
-                press_any_key_to_continue
-                ;;
-            3)
-                local backup
-                firewall_require_backup "清空" || {
-                    press_any_key_to_continue
-                    continue
-                }
-                backup="$FIREWALL_LAST_BACKUP"
-                if firewall_clear_managed_rules; then
-                    firewall_save_rules || true
-                    echo -e "${GREEN}[✓] 已清空本脚本管理的规则,不再改动系统原有 INPUT/FORWARD/OUTPUT 策略${PLAIN}"
-                else
-                    echo -e "${RED}[!] 清空规则失败${PLAIN}"
-                    firewall_restore_with_notice "$backup" "已恢复到清空前的状态" "回滚失败,请手动检查当前规则"
-                fi
-                firewall_dispose_backup "$backup"
-                press_any_key_to_continue
-                ;;
-            4)
-                local backup
-                firewall_require_backup "本次操作" || {
-                    press_any_key_to_continue
-                    continue
-                }
-                backup="$FIREWALL_LAST_BACKUP"
-                echo -e "${YELLOW}[*] 正在配置仅保留 SSH 的入站策略(SSH: ${current_ssh_port})...${PLAIN}"
-                if firewall_lockdown_all "$current_ssh_port"; then
-                    firewall_save_rules || true
-                    echo -e "${GREEN}[✓] 已应用仅留 SSH 的入站规则${PLAIN}"
-                else
-                    echo -e "${RED}[!] 写入仅保留 SSH 规则失败${PLAIN}"
-                    firewall_restore_with_notice "$backup" "已恢复到修改前的状态" "回滚失败,请手动检查当前规则"
-                fi
-                firewall_dispose_backup "$backup"
-                press_any_key_to_continue
-                ;;
-            5)
-                list_firewall_rules
-                press_any_key_to_continue
-                ;;
-            6)
-                port_jump_menu
-                ;;
-            *)
-                show_invalid_option "[!] 无效选项" "1"
-                ;;
-        esac
+        handle_firewall_action_choice "$action_choice" "$current_ssh_port" || return
     done
 }
 
+show_main_menu() {
+    clear
+    echo -e "${BLUE}✦ Steins Gate_Ver.2.3 ✦${PLAIN}"
+    echo -e "${GREEN}  01.${PLAIN}系统更新"
+    echo -e "${GREEN}  02.${PLAIN}系统清理"
+    echo -e "${GREEN}  03.${PLAIN}重装系统"
+    echo -e "${GREEN}  04.${PLAIN}设置时区"
+    echo -e "${GREEN}  05.${PLAIN}配置IP栈"
+    echo -e "${GREEN}  06.${PLAIN}配置BBR"
+    echo -e "${GREEN}  07.${PLAIN}配置DNS"
+    echo -e "${GREEN}  08.${PLAIN}配置SSH"
+    echo -e "${GREEN}  09.${PLAIN}重启VPS"
+    echo -e "${GREEN}  10.${PLAIN}配置SWAP"
+    echo -e "${GREEN}  11.${PLAIN}配置ACME"
+    echo -e "${GREEN}  12.${PLAIN}配置Snell"
+    echo -e "${GREEN}  13.${PLAIN}配置Shoes"
+    echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
+    echo -e "${GREEN}  15.${PLAIN}配置FireWall"
+    echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
+    echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
+    echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
+}
+
+handle_main_menu_choice() {
+    case "$1" in
+        1)  linux_update ;;
+        2)  linux_clean ;;
+        3)  reinstall_system_menu ;;
+        4)  change_timezone ;;
+        5)  set_ip_priority ;;
+        6)  bbr_manage_menu ;;
+        7)  dns_fix ;;
+        8)  ssh_config_menu ;;
+        9)  reboot_system ;;
+        10) set_swap_menu ;;
+        11) acme_menu ;;
+        12) snell_menu ;;
+        13) configure_shoes ;;
+        14) configure_mihomo ;;
+        15) configure_firewall ;;
+        16) configure_wireproxy ;;
+        17) configure_warpstack ;;
+        0)
+            clear
+            echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"
+            sleep 0.6
+            clear
+            return 1
+            ;;
+        *)
+            show_invalid_option "[!] 无效选项，请重新选择" "0.4" "1"
+            ;;
+    esac
+
+    return 0
+}
+
 main_menu() {
+    local choice
+
     while true; do
-        clear
-        echo -e "${BLUE}✦ Steins Gate_Ver.2.3 ✦${PLAIN}"
-        echo -e "${GREEN}  01.${PLAIN}系统更新"
-        echo -e "${GREEN}  02.${PLAIN}系统清理"
-        echo -e "${GREEN}  03.${PLAIN}重装系统"
-        echo -e "${GREEN}  04.${PLAIN}设置时区"
-        echo -e "${GREEN}  05.${PLAIN}配置IP栈"
-        echo -e "${GREEN}  06.${PLAIN}配置BBR"
-        echo -e "${GREEN}  07.${PLAIN}配置DNS"
-        echo -e "${GREEN}  08.${PLAIN}配置SSH"
-        echo -e "${GREEN}  09.${PLAIN}重启VPS"
-        echo -e "${GREEN}  10.${PLAIN}配置SWAP"
-        echo -e "${GREEN}  11.${PLAIN}配置ACME"
-        echo -e "${GREEN}  12.${PLAIN}配置Snell"
-        echo -e "${GREEN}  13.${PLAIN}配置Shoes"
-        echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
-        echo -e "${GREEN}  15.${PLAIN}配置FireWall"
-        echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
-        echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
-        echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
+        show_main_menu
         choice=$(read_menu_choice "✦ Choice [0-17] ✦ : ")
-        case "$choice" in
-            1)  linux_update ;;
-            2)  linux_clean ;;
-            3)  install_system ;;
-            4)  change_timezone ;;
-            5)  set_ip_priority ;;
-            6)  bbr_manage_menu ;;
-            7)  dns_fix ;;
-            8)  ssh_config_menu ;;
-            9)  echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps ;;
-            10) set_swap_menu ;;
-            11) acme_menu ;;
-            12) snell_menu ;;
-            13) run_app_installer "shoes" ;;
-            14) run_app_installer "mihomo" ;;
-            15) configure_firewall ;;
-            16) run_app_installer "wireproxy" ;;
-            17) run_app_installer "warp" ;;
-            0)  clear; echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"; sleep 0.6; clear; break ;;
-            *)  show_invalid_option "[!] 无效选项，请重新选择" "0.4" "1" ;;
-        esac
+        handle_main_menu_choice "$choice" || break
     done
 }
 
