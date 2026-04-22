@@ -3,7 +3,7 @@
 ```
 bash <(curl -sL https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/Zero.sh)
 ```
-![SteinsGate](./icon/Mine/SteinsGate.png)
+![SteinsGate](./icon/Mine/Zero.png)
 
 ## 𝐁𝐥𝐨𝐠 ##
 https://snell.us.kg
