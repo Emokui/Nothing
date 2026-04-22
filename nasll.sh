@@ -584,19 +584,24 @@ reinstall_select_debian_mirror() {
 reinstall_pick_ipv6_line() {
     local iface="$1" ip6_line='' ip6_src=''
 
-    ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / {print; exit}')
+    [[ -n "$iface" ]] || return 0
+
+    ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / && !/ tentative / {print; exit}')
     if [[ -z "$ip6_line" ]]; then
         ip6_src=$(ip -6 route get 2001:4860:4860::8888 oif "$iface" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
         if [[ -n "$ip6_src" ]]; then
             ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk -v src="$ip6_src" '$4 ~ ("^" src "/") {print; exit}')
         fi
     fi
+    if [[ -z "$ip6_line" ]]; then
+        ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ tentative / {print; exit}')
+    fi
 
     echo "$ip6_line"
 }
 
 reinstall_gather_network_state() {
-    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt=''
+    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt='' candidate_iface='' detected_ipv6_iface=''
 
     REINSTALL_NETWORK_INTERFACE=$(get_default_interface)
     [[ -n "$REINSTALL_NETWORK_INTERFACE" ]] || {
@@ -624,15 +629,24 @@ reinstall_gather_network_state() {
     [[ -n "$ipv6_iface" ]] || ipv6_iface="$REINSTALL_NETWORK_INTERFACE"
 
     for attempt in 1 2 3; do
-        ip6_line=$(reinstall_pick_ipv6_line "$ipv6_iface")
-        if [[ -z "$ip6_line" && "$ipv6_iface" != "$REINSTALL_NETWORK_INTERFACE" ]]; then
-            ip6_line=$(reinstall_pick_ipv6_line "$REINSTALL_NETWORK_INTERFACE")
+        for candidate_iface in "$ipv6_iface" "$REINSTALL_NETWORK_INTERFACE"; do
+            [[ -n "$candidate_iface" ]] || continue
+            ip6_line=$(reinstall_pick_ipv6_line "$candidate_iface")
+            [[ -n "$ip6_line" ]] && break
+        done
+        if [[ -z "$ip6_line" ]]; then
+            ip6_line=$(ip -6 -o addr show scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / && !/ tentative / {print; exit}')
+        fi
+        if [[ -z "$ip6_line" ]]; then
+            ip6_line=$(ip -6 -o addr show scope global 2>/dev/null | awk '!/ tentative / {print; exit}')
         fi
         [[ -n "$ip6_line" ]] && break
         [[ "$attempt" == '3' ]] || sleep 1
     done
 
     if [[ -n "$ip6_line" ]]; then
+        detected_ipv6_iface=$(echo "$ip6_line" | awk '{print $2}')
+        [[ -n "$detected_ipv6_iface" ]] && ipv6_iface="$detected_ipv6_iface"
         REINSTALL_IPV6_ADDR=$(echo "$ip6_line" | awk '{print $4}' | cut -d/ -f1)
         REINSTALL_IPV6_PREFIX=$(echo "$ip6_line" | awk '{print $4}' | cut -d/ -f2)
         ip6_route=$(ip -6 route show default dev "$ipv6_iface" 2>/dev/null | awk '/^default/ {print; exit}')
@@ -652,7 +666,7 @@ reinstall_build_ipv6_block() {
         auto)
             cat <<'EOF'
 cat >> /etc/network/interfaces <<EOF_IPV6
-iface $iface inet6 dhcp
+iface $iface inet6 auto
     accept_ra 2
     autoconf 1
 EOF_IPV6
