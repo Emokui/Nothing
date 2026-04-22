@@ -491,6 +491,14 @@ reinstall_cidr_to_netmask() {
     echo "$m"
 }
 
+reinstall_get_default_interface() {
+    local iface=''
+    iface=$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    [[ -z "$iface" ]] && iface=$(ip -6 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
+    [[ -z "$iface" ]] && iface=$(ip -o link show 2>/dev/null | awk -F': ' '$2 != "lo" {print $2; exit}')
+    echo "$iface"
+}
+
 reinstall_get_target_disk() {
     local root_source='' root_disk='' disks=''
     root_source=$(findmnt -n -o SOURCE / 2>/dev/null | head -n1)
@@ -584,26 +592,21 @@ reinstall_select_debian_mirror() {
 reinstall_pick_ipv6_line() {
     local iface="$1" ip6_line='' ip6_src=''
 
-    [[ -n "$iface" ]] || return 0
-
-    ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / && !/ tentative / {print; exit}')
+    ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / {print; exit}')
     if [[ -z "$ip6_line" ]]; then
         ip6_src=$(ip -6 route get 2001:4860:4860::8888 oif "$iface" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
         if [[ -n "$ip6_src" ]]; then
             ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk -v src="$ip6_src" '$4 ~ ("^" src "/") {print; exit}')
         fi
     fi
-    if [[ -z "$ip6_line" ]]; then
-        ip6_line=$(ip -6 -o addr show dev "$iface" scope global 2>/dev/null | awk '!/ tentative / {print; exit}')
-    fi
 
     echo "$ip6_line"
 }
 
 reinstall_gather_network_state() {
-    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt='' candidate_iface='' detected_ipv6_iface='' ipv6_prefix_route=''
+    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt=''
 
-    REINSTALL_NETWORK_INTERFACE=$(get_default_interface)
+    REINSTALL_NETWORK_INTERFACE=$(reinstall_get_default_interface)
     [[ -n "$REINSTALL_NETWORK_INTERFACE" ]] || {
         echo -e "${RED}未检测到默认网卡。${PLAIN}"
         exit 1
@@ -629,24 +632,15 @@ reinstall_gather_network_state() {
     [[ -n "$ipv6_iface" ]] || ipv6_iface="$REINSTALL_NETWORK_INTERFACE"
 
     for attempt in 1 2 3; do
-        for candidate_iface in "$ipv6_iface" "$REINSTALL_NETWORK_INTERFACE"; do
-            [[ -n "$candidate_iface" ]] || continue
-            ip6_line=$(reinstall_pick_ipv6_line "$candidate_iface")
-            [[ -n "$ip6_line" ]] && break
-        done
-        if [[ -z "$ip6_line" ]]; then
-            ip6_line=$(ip -6 -o addr show scope global 2>/dev/null | awk '!/ temporary / && !/ deprecated / && !/ tentative / {print; exit}')
-        fi
-        if [[ -z "$ip6_line" ]]; then
-            ip6_line=$(ip -6 -o addr show scope global 2>/dev/null | awk '!/ tentative / {print; exit}')
+        ip6_line=$(reinstall_pick_ipv6_line "$ipv6_iface")
+        if [[ -z "$ip6_line" && "$ipv6_iface" != "$REINSTALL_NETWORK_INTERFACE" ]]; then
+            ip6_line=$(reinstall_pick_ipv6_line "$REINSTALL_NETWORK_INTERFACE")
         fi
         [[ -n "$ip6_line" ]] && break
         [[ "$attempt" == '3' ]] || sleep 1
     done
 
     if [[ -n "$ip6_line" ]]; then
-        detected_ipv6_iface=$(echo "$ip6_line" | awk '{print $2}')
-        [[ -n "$detected_ipv6_iface" ]] && ipv6_iface="$detected_ipv6_iface"
         REINSTALL_IPV6_ADDR=$(echo "$ip6_line" | awk '{print $4}' | cut -d/ -f1)
         REINSTALL_IPV6_PREFIX=$(echo "$ip6_line" | awk '{print $4}' | cut -d/ -f2)
         ip6_route=$(ip -6 route show default dev "$ipv6_iface" 2>/dev/null | awk '/^default/ {print; exit}')
@@ -658,12 +652,6 @@ reinstall_gather_network_state() {
         else
             REINSTALL_IPV6_MODE='auto'
         fi
-    elif [[ -n "$ipv6_iface" ]]; then
-        ip6_route=$(ip -6 route show default dev "$ipv6_iface" 2>/dev/null | awk '/^default/ {print; exit}')
-        ipv6_prefix_route=$(ip -6 route show dev "$ipv6_iface" 2>/dev/null | awk '$1 ~ /:/ && $1 !~ /^fe80:/ && $1 != "default" {print $1; exit}')
-        if [[ -n "$ip6_route" && -n "$ipv6_prefix_route" ]]; then
-            REINSTALL_IPV6_MODE='auto'
-        fi
     fi
 }
 
@@ -672,7 +660,7 @@ reinstall_build_ipv6_block() {
         auto)
             cat <<'EOF'
 cat >> /etc/network/interfaces <<EOF_IPV6
-iface $iface inet6 auto
+iface $iface inet6 dhcp
     accept_ra 2
     autoconf 1
 EOF_IPV6
@@ -794,13 +782,7 @@ reinstall_install_target_system() {
     echo -e "${YELLOW}目标磁盘: ${target_disk}${PLAIN}"
     echo -e "${YELLOW}IPv4: ${REINSTALL_IPV4_ADDR}/${REINSTALL_IPV4_PREFIX} gw ${REINSTALL_IPV4_GATE}${PLAIN}"
     case "$REINSTALL_IPV6_MODE" in
-        auto)
-            if [[ -n "$REINSTALL_IPV6_ADDR" && -n "$REINSTALL_IPV6_PREFIX" ]]; then
-                echo -e "${YELLOW}IPv6: 自动继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX}（当前环境检测为自动下发）${PLAIN}"
-            else
-                echo -e "${YELLOW}IPv6: 自动继承（检测到 RA 路由环境，当前系统未持有全局地址）${PLAIN}"
-            fi
-            ;;
+        auto) echo -e "${YELLOW}IPv6: 自动继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX}（当前环境检测为自动下发）${PLAIN}" ;;
         static) echo -e "${YELLOW}IPv6: 静态继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX} gw ${REINSTALL_IPV6_GATE}${PLAIN}" ;;
         none) echo -e "${YELLOW}IPv6: 当前未检测到可继承配置${PLAIN}" ;;
     esac
