@@ -15,9 +15,9 @@ readonly SNELL_ETC="/etc/snell"
 readonly SNELL_CONFIGS="${SNELL_ETC}/configs"
 
 # ========== 配置默认值 ==========
-readonly DEFAULT_PORT=5000
-readonly DEFAULT_DNS="8.8.8.8, 1.1.1.1"
-readonly DEFAULT_OBFS_HOST="icloud.com"
+readonly DEFAULT_PORT=8443
+readonly DEFAULT_DNS="1.1.1.1"
+readonly DEFAULT_OBFS_HOST="icloud.com.cn"
 readonly SNELL_RELEASE_PAGE="https://kb.nssurge.com/surge-knowledge-base/zh/release-notes/snell"
 readonly SNELL_DOWNLOAD_BASE="https://dl.nssurge.com/snell"
 readonly SNELL_CDN_BASE="https://snell-cdn.pages.dev/snell"
