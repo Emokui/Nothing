@@ -7909,12 +7909,11 @@ wireproxy_modify_config() {
     echo -e "  ${CYAN}MTU:${NC} ${current_mtu}  ${CYAN}SOCKS:${NC} ${WIREPROXY_SOCKS_BIND}"
     echo -e "  ${CYAN}认证:${NC} ${auth_color}${auth_label}${NC}"
     wireproxy_menu_divider
-    echo -e "  ${GREEN}1)${NC} 改 Endpoint  ${CYAN}2)${NC} 改 MTU"
-    echo -e "  ${YELLOW}3)${NC} 改 SOCKS 监听 ${GREEN}4)${NC} 改 SOCKS 认证"
-    echo -e "  ${CYAN}5)${NC} 编辑 WARP 配置 ${YELLOW}6)${NC} 编辑代理配置"
-    echo -e "  ${RED}0)${NC} 返回上级"
+    echo -e "  ${GREEN}1)${NC} 改 Endpoint      ${CYAN}2)${NC} 改 MTU"
+    echo -e "  ${YELLOW}3)${NC} 改 SOCKS 监听   ${GREEN}4)${NC} 改 SOCKS 认证"
+    echo -e "  ${CYAN}5)${NC} 编辑 WARP 配置 ${RED}0)${NC} 返回上级"
     echo
-    read -rp "  请选择 [0-6]: " input
+    read -rp "  请选择 [0-5]: " input
 
     case "$input" in
         1)
@@ -7964,11 +7963,6 @@ wireproxy_modify_config() {
             backup_file="$(wireproxy_make_backup "$WIREPROXY_WG_WARP_CONF")"
             ${EDITOR:-nano} "$WIREPROXY_WG_WARP_CONF"
             wireproxy_restart_service_with_backup "$backup_file" "$WIREPROXY_WG_WARP_CONF"
-            ;;
-        6)
-            backup_file="$(wireproxy_make_backup "$WIREPROXY_CONF")"
-            ${EDITOR:-nano} "$WIREPROXY_CONF"
-            wireproxy_restart_service_with_backup "$backup_file" "$WIREPROXY_CONF"
             ;;
         0) return 1 ;;
         *) wireproxy_warn "无效选择" ;;
