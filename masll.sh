@@ -601,7 +601,7 @@ reinstall_pick_ipv6_line() {
 }
 
 reinstall_gather_network_state() {
-    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt='' candidate_iface='' detected_ipv6_iface=''
+    local iaddr='' ip6_line='' ip6_route='' ipv6_iface='' attempt='' candidate_iface='' detected_ipv6_iface='' ipv6_prefix_route=''
 
     REINSTALL_NETWORK_INTERFACE=$(get_default_interface)
     [[ -n "$REINSTALL_NETWORK_INTERFACE" ]] || {
@@ -656,6 +656,12 @@ reinstall_gather_network_state() {
         elif [[ -n "$REINSTALL_IPV6_GATE" ]]; then
             REINSTALL_IPV6_MODE='static'
         else
+            REINSTALL_IPV6_MODE='auto'
+        fi
+    elif [[ -n "$ipv6_iface" ]]; then
+        ip6_route=$(ip -6 route show default dev "$ipv6_iface" 2>/dev/null | awk '/^default/ {print; exit}')
+        ipv6_prefix_route=$(ip -6 route show dev "$ipv6_iface" 2>/dev/null | awk '$1 ~ /:/ && $1 !~ /^fe80:/ && $1 != "default" {print $1; exit}')
+        if [[ -n "$ip6_route" && -n "$ipv6_prefix_route" ]]; then
             REINSTALL_IPV6_MODE='auto'
         fi
     fi
@@ -788,7 +794,13 @@ reinstall_install_target_system() {
     echo -e "${YELLOW}目标磁盘: ${target_disk}${PLAIN}"
     echo -e "${YELLOW}IPv4: ${REINSTALL_IPV4_ADDR}/${REINSTALL_IPV4_PREFIX} gw ${REINSTALL_IPV4_GATE}${PLAIN}"
     case "$REINSTALL_IPV6_MODE" in
-        auto) echo -e "${YELLOW}IPv6: 自动继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX}（当前环境检测为自动下发）${PLAIN}" ;;
+        auto)
+            if [[ -n "$REINSTALL_IPV6_ADDR" && -n "$REINSTALL_IPV6_PREFIX" ]]; then
+                echo -e "${YELLOW}IPv6: 自动继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX}（当前环境检测为自动下发）${PLAIN}"
+            else
+                echo -e "${YELLOW}IPv6: 自动继承（检测到 RA 路由环境，当前系统未持有全局地址）${PLAIN}"
+            fi
+            ;;
         static) echo -e "${YELLOW}IPv6: 静态继承 ${REINSTALL_IPV6_ADDR}/${REINSTALL_IPV6_PREFIX} gw ${REINSTALL_IPV6_GATE}${PLAIN}" ;;
         none) echo -e "${YELLOW}IPv6: 当前未检测到可继承配置${PLAIN}" ;;
     esac
