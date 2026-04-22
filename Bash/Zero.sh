@@ -8601,7 +8601,12 @@ configure_wireproxy() {
     rc=$?
     (( rc == 0 )) || press_any_key_to_continue "WireProxy 已退出，按任意键返回菜单..."
 }
-configure_warpstack()   { ( warpstack_menu ); }
+configure_warpstack() {
+    local rc
+    ( warpstack_menu )
+    rc=$?
+    (( rc == 0 )) || press_any_key_to_continue "WarpStack 已退出，按任意键返回菜单..."
+}
 
 FIREWALL_RULE_DIR="/etc/iptables"
 FIREWALL_RULES_V4="$FIREWALL_RULE_DIR/zero.rules.v4"
