@@ -13,7 +13,6 @@ PLAIN="\033[0m"
 readonly SNELL_BIN="/usr/local/bin/snell-server"
 readonly SNELL_ETC="/etc/snell"
 readonly SNELL_CONFIGS="${SNELL_ETC}/configs"
-readonly SNELL_VERSION_FILE="${SNELL_ETC}/version"
 
 # ========== 配置默认值 ==========
 readonly DEFAULT_PORT=5000
@@ -33,6 +32,55 @@ fi
 pause_and_clear() {
   read -n 1 -s -r -p "$(echo -e "${YELLOW}按任意键继续...${PLAIN}")"
   clear
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+trim_input() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+read_menu_choice() {
+  local prompt="$1"
+  local value
+  read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" value
+  trim_input "$value"
+}
+
+show_invalid_option() {
+  echo -e "${RED}无效选项,请重新选择${PLAIN}"
+  pause_and_clear
+}
+
+pkg_install_packages() {
+  if command_exists apt; then
+    apt update && apt install -y "$@"
+  else
+    return 1
+  fi
+}
+
+install_tool_if_missing() {
+  local tool="$1"
+  shift
+
+  command_exists "$tool" && return 0
+
+  echo -e "${YELLOW}未检测到 ${tool}，正在自动安装...${PLAIN}"
+  pkg_install_packages "$@" || {
+    echo -e "${RED}未检测到可用的 apt，${tool} 安装失败,请手动安装！${PLAIN}"
+    return 1
+  }
+  command_exists "$tool" || {
+    echo -e "${RED}${tool} 安装失败,请手动安装！${PLAIN}"
+    return 1
+  }
+  echo -e "${GREEN}${tool} 安装完成${PLAIN}"
 }
 
 get_arch() {
@@ -60,6 +108,11 @@ cleanup_tmp() {
   rm -f /tmp/snell-server /tmp/snell-server-*.zip 2>/dev/null
 }
 
+normalize_dns_list() {
+  local dns="$1"
+  printf '%s' "$dns" | sed 's/, */, /g'
+}
+
 validate_port() {
   local p="$1"
   [[ "$p" =~ ^[0-9]+$ ]] && ((p >= 1 && p <= 65535))
@@ -75,11 +128,77 @@ snell_installed() {
   [[ -f "$SNELL_BIN" ]] && [[ -x "$SNELL_BIN" ]]
 }
 
-snell_config_exists() {
+snell_collect_config_files() {
   shopt -s nullglob
-  local files=("$SNELL_CONFIGS"/*.conf)
+  SNELL_CONFIG_FILES=("$SNELL_CONFIGS"/*.conf)
   shopt -u nullglob
-  [[ -d "$SNELL_CONFIGS" && ${#files[@]} -gt 0 ]]
+}
+
+snell_config_exists() {
+  snell_collect_config_files
+  [[ -d "$SNELL_CONFIGS" && ${#SNELL_CONFIG_FILES[@]} -gt 0 ]]
+}
+
+snell_current_version() {
+  snell_installed || return 1
+
+  local output version
+  output=$("$SNELL_BIN" --version 2>&1 || true)
+  version=$(printf '%s\n' "$output" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*' | head -n1)
+  [[ -n "$version" ]] || return 1
+  printf '%s\n' "$version"
+}
+
+snell_service_name() {
+  printf 'snell@%s.service' "$1"
+}
+
+snell_service_file() {
+  printf '/etc/systemd/system/%s' "$(snell_service_name "$1")"
+}
+
+snell_get_config_value() {
+  local config_file="$1"
+  local key="$2"
+  grep "^${key}[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | sed 's/^ *//;s/ *$//'
+}
+
+snell_require_configs() {
+  local message="${1:-当前没有任何配置文件}"
+  snell_collect_config_files
+  if [[ ${#SNELL_CONFIG_FILES[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}${message}${PLAIN}"
+    pause_and_clear
+    return 1
+  fi
+  return 0
+}
+
+fetch_url() {
+  local url="$1"
+
+  if command_exists curl; then
+    curl -fsSL --connect-timeout 10 --max-time 30 "$url"
+  elif command_exists wget; then
+    wget -qO- --timeout=30 "$url"
+  else
+    install_tool_if_missing curl curl || return 1
+    curl -fsSL --connect-timeout 10 --max-time 30 "$url"
+  fi
+}
+
+download_file() {
+  local url="$1"
+  local output_file="$2"
+
+  if command_exists curl; then
+    curl -fsSL --connect-timeout 10 --max-time 120 -o "$output_file" "$url"
+  elif command_exists wget; then
+    wget -qO "$output_file" --timeout=120 "$url"
+  else
+    install_tool_if_missing curl curl || return 1
+    curl -fsSL --connect-timeout 10 --max-time 120 -o "$output_file" "$url"
+  fi
 }
 
 
@@ -89,7 +208,7 @@ get_latest_snell_version() {
     arch=$(get_arch)
 
     local page
-    page=$(curl -s --connect-timeout 10 --max-time 30 "$SNELL_RELEASE_PAGE")
+    page=$(fetch_url "$SNELL_RELEASE_PAGE")
     
     if [[ -z "$page" ]]; then
         echo -e "${RED}无法获取版本信息，请检查网络连接${PLAIN}"
@@ -115,59 +234,25 @@ get_latest_snell_version() {
 
     if [[ -n "$latest_stable" ]]; then
         SNELL_VERSION=$(echo "$latest_stable" | sed -E "s/.*snell-server-(v[0-9]+\.[0-9]+\.[0-9]+)-linux-${arch}\.zip/\1/")
-        SNELL_ZIP=$(basename "$latest_stable")
         SNELL_URL="$latest_stable"
-        SNELL_ARCH="$arch"
     else
         SNELL_VERSION=""
-        SNELL_ZIP=""
         SNELL_URL=""
-        SNELL_ARCH="$arch"
     fi
 
     if [[ -n "$latest_beta" ]]; then
         SNELL_BETA_VERSION=$(echo "$latest_beta" | sed -E "s/.*snell-server-(v[0-9]+\.[0-9]+\.[0-9]+[a-z0-9]*)-linux-${arch}\.zip/\1/")
-        SNELL_BETA_ZIP=$(basename "$latest_beta")
         SNELL_BETA_URL="$latest_beta"
-        SNELL_BETA_ARCH="$arch"
     else
         SNELL_BETA_VERSION=""
-        SNELL_BETA_ZIP=""
         SNELL_BETA_URL=""
-        SNELL_BETA_ARCH="$arch"
     fi
 }
 
 get_latest_snell_beta_version() {
     get_latest_snell_version || return 1
     SNELL_VERSION="$SNELL_BETA_VERSION"
-    SNELL_ZIP="$SNELL_BETA_ZIP"
     SNELL_URL="$SNELL_BETA_URL"
-    SNELL_ARCH="$SNELL_BETA_ARCH"
-}
-
-# ========== 核心安装函数 ==========
-install_unzip_if_missing() {
-    if ! command -v unzip >/dev/null 2>&1; then
-        echo -e "${YELLOW}未检测到 unzip，正在自动安装...${PLAIN}"
-        if command -v apt &>/dev/null; then
-            apt update && apt install -y unzip
-        elif command -v dnf &>/dev/null; then
-            dnf install -y unzip
-        elif command -v yum &>/dev/null; then
-            yum install -y unzip
-        elif command -v apk &>/dev/null; then
-            apk add unzip
-        elif command -v pacman &>/dev/null; then
-            pacman -Sy --noconfirm unzip
-        elif command -v zypper &>/dev/null; then
-            zypper --non-interactive install unzip
-        else
-            echo -e "${RED}无法识别的包管理器,unzip 安装失败,请手动安装！${PLAIN}"
-            return 1
-        fi
-        echo -e "${GREEN}unzip 安装完成${PLAIN}"
-    fi
 }
 
 download_and_install_snell() {
@@ -180,13 +265,13 @@ download_and_install_snell() {
   cleanup_tmp
   
   echo -e "${YELLOW}下载 Snell（$(get_arch)，${version}）...${PLAIN}"
-  if ! curl -fsSL --connect-timeout 10 --max-time 120 -o "$zip_file" "$url"; then
+  if ! download_file "$url" "$zip_file"; then
     echo -e "${RED}下载失败，请检查网络连接${PLAIN}"
     cleanup_tmp
     return 1
   fi
   
-  install_unzip_if_missing || return 1
+  install_tool_if_missing unzip unzip || return 1
   
   if ! unzip -o "$zip_file"; then
     echo -e "${RED}解压失败${PLAIN}"
@@ -203,7 +288,6 @@ download_and_install_snell() {
   chmod +x snell-server
   mv -f snell-server "${SNELL_BIN}"
   mkdir -p "$SNELL_ETC"
-  echo "$version" > "${SNELL_VERSION_FILE}"
   cleanup_tmp
   
   echo -e "${GREEN}Snell ${version} 安装成功${PLAIN}"
@@ -283,9 +367,7 @@ update_snell_stable() {
   fi
 
   local current_ver=""
-  if [[ -f "$SNELL_VERSION_FILE" ]]; then
-    current_ver=$(cat "$SNELL_VERSION_FILE")
-  fi
+  current_ver=$(snell_current_version || true)
 
   if [[ "$current_ver" == "$SNELL_VERSION" && -f "$SNELL_BIN" ]]; then
     echo -e "${GREEN}Snell 已经是正式版最新版:${SNELL_VERSION}${PLAIN}"
@@ -321,9 +403,7 @@ update_snell_beta() {
   fi
 
   local current_ver=""
-  if [[ -f "$SNELL_VERSION_FILE" ]]; then
-    current_ver=$(cat "$SNELL_VERSION_FILE")
-  fi
+  current_ver=$(snell_current_version || true)
 
   if [[ "$current_ver" == "$SNELL_VERSION" && -f "$SNELL_BIN" ]]; then
     echo -e "${GREEN}Snell 已经是测试版最新版：${SNELL_VERSION}${PLAIN}"
@@ -344,14 +424,12 @@ rollback_snell_v4() {
   local arch
   arch=$(get_arch)
   
-  if [[ -f "$SNELL_VERSION_FILE" ]]; then
-      local current_ver
-      current_ver=$(cat "$SNELL_VERSION_FILE")
-      if [[ "$current_ver" == "$target_version" ]] && [[ -f "$SNELL_BIN" ]]; then
-          echo -e "${GREEN}Snell 当前已是 ${target_version} 版本 ${PLAIN}"
-          pause_and_clear
-          return 0
-      fi
+  local current_ver=""
+  current_ver=$(snell_current_version || true)
+  if [[ "$current_ver" == "$target_version" ]] && [[ -f "$SNELL_BIN" ]]; then
+      echo -e "${GREEN}Snell 当前已是 ${target_version} 版本 ${PLAIN}"
+      pause_and_clear
+      return 0
   fi
 
   local url
@@ -395,9 +473,10 @@ generate_config_file() {
 create_systemd_service() {
   local config_name="$1"
   local config_file="$2"
-  local service_name="snell@${config_name}.service"
+  local service_name
+  service_name=$(snell_service_name "$config_name")
   
-  cat > "/etc/systemd/system/$service_name" << EOF
+  cat > "$(snell_service_file "$config_name")" << EOF
 [Unit]
 Description=Snell Instance (${config_name})
 After=network.target
@@ -422,7 +501,8 @@ generate_and_enable_config() {
   mkdir -p "$config_dir"
   
   echo -e "${BLUE}请输入配置名称:${PLAIN}"
-  read -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
+  read -r -p "$(echo -e "${GREEN}(如: config1): ${PLAIN}")" config_name
+  config_name=$(trim_input "$config_name")
   
   if [[ -z "$config_name" ]]; then
     echo -e "${RED}配置名称不能为空!${PLAIN}"
@@ -443,7 +523,8 @@ generate_and_enable_config() {
     return 1
   fi
   
-  read -p "$(echo -e "${BLUE}请输入监听端口 ${YELLOW}(默认${DEFAULT_PORT})${BLUE}: ${PLAIN}")" port
+  read -r -p "$(echo -e "${BLUE}请输入监听端口 ${YELLOW}(默认${DEFAULT_PORT})${BLUE}: ${PLAIN}")" port
+  port=$(trim_input "$port")
   port=${port:-$DEFAULT_PORT}
   if ! validate_port "$port"; then
     echo -e "${RED}端口必须是 1-65535 之间的数字${PLAIN}"
@@ -451,64 +532,67 @@ generate_and_enable_config() {
     return 1
   fi
   
-  read -p "$(echo -e "${BLUE}请输入PSK密钥 ${YELLOW}(回车随机生成)${BLUE}: ${PLAIN}")" psk
+  read -r -p "$(echo -e "${BLUE}请输入PSK密钥 ${YELLOW}(回车随机生成)${BLUE}: ${PLAIN}")" psk
+  psk=$(trim_input "$psk")
   [[ -z "$psk" ]] && psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   
   local obfs="off"
   local obfs_host=""
-  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(默认不开启 Y/N)${BLUE}: ${PLAIN}")" enable_obfs
+  read -r -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(默认不开启 Y/N)${BLUE}: ${PLAIN}")" enable_obfs
+  enable_obfs=$(trim_input "$enable_obfs")
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(默认 ${DEFAULT_OBFS_HOST})${BLUE}: ${PLAIN}")" obfs_host
+    read -r -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(默认 ${DEFAULT_OBFS_HOST})${BLUE}: ${PLAIN}")" obfs_host
+    obfs_host=$(trim_input "$obfs_host")
     obfs_host=${obfs_host:-$DEFAULT_OBFS_HOST}
   fi
 
   local ipv6="false"
-  read -p "$(echo -e "${BLUE}是否开启 IPv6 ${YELLOW}(默认不开启 Y/N)${BLUE}: ${PLAIN}")" enable_ipv6
+  read -r -p "$(echo -e "${BLUE}是否开启 IPv6 ${YELLOW}(默认不开启 Y/N)${BLUE}: ${PLAIN}")" enable_ipv6
+  enable_ipv6=$(trim_input "$enable_ipv6")
   if [[ "$enable_ipv6" =~ ^[yY]$ ]]; then
     ipv6="true"
   fi
 
   local tfo="true"
-  read -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(默认开启 Y/N)${BLUE}: ${PLAIN}")" enable_tfo
+  read -r -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(默认开启 Y/N)${BLUE}: ${PLAIN}")" enable_tfo
+  enable_tfo=$(trim_input "$enable_tfo")
   if [[ "$enable_tfo" =~ ^[nN]$ ]]; then
     tfo="false"
   fi
 
   local dns="$DEFAULT_DNS"
-  read -p "$(echo -e "${BLUE}是否自定义DNS ${YELLOW}(默认${DEFAULT_DNS} Y/N)${BLUE}: ${PLAIN}")" custom_dns
+  read -r -p "$(echo -e "${BLUE}是否自定义DNS ${YELLOW}(默认${DEFAULT_DNS} Y/N)${BLUE}: ${PLAIN}")" custom_dns
+  custom_dns=$(trim_input "$custom_dns")
   if [[ "$custom_dns" =~ ^[yY]$ ]]; then
-    read -p "$(echo -e "${BLUE}请输入 DNS ${YELLOW}(用英文逗号分隔)${BLUE}: ${PLAIN}")" dns
+    read -r -p "$(echo -e "${BLUE}请输入 DNS ${YELLOW}(用英文逗号分隔)${BLUE}: ${PLAIN}")" dns
+    dns=$(trim_input "$dns")
     dns=${dns:-$DEFAULT_DNS}
-    dns=$(echo "$dns" | sed 's/, */, /g')
   fi
+  dns=$(normalize_dns_list "$dns")
 
   generate_config_file "$config_file" "$port" "$psk" "$obfs" "$obfs_host" "$ipv6" "$tfo" "$dns"
   echo -e "${GREEN}配置文件已生成: $config_file${PLAIN}"
 
-  create_systemd_service "$config_name" "$config_file"
-  echo -e "${GREEN}配置 $config_name 已启动并设置为开机自启${PLAIN}"
+  if create_systemd_service "$config_name" "$config_file"; then
+    echo -e "${GREEN}配置 $config_name 已启动并设置为开机自启${PLAIN}"
+  else
+    echo -e "${RED}配置 $config_name 创建成功，但服务启动失败，请检查 systemd 日志${PLAIN}"
+  fi
   pause_and_clear
 }
 
 modify_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
-  
-  shopt -s nullglob
-  local files=("$config_dir"/*.conf)
-  shopt -u nullglob
-  
-  if [[ ${#files[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件,请先生成配置${PLAIN}"
-    pause_and_clear
-    return
-  fi
+
+  snell_require_configs "当前没有任何配置文件,请先生成配置" || return
   
   echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
   echo -e "${BLUE}请选择要修改的配置名称:${PLAIN}"
-  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  read -r -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  config_name=$(trim_input "$config_name")
   
   if [[ -z "$config_name" ]]; then
     echo -e "${RED}配置名称不能为空!${PLAIN}"
@@ -517,7 +601,8 @@ modify_config() {
   fi
   
   local config_file="${config_dir}/${config_name}.conf"
-  local service_name="snell@${config_name}.service"
+  local service_name
+  service_name=$(snell_service_name "$config_name")
   
   if [[ ! -f "$config_file" ]]; then
     echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
@@ -526,13 +611,13 @@ modify_config() {
   fi
 
   local current_port current_psk current_obfs current_obfs_host current_ipv6 current_tfo current_dns
-  current_port=$(grep "^listen[[:space:]]*=" "$config_file" | awk -F: '{print $NF}' | tr -d ' ')
-  current_psk=$(grep "^psk[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
-  current_obfs=$(grep "^obfs[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
-  current_obfs_host=$(grep "^obfs-host[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
-  current_ipv6=$(grep "^ipv6[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
-  current_tfo=$(grep "^tfo[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | tr -d ' ')
-  current_dns=$(grep "^dns[[:space:]]*=" "$config_file" | awk -F'=' '{print $2}' | sed 's/^ *//;s/ *$//')
+  current_port=$(snell_get_config_value "$config_file" "listen" | awk -F: '{print $NF}' | tr -d ' ')
+  current_psk=$(snell_get_config_value "$config_file" "psk" | tr -d ' ')
+  current_obfs=$(snell_get_config_value "$config_file" "obfs" | tr -d ' ')
+  current_obfs_host=$(snell_get_config_value "$config_file" "obfs-host" | tr -d ' ')
+  current_ipv6=$(snell_get_config_value "$config_file" "ipv6" | tr -d ' ')
+  current_tfo=$(snell_get_config_value "$config_file" "tfo" | tr -d ' ')
+  current_dns=$(snell_get_config_value "$config_file" "dns")
 
   clear
   echo -e "${BLUE}当前配置内容:${PLAIN}"
@@ -553,14 +638,16 @@ modify_config() {
     *)        echo -e "服务状态: ${BLUE}未知或未安装${PLAIN}" ;;
   esac
 
-  read -p "$(echo -e "${YELLOW}是否修改此配置? (Y/N): ${PLAIN}")" confirm_modify
+  read -r -p "$(echo -e "${YELLOW}是否修改此配置? (Y/N): ${PLAIN}")" confirm_modify
+  confirm_modify=$(trim_input "$confirm_modify")
   if [[ ! "$confirm_modify" =~ ^[yY]$ ]]; then
     return
   fi
 
   echo -e "${YELLOW}开始修改配置(回车保持原值)...${PLAIN}"
   
-  read -p "$(echo -e "${BLUE}请输入新端口 ${YELLOW}(当前${current_port})${BLUE}: ${PLAIN}")" port
+  read -r -p "$(echo -e "${BLUE}请输入新端口 ${YELLOW}(当前${current_port})${BLUE}: ${PLAIN}")" port
+  port=$(trim_input "$port")
   port=${port:-$current_port}
   if ! validate_port "$port"; then
     echo -e "${RED}端口必须是 1-65535 之间的数字${PLAIN}"
@@ -568,7 +655,8 @@ modify_config() {
     return 1
   fi
   
-  read -p "$(echo -e "${BLUE}请输入新PSK密钥 ${YELLOW}(当前${current_psk} R随机生成)${BLUE}: ${PLAIN}")" psk
+  read -r -p "$(echo -e "${BLUE}请输入新PSK密钥 ${YELLOW}(当前${current_psk} R随机生成)${BLUE}: ${PLAIN}")" psk
+  psk=$(trim_input "$psk")
   if [[ "$psk" =~ ^[rR]$ ]]; then
     psk=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
   elif [[ -z "$psk" ]]; then
@@ -576,10 +664,12 @@ modify_config() {
   fi
   
   local obfs obfs_host
-  read -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(当前${current_obfs} Y/N)${BLUE}: ${PLAIN}")" enable_obfs
+  read -r -p "$(echo -e "${BLUE}是否开启 obfs ${YELLOW}(当前${current_obfs} Y/N)${BLUE}: ${PLAIN}")" enable_obfs
+  enable_obfs=$(trim_input "$enable_obfs")
   if [[ "$enable_obfs" =~ ^[yY]$ ]]; then
     obfs="http"
-    read -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-$DEFAULT_OBFS_HOST})${BLUE}: ${PLAIN}")" obfs_host
+    read -r -p "$(echo -e "${BLUE}请输入 obfs 域名 ${YELLOW}(当前${current_obfs_host:-$DEFAULT_OBFS_HOST})${BLUE}: ${PLAIN}")" obfs_host
+    obfs_host=$(trim_input "$obfs_host")
     obfs_host=${obfs_host:-${current_obfs_host:-$DEFAULT_OBFS_HOST}}
   elif [[ "$enable_obfs" =~ ^[nN]$ ]]; then
     obfs="off"
@@ -591,7 +681,8 @@ modify_config() {
 
   # IPv6
   local ipv6
-  read -p "$(echo -e "${BLUE}是否开启 IPv6 ${YELLOW}(当前${current_ipv6:-false} Y/N)${BLUE}: ${PLAIN}")" enable_ipv6
+  read -r -p "$(echo -e "${BLUE}是否开启 IPv6 ${YELLOW}(当前${current_ipv6:-false} Y/N)${BLUE}: ${PLAIN}")" enable_ipv6
+  enable_ipv6=$(trim_input "$enable_ipv6")
   if [[ "$enable_ipv6" =~ ^[yY]$ ]]; then
     ipv6="true"
   elif [[ "$enable_ipv6" =~ ^[nN]$ ]]; then
@@ -601,7 +692,8 @@ modify_config() {
   fi
 
   local tfo
-  read -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(当前${current_tfo:-true} Y/N)${BLUE}: ${PLAIN}")" enable_tfo
+  read -r -p "$(echo -e "${BLUE}是否开启 TFO ${YELLOW}(当前${current_tfo:-true} Y/N)${BLUE}: ${PLAIN}")" enable_tfo
+  enable_tfo=$(trim_input "$enable_tfo")
   if [[ "$enable_tfo" =~ ^[yY]$ ]]; then
     tfo="true"
   elif [[ "$enable_tfo" =~ ^[nN]$ ]]; then
@@ -611,21 +703,25 @@ modify_config() {
   fi
 
   local dns
-  read -p "$(echo -e "${BLUE}是否自定义DNS ${YELLOW}(当前${current_dns:-$DEFAULT_DNS}, Y/N)${BLUE}: ${PLAIN}")" custom_dns
+  read -r -p "$(echo -e "${BLUE}是否自定义DNS ${YELLOW}(当前${current_dns:-$DEFAULT_DNS}, Y/N)${BLUE}: ${PLAIN}")" custom_dns
+  custom_dns=$(trim_input "$custom_dns")
   if [[ "$custom_dns" =~ ^[yY]$ ]]; then
-    read -p "$(echo -e "${BLUE}请输入 DNS ${YELLOW}(用英文逗号分隔)${BLUE}: ${PLAIN}")" dns
+    read -r -p "$(echo -e "${BLUE}请输入 DNS ${YELLOW}(用英文逗号分隔)${BLUE}: ${PLAIN}")" dns
+    dns=$(trim_input "$dns")
     dns=${dns:-$DEFAULT_DNS}
-    dns=$(echo "$dns" | sed 's/, */, /g')
   else
     dns=${current_dns:-$DEFAULT_DNS}
-    dns=$(echo "$dns" | sed 's/, */, /g')
   fi
+  dns=$(normalize_dns_list "$dns")
 
   generate_config_file "$config_file" "$port" "$psk" "$obfs" "$obfs_host" "$ipv6" "$tfo" "$dns"
 
   echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
-  systemctl restart "$service_name"
-  echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
+  if systemctl restart "$service_name"; then
+    echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
+  else
+    echo -e "${RED}服务重启失败,请检查当前配置或 systemd 日志${PLAIN}"
+  fi
   echo -e "${BLUE}------ 当前服务状态 ------${PLAIN}"
   systemctl status "$service_name" --no-pager
   pause_and_clear
@@ -634,21 +730,14 @@ modify_config() {
 delete_config() {
   clear
   local config_dir="$SNELL_CONFIGS"
-  
-  shopt -s nullglob
-  local files=("$config_dir"/*.conf)
-  shopt -u nullglob
-  
-  if [[ ${#files[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
-    pause_and_clear
-    return
-  fi
+
+  snell_require_configs || return
   
   echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
   echo -e "${BLUE}请输入要删除的配置名称,输入99删除全部配置:${PLAIN}"
-  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  read -r -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  config_name=$(trim_input "$config_name")
   
   if [[ "$config_name" == "99" ]]; then
     delete_all_configs
@@ -662,7 +751,8 @@ delete_config() {
   fi
   
   local config_file="${config_dir}/${config_name}.conf"
-  local service_name="snell@${config_name}.service"
+  local service_name
+  service_name=$(snell_service_name "$config_name")
   
   if [[ ! -f "$config_file" ]]; then
     echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
@@ -671,7 +761,7 @@ delete_config() {
   fi
   
   systemctl disable --now "$service_name" &>/dev/null || true
-  rm -f "/etc/systemd/system/$service_name"
+  rm -f "$(snell_service_file "$config_name")"
   rm -f "$config_file"
   systemctl daemon-reload
   echo -e "${GREEN}配置 $config_name 及其服务已删除${PLAIN}"
@@ -681,27 +771,21 @@ delete_config() {
 delete_all_configs() {
   clear
   local config_dir="$SNELL_CONFIGS"
-  
-  shopt -s nullglob
-  local files=("$config_dir"/*.conf)
-  shopt -u nullglob
-  
-  if [[ ${#files[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
-    pause_and_clear
-    return
-  fi
+
+  snell_require_configs || return
   
   echo -e "${RED}警告:即将删除所有配置及服务!${PLAIN}"
-  read -p "$(echo -e "${YELLOW}确定继续?[y/N]: ${PLAIN}")" choice
+  read -r -p "$(echo -e "${YELLOW}确定继续?[y/N]: ${PLAIN}")" choice
+  choice=$(trim_input "$choice")
   [[ ! "$choice" =~ ^[yY]$ ]] && pause_and_clear && return
   
-  for config_file in "${files[@]}"; do
+  for config_file in "${SNELL_CONFIG_FILES[@]}"; do
     local config_name
     config_name=$(basename "$config_file" .conf)
-    local service_name="snell@${config_name}.service"
+    local service_name
+    service_name=$(snell_service_name "$config_name")
     systemctl disable --now "$service_name" &>/dev/null || true
-    rm -f "/etc/systemd/system/$service_name"
+    rm -f "$(snell_service_file "$config_name")"
   done
   
   rm -rf "$config_dir"
@@ -719,7 +803,8 @@ delete_all_snell() {
   fi
 
   echo -e "${RED}警告!此操作将彻底删除snell-server及其相关内容、服务${PLAIN}"
-  read -p "$(echo -e "${YELLOW}确定继续? [y/N]: ${PLAIN}")" confirm
+  read -r -p "$(echo -e "${YELLOW}确定继续? [y/N]: ${PLAIN}")" confirm
+  confirm=$(trim_input "$confirm")
   [[ ! "$confirm" =~ ^[yY]$ ]] && echo -e "${YELLOW}操作已取消${PLAIN}" && pause_and_clear && return
 
   shopt -s nullglob
@@ -745,31 +830,17 @@ delete_all_snell() {
 stop_or_restart_snell() {
   clear
   local config_dir="$SNELL_CONFIGS"
-  
-  shopt -s nullglob
-  local files=("$config_dir"/*.conf)
-  shopt -u nullglob
-  
-  if [[ ${#files[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}当前没有任何配置文件${PLAIN}"
-    pause_and_clear
-    return
-  fi
+
+  snell_require_configs || return
   
   echo -e "${BLUE}当前可用配置:${PLAIN}"
   list_configs
   echo -e "${BLUE}请输入要停止的配置名称,输入0重启全部配置:${PLAIN}"
-  read -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  read -r -p "$(echo -e "${GREEN}配置名称: ${PLAIN}")" config_name
+  config_name=$(trim_input "$config_name")
   
   if [[ "$config_name" == "0" ]]; then
-    for config_file in "${files[@]}"; do
-      local cn
-      cn=$(basename "$config_file" .conf)
-      local service_name="snell@${cn}.service"
-      systemctl restart "$service_name"
-      echo -e "${GREEN}已重启服务: $service_name${PLAIN}"
-    done
-    echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+    restart_all_snell_services
     pause_and_clear
     return
   fi
@@ -781,7 +852,8 @@ stop_or_restart_snell() {
   fi
   
   local config_file="${config_dir}/${config_name}.conf"
-  local service_name="snell@${config_name}.service"
+  local service_name
+  service_name=$(snell_service_name "$config_name")
   
   if [[ ! -f "$config_file" ]]; then
     echo -e "${RED}配置文件 $config_name 不存在!${PLAIN}"
@@ -795,18 +867,13 @@ stop_or_restart_snell() {
 }
 
 list_configs() {
-  local config_dir="$SNELL_CONFIGS"
-  
-  shopt -s nullglob
-  local files=("$config_dir"/*.conf)
-  shopt -u nullglob
-  
-  if [[ ${#files[@]} -eq 0 ]]; then
+  snell_collect_config_files
+  if [[ ${#SNELL_CONFIG_FILES[@]} -eq 0 ]]; then
     echo -e "${YELLOW}没有找到任何配置文件${PLAIN}"
     return 0
   fi
   
-  for f in "${files[@]}"; do
+  for f in "${SNELL_CONFIG_FILES[@]}"; do
     local name
     name=$(basename "$f" .conf)
     echo -e "  ${YELLOW}${name}${PLAIN}"
@@ -819,7 +886,7 @@ show_sub_menu() {
   echo -e "${BLUE}✦ Config_Menu ✦${PLAIN}"
   echo -e "${GREEN}  1.${PLAIN}生成配置"
   echo -e "${GREEN}  2.${PLAIN}停止服务"
-  echo -e "${GREEN}  3.${PLAIN}查看配置"
+  echo -e "${GREEN}  3.${PLAIN}修改配置"
   echo -e "${GREEN}  4.${PLAIN}删除配置"
   echo -e "${GREEN}  0.${PLAIN}返回主页"
 }
@@ -827,14 +894,14 @@ show_sub_menu() {
 config_snell_menu() {
   while true; do
     show_sub_menu
-    read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" sub_choice
+    sub_choice=$(read_menu_choice "✦ Steins Gate ✦ : ")
     case $sub_choice in
       1) generate_and_enable_config ;;
       2) stop_or_restart_snell ;;
       3) modify_config ;;
       4) delete_config ;;
       0) break ;;
-      *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
+      *) show_invalid_option ;;
     esac
   done
 }
@@ -846,13 +913,13 @@ update_snell_menu() {
   echo -e "${GREEN}  2.${PLAIN}测试版"
   echo -e "${GREEN}  3.${PLAIN}回退v4版"
   echo -e "${GREEN}  0.${PLAIN}返回主页"
-  read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" update_choice
+  update_choice=$(read_menu_choice "✦ Steins Gate ✦ : ")
   case $update_choice in
     1) update_snell_stable ;;
     2) update_snell_beta ;;
     3) rollback_snell_v4 ;;
     0) return ;;
-    *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
+    *) show_invalid_option ;;
   esac
 }
 
@@ -869,17 +936,16 @@ show_main_menu() {
 main() {
   while true; do
     show_main_menu
-    read -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" main_choice
+    main_choice=$(read_menu_choice "✦ Steins Gate ✦ : ")
     case $main_choice in
       1) install_snell ;;
       2) config_snell_menu ;;
       3) delete_all_snell ;;
       4) update_snell_menu ;;
       0) exit 0 ;;
-      *) echo -e "${RED}无效选项,请重新选择${PLAIN}"; pause_and_clear ;;
+      *) show_invalid_option ;;
     esac
   done
 }
 
-install_unzip_if_missing
 main
