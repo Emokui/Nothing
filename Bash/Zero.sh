@@ -7368,7 +7368,7 @@ wireproxy_resolve_host_by_family() {
     command -v getent >/dev/null 2>&1 || wireproxy_err "缺少 getent，无法解析 Endpoint"
     case "$family" in
         4) getent ahostsv4 "$host" | awk 'NR==1 { print $1; exit }' ;;
-        6) getent ahostsv6 "$host" | awk 'NR==1 { print $1; exit }' ;;
+        6) getent ahostsv6 "$host" | awk '$1 ~ /:/ && $1 !~ /^::ffff:/ { print $1; exit }' ;;
         *) return 1 ;;
     esac
 }
@@ -8087,6 +8087,99 @@ warpstack_is_valid_endpoint() {
     return 0
 }
 
+warpstack_endpoint_host() {
+    local value="$1"
+    if [[ "$value" =~ ^\[([0-9a-fA-F:]+)\]:[0-9]{1,5}$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$value" =~ ^([^:]+):[0-9]{1,5}$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    else
+        printf '%s\n' "$value"
+    fi
+}
+
+warpstack_endpoint_port() {
+    local value="$1"
+    if [[ "$value" =~ ^\[[0-9a-fA-F:]+\]:([0-9]{1,5})$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    elif [[ "$value" =~ ^[^:]+:([0-9]{1,5})$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
+}
+
+warpstack_is_ipv4_literal() {
+    local host="$1"
+    [[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+warpstack_is_ipv6_literal() {
+    local host="$1"
+    [[ "$host" == *:* ]]
+}
+
+warpstack_resolve_endpoint_host_by_family() {
+    local host="$1" family="$2"
+    command -v getent >/dev/null 2>&1 || warpstack_err "缺少 getent，无法解析 Endpoint"
+    case "$family" in
+        4) getent ahostsv4 "$host" | awk '$1 ~ /^([0-9]{1,3}\.){3}[0-9]{1,3}$/ { print $1; exit }' ;;
+        6) getent ahostsv6 "$host" | awk '$1 ~ /:/ && $1 !~ /^::ffff:/ { print $1; exit }' ;;
+        *) return 1 ;;
+    esac
+}
+
+warpstack_select_endpoint_for_network() {
+    local current="$1" preferred_v4="$2" preferred_v6="$3" preferred_port="$4"
+    local host port resolved
+
+    [[ -n "$WARPSTACK_NET_MODE" ]] || warpstack_detect_network
+    port="${preferred_port:-$(warpstack_endpoint_port "$current")}"
+    [[ -z "$port" ]] && port="2408"
+
+    case "$WARPSTACK_NET_MODE" in
+        v6_only)
+            if [[ -n "$preferred_v6" ]]; then
+                printf '[%s]:%s\n' "$preferred_v6" "$port"
+                return 0
+            fi
+            host="$(warpstack_endpoint_host "$current")"
+            [[ -n "$host" ]] || warpstack_err "无法确定 IPv6 Endpoint"
+            if warpstack_is_ipv6_literal "$host" && ! warpstack_is_ipv4_literal "$host"; then
+                printf '[%s]:%s\n' "$host" "$port"
+                return 0
+            fi
+            resolved="$(warpstack_resolve_endpoint_host_by_family "$host" 6)"
+            [[ -n "$resolved" ]] || warpstack_err "无法解析 IPv6 Endpoint: $host"
+            printf '[%s]:%s\n' "$resolved" "$port"
+            ;;
+        dual|v4_only)
+            host="$(warpstack_endpoint_host "$current")"
+            [[ -n "$host" ]] || warpstack_err "无法确定 IPv4 Endpoint"
+            if warpstack_is_ipv6_literal "$host" && ! warpstack_is_ipv4_literal "$host"; then
+                if [[ -n "$preferred_v4" ]]; then
+                    printf '%s:%s\n' "$preferred_v4" "$port"
+                    return 0
+                fi
+                warpstack_err "当前为 IPv4 网络，无法使用 IPv6 Endpoint: $host"
+            fi
+            if [[ -n "$preferred_v4" ]]; then
+                printf '%s:%s\n' "$preferred_v4" "$port"
+                return 0
+            fi
+            if warpstack_is_ipv4_literal "$host" || [[ "$host" =~ ^[A-Za-z0-9.-]+$ ]]; then
+                printf '%s:%s\n' "$host" "$port"
+                return 0
+            fi
+            warpstack_err "无法确定 IPv4 Endpoint: $host"
+            ;;
+        none)
+            warpstack_err "当前服务器无可用网络，无法确定 Endpoint"
+            ;;
+        *)
+            warpstack_err "未知网络模式: $WARPSTACK_NET_MODE"
+            ;;
+    esac
+}
+
 warpstack_escape_sed_replacement() {
     printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
@@ -8180,42 +8273,30 @@ warpstack_write_wg_conf() {
     mkdir -p /etc/wireguard
 
     if [[ "$mode" == "add_v4" ]]; then
+        [[ -n "$v4" ]] || warpstack_err "缺少 WARP IPv4 地址，无法写入配置"
         cat > "$WARPSTACK_WG_CONF" << EOF
 [Interface]
 PrivateKey = ${priv}
-Address = ${v4}/32, ${v6}/128
-MTU = 1280
-Table = 51820
-PostUp  = ip -4 route add default dev %i table main
-PostDown = ip -4 route del default dev %i table main
-PostUp  = ip -6 rule add from ${v6}/128 table 51820
-PostUp  = ip -6 rule add oif %i table 51820
-PostDown = ip -6 rule del from ${v6}/128 table 51820
-PostDown = ip -6 rule del oif %i table 51820
+Address = ${v4}/32
+MTU = 1408
 
 [Peer]
 PublicKey = ${pub}
-AllowedIPs = 0.0.0.0/0, ::/0
+AllowedIPs = 0.0.0.0/0
 Endpoint = ${ep}
 PersistentKeepalive = 25
 EOF
     elif [[ "$mode" == "add_v6" ]]; then
+        [[ -n "$v6" ]] || warpstack_err "缺少 WARP IPv6 地址，无法写入配置"
         cat > "$WARPSTACK_WG_CONF" << EOF
 [Interface]
 PrivateKey = ${priv}
-Address = ${v4}/32, ${v6}/128
+Address = ${v6}/128
 MTU = 1280
-Table = 51820
-PostUp  = ip -6 route add default dev %i table main
-PostDown = ip -6 route del default dev %i table main
-PostUp  = ip -4 rule add from ${v4}/32 table 51820
-PostUp  = ip -4 rule add oif %i table 51820
-PostDown = ip -4 rule del from ${v4}/32 table 51820
-PostDown = ip -4 rule del oif %i table 51820
 
 [Peer]
 PublicKey = ${pub}
-AllowedIPs = 0.0.0.0/0, ::/0
+AllowedIPs = ::/0
 Endpoint = ${ep}
 PersistentKeepalive = 25
 EOF
@@ -8282,6 +8363,56 @@ warpstack_public_ip() {
     [[ -n "$ip" ]] && printf '%s' "$ip" || printf '%s' "$fallback"
 }
 
+warpstack_fetch_trace() {
+    local family="$1" trace=""
+    trace="$(curl -s "$family" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
+    printf '%s\n' "$trace"
+}
+
+warpstack_trace_value() {
+    local trace="$1" key="$2"
+    printf '%s\n' "$trace" | awk -F= -v key="$key" '$1 == key { print $2; exit }'
+}
+
+warpstack_print_trace_status() {
+    local label="$1" trace="$2" ip loc warp
+    ip="$(warpstack_trace_value "$trace" "ip")"
+    loc="$(warpstack_trace_value "$trace" "loc")"
+    warp="$(warpstack_trace_value "$trace" "warp")"
+
+    [[ -n "$ip" ]] && echo -e "  ${label} IP:   ${CYAN}${ip}${NC}"
+    [[ -n "$loc" ]] && echo -e "  ${label} Loc:  ${CYAN}${loc}${NC}"
+    echo -e "  ${label} Warp: ${YELLOW}${warp:-unknown}${NC}"
+}
+
+warpstack_show_trace_status() {
+    local allowed trace has_target=false
+
+    [[ -f "$WARPSTACK_WG_CONF" ]] || { warpstack_warn "未找到 ${WARPSTACK_WG_CONF}，无法判断 WARP 状态"; return; }
+    allowed="$(warpstack_conf_value "AllowedIPs")"
+
+    if [[ "$allowed" == *"0.0.0.0/0"* ]]; then
+        has_target=true
+        if trace="$(warpstack_fetch_trace "-4")"; then
+            warpstack_print_trace_status "IPv4" "$trace"
+        else
+            warpstack_warn "无法通过 IPv4 获取 Cloudflare trace"
+        fi
+    fi
+
+    if [[ "$allowed" == *"::/0"* ]]; then
+        has_target=true
+        if trace="$(warpstack_fetch_trace "-6")"; then
+            warpstack_print_trace_status "IPv6" "$trace"
+        else
+            warpstack_warn "无法通过 IPv6 获取 Cloudflare trace"
+        fi
+    fi
+
+    $has_target || warpstack_warn "配置中未找到可检查的 WARP AllowedIPs"
+}
+
 warpstack_install_free() {
     warpstack_prepare_install free || return 1
 
@@ -8307,14 +8438,34 @@ warpstack_install_free() {
 
     local tmpdir; tmpdir=$(mktemp -d)
     [[ -z "$tmpdir" ]] && warpstack_err "创建临时目录失败"
-    cd "$tmpdir" || warpstack_err "进入临时目录失败: $tmpdir"
+    cd "$tmpdir" || {
+        rm -rf "$tmpdir"
+        if $wgcf_downloaded; then
+            rm -f "$WARPSTACK_WGCF_BIN"
+        fi
+        warpstack_err "进入临时目录失败: $tmpdir"
+    }
 
     warpstack_info "注册 WARP 免费账户 ..."
-    yes | "$WARPSTACK_WGCF_BIN" register || warpstack_err "WARP 注册失败"
+    yes | "$WARPSTACK_WGCF_BIN" register || {
+        cd / || true
+        rm -rf "$tmpdir"
+        if $wgcf_downloaded; then
+            rm -f "$WARPSTACK_WGCF_BIN"
+        fi
+        warpstack_err "WARP 注册失败"
+    }
     warpstack_ok "注册成功"
 
     warpstack_info "生成 WireGuard 配置 ..."
-    "$WARPSTACK_WGCF_BIN" generate || warpstack_err "配置生成失败"
+    "$WARPSTACK_WGCF_BIN" generate || {
+        cd / || true
+        rm -rf "$tmpdir"
+        if $wgcf_downloaded; then
+            rm -f "$WARPSTACK_WGCF_BIN"
+        fi
+        warpstack_err "配置生成失败"
+    }
 
     local priv pub addr ep warp_v4 warp_v6
     priv=$(grep 'PrivateKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
@@ -8323,6 +8474,15 @@ warpstack_install_free() {
     ep=$(grep 'Endpoint' wgcf-profile.conf | awk -F' = ' '{print $2}')
     warp_v4=$(echo "$addr" | grep -oP '\d+\.\d+\.\d+\.\d+')
     warp_v6=$(echo "$addr" | grep -oP '2606:[0-9a-f:]+')
+
+    [[ -n "$priv" && -n "$pub" && -n "$warp_v4" && -n "$warp_v6" && -n "$ep" ]] || {
+        cd / || true
+        rm -rf "$tmpdir"
+        if $wgcf_downloaded; then
+            rm -f "$WARPSTACK_WGCF_BIN"
+        fi
+        warpstack_err "无法从 wgcf-profile.conf 提取 WARP 配置"
+    }
 
     warpstack_info "WARP IPv4: $warp_v4 | IPv6: $warp_v6"
 
@@ -8335,6 +8495,7 @@ warpstack_install_free() {
         warpstack_ok "临时文件已清理"
     fi
 
+    ep="$(warpstack_select_endpoint_for_network "$ep" "" "" "")"
     warpstack_finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$ep" "free"
 }
 
@@ -8394,27 +8555,23 @@ warpstack_install_team() {
     [[ -n "$api_ports" ]] && ep_port=$(echo "$api_ports" | cut -d',' -f1 | tr -d ' ')
 
     ep_host=$(echo "$response" | grep -oP '"host"\s*:\s*"\K[^"]+' | head -1)
-    if [[ "$WARPSTACK_NET_MODE" == "v6_only" ]]; then
-        ep_v6=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
-        ep_v6=$(echo "$ep_v6" | sed 's/\[//g; s/\]//g; s/:0$//g')
-        if [[ -n "$ep_v6" && "$ep_v6" != *"cf1"* ]]; then
-            endpoint="[${ep_v6}]:${ep_port}"
-        elif [[ -n "$ep_host" ]]; then
-            endpoint="${ep_host%%:*}:${ep_port}"
-        else
-            warpstack_err "API 未返回可用的 Endpoint"
-        fi
-    else
-        ep_v4=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
-        ep_v4=$(echo "$ep_v4" | sed 's/:0$//g')
-        if [[ -n "$ep_v4" && "$ep_v4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            endpoint="${ep_v4}:${ep_port}"
-        elif [[ -n "$ep_host" ]]; then
-            endpoint="${ep_host%%:*}:${ep_port}"
-        else
-            warpstack_err "API 未返回可用的 Endpoint"
-        fi
-    fi
+    ep_v4=$(echo "$response" | grep -oP '"v4"\s*:\s*"\K[^"]+' | tail -1)
+    ep_v4=$(echo "$ep_v4" | sed 's/:0$//g')
+    ep_v6=$(echo "$response" | grep -oP '"v6"\s*:\s*"\K[^"]+' | tail -1)
+    ep_v6=$(echo "$ep_v6" | sed 's/\[//g; s/\]//g; s/:0$//g')
+
+    case "$WARPSTACK_NET_MODE" in
+        v6_only)
+            [[ "$ep_v6" == *"cf1"* ]] && ep_v6=""
+            endpoint="$(warpstack_select_endpoint_for_network "${ep_host:-$ep_v6}" "" "$ep_v6" "$ep_port")"
+            ;;
+        v4_only|dual)
+            endpoint="$(warpstack_select_endpoint_for_network "${ep_host:-$ep_v4}" "" "" "$ep_port")"
+            ;;
+        *)
+            warpstack_err "当前网络模式无法确定 Endpoint"
+            ;;
+    esac
     warpstack_finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint" "team($org)"
 }
 
@@ -8528,6 +8685,8 @@ warpstack_show_ip() {
     v6=$(warpstack_public_ip "-6" "无")
     echo -e "  IPv4: ${CYAN}${v4}${NC}"
     echo -e "  IPv6: ${CYAN}${v6}${NC}"
+    warpstack_menu_divider
+    warpstack_show_trace_status
 }
 
 warpstack_uninstall() {
