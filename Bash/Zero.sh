@@ -7633,38 +7633,10 @@ wireproxy_show_proxy_status() {
 }
 
 wireproxy_show_proxy_trace() {
-    local trace="" v4_trace="" ip="" ip4="" ip6="" loc="" warp="" attempt
+    local v4_trace="" v6_trace="" ip4="" ip6="" warp_status="" attempt
     wireproxy_load_socks_settings
 
     [[ -f "$WIREPROXY_CONF" ]] || { wireproxy_warn "未找到配置文件"; return; }
-
-    for attempt in 1 2 3 4 5; do
-        trace="$(wireproxy_fetch_trace_via_proxy "socks5h" || true)"
-        [[ -n "$trace" ]] && break
-        sleep 1
-    done
-
-    if [[ -z "$trace" ]]; then
-        for attempt in 1 2 3; do
-            trace="$(wireproxy_fetch_trace_via_proxy "socks5" || true)"
-            [[ -n "$trace" ]] && break
-            sleep 1
-        done
-    fi
-
-    if [[ -z "$trace" ]]; then
-        wireproxy_warn "无法通过 SOCKS 代理获取 WARP 出口信息，可稍等几秒后再试一次"
-        return
-    fi
-
-    ip="$(wireproxy_trace_value "$trace" "ip")"
-    if [[ -n "$ip" ]]; then
-        if wireproxy_is_ipv6_literal "$ip" && ! wireproxy_is_ipv4_literal "$ip"; then
-            ip6="$ip"
-        else
-            ip4="$ip"
-        fi
-    fi
 
     for attempt in 1 2 3; do
         v4_trace="$(wireproxy_fetch_trace_via_proxy_v4 || true)"
@@ -7674,40 +7646,28 @@ wireproxy_show_proxy_trace() {
 
     [[ -n "$v4_trace" ]] && ip4="$(wireproxy_trace_value "$v4_trace" "ip")"
 
-    if [[ -z "$ip6" ]]; then
-        for attempt in 1 2 3; do
-            ip6="$(wireproxy_fetch_ipv6_ip_via_proxy || true)"
-            [[ -n "$ip6" ]] && break
-            sleep 1
-        done
-    fi
+    for attempt in 1 2 3; do
+        v6_trace="$(wireproxy_fetch_trace_via_proxy_v6 || true)"
+        [[ -n "$v6_trace" ]] && break
+        sleep 1
+    done
+
+    [[ -n "$v6_trace" ]] && ip6="$(wireproxy_trace_value "$v6_trace" "ip")"
+
+    [[ -z "$ip6" ]] && ip6="$(wireproxy_fetch_ipv6_ip_via_proxy || true)"
 
     [[ -z "$ip4" ]] && ip4="无"
     [[ -z "$ip6" ]] && ip6="无"
-    loc="$(wireproxy_trace_value "$trace" "loc")"
-    warp="$(wireproxy_trace_value "$trace" "warp")"
 
     echo -e "  IPv4: ${GREEN}${ip4}${NC}"
     echo -e "  IPv6: ${CYAN}${ip6}${NC}"
-    [[ -n "$loc" ]] && echo -e "  Loc:  ${CYAN}${loc}${NC}"
-    [[ -n "$warp" ]] && echo -e "  Warp: ${YELLOW}${warp}${NC}"
-    echo ""
-}
-
-wireproxy_fetch_trace_via_proxy() {
-    local scheme="$1" proxy_url
-    local curl_args=()
-    local trace=""
-
-    proxy_url="${scheme}://${WIREPROXY_SOCKS_BIND}"
-    curl_args=(--proxy "$proxy_url" --connect-timeout 5 --max-time 10 -s)
-    if [[ -n "$WIREPROXY_SOCKS_USER" ]]; then
-        curl_args+=(--proxy-user "${WIREPROXY_SOCKS_USER}:${WIREPROXY_SOCKS_PASS}")
+    if [[ -n "$v4_trace" || -n "$v6_trace" ]]; then
+        warp_status="$(wireproxy_merge_warp_status "$v4_trace" "$v6_trace")"
+        echo -e "  Warp: ${YELLOW}${warp_status}${NC}"
+    else
+        wireproxy_warn "无法通过 SOCKS 代理获取 WARP 出口信息，可稍等几秒后再试一次"
     fi
-
-    trace="$(curl "${curl_args[@]}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
-    [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
-    printf '%s\n' "$trace"
+    echo ""
 }
 
 wireproxy_fetch_trace_via_proxy_v4() {
@@ -7721,6 +7681,21 @@ wireproxy_fetch_trace_via_proxy_v4() {
     fi
 
     trace="$(curl "${curl_args[@]}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
+    printf '%s\n' "$trace"
+}
+
+wireproxy_fetch_trace_via_proxy_v6() {
+    local proxy_url trace=""
+    local curl_args=()
+
+    proxy_url="socks5://${WIREPROXY_SOCKS_BIND}"
+    curl_args=(-g --proxy "$proxy_url" --connect-timeout 5 --max-time 10 -s)
+    if [[ -n "$WIREPROXY_SOCKS_USER" ]]; then
+        curl_args+=(--proxy-user "${WIREPROXY_SOCKS_USER}:${WIREPROXY_SOCKS_PASS}")
+    fi
+
+    trace="$(curl "${curl_args[@]}" "http://[2606:4700:4700::1111]/cdn-cgi/trace" 2>/dev/null || true)"
     [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
     printf '%s\n' "$trace"
 }
@@ -7743,6 +7718,28 @@ wireproxy_fetch_ipv6_ip_via_proxy() {
 wireproxy_trace_value() {
     local trace="$1" key="$2"
     printf '%s\n' "$trace" | awk -F= -v key="$key" '$1 == key { print $2; exit }'
+}
+
+wireproxy_trace_warp_label() {
+    local trace="$1" warp
+    warp="$(wireproxy_trace_value "$trace" "warp")"
+    [[ "$warp" == "on" ]] && warp="free"
+    [[ -n "$warp" ]] && printf '%s\n' "$warp" || printf 'unknown\n'
+}
+
+wireproxy_merge_warp_status() {
+    local status="unknown" trace warp
+    for trace in "$@"; do
+        [[ -z "$trace" ]] && continue
+        warp="$(wireproxy_trace_warp_label "$trace")"
+        case "$warp" in
+            plus) printf 'plus\n'; return 0 ;;
+            free) status="free" ;;
+            off) [[ "$status" == "unknown" ]] && status="off" ;;
+        esac
+    done
+
+    printf '%s\n' "$status"
 }
 
 wireproxy_install_free() {
@@ -8375,42 +8372,32 @@ warpstack_trace_value() {
     printf '%s\n' "$trace" | awk -F= -v key="$key" '$1 == key { print $2; exit }'
 }
 
-warpstack_print_trace_status() {
-    local label="$1" trace="$2" ip loc warp
-    ip="$(warpstack_trace_value "$trace" "ip")"
-    loc="$(warpstack_trace_value "$trace" "loc")"
+warpstack_trace_warp_label() {
+    local trace="$1" warp
     warp="$(warpstack_trace_value "$trace" "warp")"
-
-    [[ -n "$ip" ]] && echo -e "  ${label} IP:   ${CYAN}${ip}${NC}"
-    [[ -n "$loc" ]] && echo -e "  ${label} Loc:  ${CYAN}${loc}${NC}"
-    echo -e "  ${label} Warp: ${YELLOW}${warp:-unknown}${NC}"
+    [[ "$warp" == "on" ]] && warp="free"
+    [[ -n "$warp" ]] && printf '%s\n' "$warp" || printf 'unknown\n'
 }
 
-warpstack_show_trace_status() {
-    local allowed trace has_target=false
+warpstack_merge_warp_status() {
+    local status="unknown" trace warp
+    for trace in "$@"; do
+        [[ -z "$trace" ]] && continue
+        warp="$(warpstack_trace_warp_label "$trace")"
+        case "$warp" in
+            plus) printf 'plus\n'; return 0 ;;
+            free) status="free" ;;
+            off) [[ "$status" == "unknown" ]] && status="off" ;;
+        esac
+    done
 
-    [[ -f "$WARPSTACK_WG_CONF" ]] || { warpstack_warn "未找到 ${WARPSTACK_WG_CONF}，无法判断 WARP 状态"; return; }
-    allowed="$(warpstack_conf_value "AllowedIPs")"
+    printf '%s\n' "$status"
+}
 
-    if [[ "$allowed" == *"0.0.0.0/0"* ]]; then
-        has_target=true
-        if trace="$(warpstack_fetch_trace "-4")"; then
-            warpstack_print_trace_status "IPv4" "$trace"
-        else
-            warpstack_warn "无法通过 IPv4 获取 Cloudflare trace"
-        fi
-    fi
-
-    if [[ "$allowed" == *"::/0"* ]]; then
-        has_target=true
-        if trace="$(warpstack_fetch_trace "-6")"; then
-            warpstack_print_trace_status "IPv6" "$trace"
-        else
-            warpstack_warn "无法通过 IPv6 获取 Cloudflare trace"
-        fi
-    fi
-
-    $has_target || warpstack_warn "配置中未找到可检查的 WARP AllowedIPs"
+warpstack_trace_is_warp() {
+    local trace="$1" warp
+    warp="$(warpstack_trace_value "$trace" "warp")"
+    [[ -n "$warp" && "$warp" != "off" ]]
 }
 
 warpstack_install_free() {
@@ -8680,13 +8667,50 @@ warpstack_manage_service() {
 warpstack_show_ip() {
     clear
     warpstack_info "当前出口 IP"
-    local v4 v6
+    local v4 v6 allowed v4_trace="" v6_trace="" v4_suffix="" v6_suffix="" warp_status="" has_target=false has_warp=false
     v4=$(warpstack_public_ip "-4" "无")
     v6=$(warpstack_public_ip "-6" "无")
-    echo -e "  IPv4: ${CYAN}${v4}${NC}"
-    echo -e "  IPv6: ${CYAN}${v6}${NC}"
+
+    if [[ -f "$WARPSTACK_WG_CONF" ]]; then
+        allowed="$(warpstack_conf_value "AllowedIPs")"
+        if [[ "$allowed" == *"0.0.0.0/0"* ]]; then
+            has_target=true
+            v4_trace="$(warpstack_fetch_trace "-4" || true)"
+            if warpstack_trace_is_warp "$v4_trace"; then
+                has_warp=true
+                v4_suffix=" ${GREEN}(WARP)${NC}"
+            fi
+        fi
+        if [[ "$allowed" == *"::/0"* ]]; then
+            has_target=true
+            v6_trace="$(warpstack_fetch_trace "-6" || true)"
+            if warpstack_trace_is_warp "$v6_trace"; then
+                has_warp=true
+                v6_suffix=" ${GREEN}(WARP)${NC}"
+            fi
+        fi
+    fi
+
+    echo -e "  IPv4: ${CYAN}${v4}${NC}${v4_suffix}"
+    echo -e "  IPv6: ${CYAN}${v6}${NC}${v6_suffix}"
     warpstack_menu_divider
-    warpstack_show_trace_status
+    if [[ ! -f "$WARPSTACK_WG_CONF" ]]; then
+        warpstack_warn "未找到 ${WARPSTACK_WG_CONF}，无法判断 WARP 状态"
+        return
+    fi
+    if [[ "$allowed" == *"0.0.0.0/0"* ]]; then
+        [[ -z "$v4_trace" ]] && warpstack_warn "无法通过 IPv4 获取 Cloudflare trace"
+    fi
+    if [[ "$allowed" == *"::/0"* ]]; then
+        [[ -z "$v6_trace" ]] && warpstack_warn "无法通过 IPv6 获取 Cloudflare trace"
+    fi
+    $has_target || warpstack_warn "配置中未找到可检查的 WARP AllowedIPs"
+    if $has_warp; then
+        warp_status="$(warpstack_merge_warp_status "$v4_trace" "$v6_trace")"
+        echo -e "  Warp: ${YELLOW}${warp_status}${NC}"
+    else
+        warpstack_warn "未检测到 WARP 出口状态"
+    fi
 }
 
 warpstack_uninstall() {
