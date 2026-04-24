@@ -1390,6 +1390,10 @@ bbr_prompt_reboot() {
     fi
 }
 
+bbr_xanmod_installed() {
+    dpkg -l 2>/dev/null | grep -qE '^ii[[:space:]]+linux-image-.*xanmod'
+}
+
 bbr_read_runtime_status() {
     local current_kernel cc qdisc available_cc xanmod_installed="no"
 
@@ -1398,7 +1402,7 @@ bbr_read_runtime_status() {
     qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
     available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)
 
-    if dpkg -l 2>/dev/null | grep -qE '^ii[[:space:]]+linux-image-.*xanmod'; then
+    if bbr_xanmod_installed; then
         xanmod_installed="yes"
     fi
 
@@ -1424,7 +1428,7 @@ bbr_cpu_has_flags() {
 }
 
 bbr_detect_x86_64_level_local() {
-    if ! bbr_cpu_has_flags cx16 lahf_lm popcnt sse3 ssse3 sse4_1 sse4_2; then
+    if ! bbr_cpu_has_flags cx16 lahf_lm popcnt pni ssse3 sse4_1 sse4_2; then
         echo 1
         return 0
     fi
@@ -1858,16 +1862,36 @@ bbr_calculate_buffer_size() {
     fi
 }
 
+bbr_clean_sysctl_conf_conflicts() {
+    [[ -f /etc/sysctl.conf ]] || return 0
+
+    cp /etc/sysctl.conf /etc/sysctl.conf.bak.conflict 2>/dev/null || true
+
+    local key
+    for key in \
+        'net\.ipv4\.tcp_wmem' \
+        'net\.ipv4\.tcp_rmem' \
+        'net\.core\.rmem_max' \
+        'net\.core\.wmem_max' \
+        'net\.core\.default_qdisc' \
+        'net\.ipv4\.tcp_congestion_control'
+    do
+        sed -i -E "/^[[:space:]]*#?[[:space:]]*${key}[[:space:]]*=/d" /etc/sysctl.conf 2>/dev/null
+    done
+}
+
 bbr_check_and_clean_conflicts() {
     echo -e "${BLUE}=== 检查 sysctl 配置冲突 ===${PLAIN}"
     local conflicts=()
     local conf base num
-    local tune_key_regex='(^|\s)net\.(core\.(rmem_max|wmem_max|default_qdisc)|ipv4\.tcp_(rmem|wmem|congestion_control))'
+    local tune_key_regex='net\.(core\.(rmem_max|wmem_max|default_qdisc)|ipv4\.tcp_(rmem|wmem|congestion_control))'
+    local active_tune_regex="^[[:space:]]*${tune_key_regex}[[:space:]]*="
+    local sysctl_conf_tune_regex="^[[:space:]]*#?[[:space:]]*${tune_key_regex}[[:space:]]*="
 
     for conf in /etc/sysctl.d/*.conf; do
         [[ -f "$conf" ]] || continue
         [[ "$conf" == "$BBR_SYSCTL_CONF" ]] && continue
-        if grep -qE "$tune_key_regex" "$conf" 2>/dev/null; then
+        if grep -qE "$active_tune_regex" "$conf" 2>/dev/null; then
             base=$(basename "$conf")
             num=$(echo "$base" | sed -n 's/^\([0-9]\+\).*/\1/p')
             if [[ -z "$num" || "$num" -ge 99 ]]; then
@@ -1877,7 +1901,7 @@ bbr_check_and_clean_conflicts() {
     done
 
     local has_sysctl_conflict=0
-    if [[ -f /etc/sysctl.conf ]] && grep -qE "$tune_key_regex" /etc/sysctl.conf 2>/dev/null; then
+    if [[ -f /etc/sysctl.conf ]] && grep -qE "$sysctl_conf_tune_regex" /etc/sysctl.conf 2>/dev/null; then
         has_sysctl_conflict=1
     fi
 
@@ -1892,22 +1916,11 @@ bbr_check_and_clean_conflicts() {
     fi
     [[ "$has_sysctl_conflict" -eq 1 ]] && echo "  - /etc/sysctl.conf"
 
-    read -rp "是否自动禁用/注释这些覆盖配置？(Y/N): " answer
+    read -rp "是否自动禁用/清理这些覆盖配置？(Y/N): " answer
     case "$answer" in
         [Yy])
             if [[ "$has_sysctl_conflict" -eq 1 ]]; then
-                cp /etc/sysctl.conf /etc/sysctl.conf.bak.conflict 2>/dev/null || true
-                local key
-                for key in \
-                    'net\.ipv4\.tcp_wmem' \
-                    'net\.ipv4\.tcp_rmem' \
-                    'net\.core\.rmem_max' \
-                    'net\.core\.wmem_max' \
-                    'net\.core\.default_qdisc' \
-                    'net\.ipv4\.tcp_congestion_control'
-                do
-                    sed -i "/^[[:space:]]*${key}/s/^[[:space:]]*/# /" /etc/sysctl.conf 2>/dev/null
-                done
+                bbr_clean_sysctl_conf_conflicts
             fi
             for conf in "${conflicts[@]}"; do
                 mv "$conf" "${conf}.disabled.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
@@ -1956,15 +1969,12 @@ bbr_apply_mss_clamp() {
         return 0
     fi
 
+    while iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; do
+        iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || break
+    done
+
     if [[ "$action" == "enable" ]]; then
-        while iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; do
-            iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || break
-        done
         iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    else
-        while iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; do
-            iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || break
-        done
     fi
 }
 
@@ -2081,16 +2091,18 @@ ExecStart=/usr/local/bin/bbr-optimize-apply.sh
 WantedBy=multi-user.target
 EOF
 
-    cat > "$BBR_PERSIST_SCRIPT" <<'EOF'
+cat > "$BBR_PERSIST_SCRIPT" <<'EOF'
 #!/bin/bash
-for d in /sys/class/net/*; do
-    [ -e "$d" ] || continue
-    dev=$(basename "$d")
-    case "$dev" in
-        lo|docker*|veth*|br-*|virbr*|zt*|tailscale*|wg*|tun*|tap*) continue ;;
-    esac
-    tc qdisc replace dev "$dev" root fq 2>/dev/null
-done
+if command -v tc >/dev/null 2>&1; then
+    for d in /sys/class/net/*; do
+        [ -e "$d" ] || continue
+        dev=$(basename "$d")
+        case "$dev" in
+            lo|docker*|veth*|br-*|virbr*|zt*|tailscale*|wg*|tun*|tap*) continue ;;
+        esac
+        tc qdisc replace dev "$dev" root fq 2>/dev/null
+    done
+fi
 if command -v iptables >/dev/null 2>&1; then
     iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 \
         || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
@@ -2130,11 +2142,14 @@ EOF
 }
 
 bbr_install_xanmod_kernel() {
-    echo -e "${BLUE}=== 安装 XanMod 内核与 BBR v3 ===${PLAIN}"
+    local action_label="安装"
+    bbr_xanmod_installed && action_label="更新"
+
+    echo -e "${BLUE}=== ${action_label} XanMod 内核与 BBR v3 ===${PLAIN}"
     echo "支持系统: Debian/Ubuntu (x86_64)"
     echo -e "${YELLOW}警告: 将升级 Linux 内核，请提前备份重要数据${PLAIN}"
-    if ! bbr_confirm "确定继续安装吗？(Y/N): "; then
-        echo "已取消安装"
+    if ! bbr_confirm "确定继续${action_label}吗？(Y/N): "; then
+        echo "已取消${action_label}"
         press_any_key_to_continue
         return 1
     fi
@@ -2257,7 +2272,7 @@ bbr_install_xanmod_kernel() {
         return 1
     fi
 
-    echo -e "${GREEN}XanMod 内核安装成功${PLAIN}"
+    echo -e "${GREEN}XanMod 内核${action_label}成功${PLAIN}"
     echo -e "${YELLOW}提示: 请先重启系统加载新内核，然后再进行 BBR 调优${PLAIN}"
     press_any_key_to_continue
 }
@@ -2319,7 +2334,7 @@ bbr_show_manage_menu() {
     echo -e "${BLUE}============ BBR管理 ============${PLAIN}"
     bbr_menu_status_line
     echo -e "${BLUE}==================================${PLAIN}"
-    echo -e "${GREEN}1.安装XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
+    echo -e "${GREEN}1.安装/更新XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
     echo -e "${BLUE}3.BBR调优${PLAIN}      ${YELLOW}0.返回菜单${PLAIN}"
     echo -e "${BLUE}==================================${PLAIN}"
 }
