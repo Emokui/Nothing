@@ -31,11 +31,63 @@ press_any_key_to_continue() {
     fi
 }
 
+pause_any_key() {
+    local msg="${1:-按任意键继续...}"
+    press_any_key_to_continue "$msg"
+}
+
+pause_any_key_and_clear() {
+    pause_any_key "${1:-按任意键继续...}"
+    clear
+}
+
+pause_enter() {
+    local msg="${1:-按回车继续...}"
+    if [ -t 0 ]; then
+        read -r -p "$(echo -e "${BLUE}${msg}${PLAIN}")" _
+    else
+        echo
+    fi
+}
+
+pause_enter_and_clear() {
+    pause_enter "${1:-按回车返回...}"
+    clear
+}
+
 trim_input() {
     local value="$1"
     value="${value#"${value%%[![:space:]]*}"}"
     value="${value%"${value##*[![:space:]]}"}"
     printf '%s' "$value"
+}
+
+log_info() {
+    echo -e "${BLUE}$*${PLAIN}"
+}
+
+log_ok() {
+    echo -e "${GREEN}$*${PLAIN}"
+}
+
+log_warn() {
+    echo -e "${YELLOW}$*${PLAIN}"
+}
+
+log_err() {
+    echo -e "${RED}$*${PLAIN}"
+}
+
+log_prefixed() {
+    local color="$1"
+    local prefix="$2"
+    shift 2
+    echo -e "${color}${prefix}${PLAIN} $*"
+}
+
+service_failure_hint() {
+    local service_name="$1"
+    [[ -n "$service_name" ]] && echo -e "${YELLOW}需要排查时: systemctl status --no-pager ${service_name}${PLAIN}"
 }
 
 normalize_numeric_choice() {
@@ -492,11 +544,7 @@ reinstall_cidr_to_netmask() {
 }
 
 reinstall_get_default_interface() {
-    local iface=''
-    iface=$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
-    [[ -z "$iface" ]] && iface=$(ip -6 route show default 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") {print $(i + 1); exit}}')
-    [[ -z "$iface" ]] && iface=$(ip -o link show 2>/dev/null | awk -F': ' '$2 != "lo" {print $2; exit}')
-    echo "$iface"
+    get_default_interface
 }
 
 reinstall_get_target_disk() {
@@ -1059,7 +1107,16 @@ reinstall_menu() {
     reinstall_check_sys
     [[ "$EUID" -ne '0' ]] && echo -e "${RED}请使用 root 权限运行此脚本${PLAIN}" && return
     [[ -z "${reinstall_release:-}" ]] && echo -e "${RED}暂不支持当前系统${PLAIN}" && press_any_key_to_continue && return
-    reinstall_install_dependencies
+    if [[ "$(uname -m)" != "x86_64" && "$(uname -m)" != "amd64" ]]; then
+        echo -e "${RED}当前重装模块仅支持 amd64/x86_64${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
+    if ! reinstall_install_dependencies; then
+        echo -e "${RED}重装依赖安装失败,已停止本次操作${PLAIN}"
+        press_any_key_to_continue
+        return 1
+    fi
     reinstall_main_loop
 }
 
@@ -2042,8 +2099,8 @@ EOF
 
     chmod +x "$BBR_PERSIST_SCRIPT"
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl daemon-reload >/dev/null 2>&1
-        systemctl enable "$BBR_PERSIST_SERVICE_NAME" >/dev/null 2>&1
+        systemctl daemon-reload >/dev/null 2>&1 || echo -e "${YELLOW}systemd 重新加载失败,BBR 持久化服务可能未生效${PLAIN}"
+        systemctl enable "$BBR_PERSIST_SERVICE_NAME" >/dev/null 2>&1 || echo -e "${YELLOW}BBR 持久化服务启用失败,重启后可能需要重新应用调优${PLAIN}"
     else
         echo -e "${YELLOW}未检测到 systemctl，已跳过持久化服务启用${PLAIN}"
     fi
@@ -2395,7 +2452,7 @@ dns_write_resolv_conf() {
         for dns in "$@"; do
             echo "nameserver $dns"
         done
-    } > "$DNS_RESOLV_CONF" 2>/dev/null || true
+    } > "$DNS_RESOLV_CONF" 2>/dev/null
 }
 
 dns_restart_local_resolvers() {
@@ -2430,14 +2487,17 @@ dns_apply() {
     fi
 
     if dns_systemd_resolved_active; then
-        mkdir -p "$DNS_RESOLVED_DROPIN_DIR"
+        mkdir -p "$DNS_RESOLVED_DROPIN_DIR" || return 1
         {
             echo "[Resolve]"
             echo "DNS=${dns_list[*]}"
             echo "Domains=~."
-        } > "$DNS_RESOLVED_DROPIN_FILE"
+        } > "$DNS_RESOLVED_DROPIN_FILE" || return 1
 
-        systemctl restart systemd-resolved 2>/dev/null || true
+        if ! systemctl restart systemd-resolved 2>/dev/null; then
+            echo -e "${RED}systemd-resolved 重启失败${PLAIN}"
+            return 1
+        fi
 
         if command -v resolvectl >/dev/null 2>&1; then
             resolvectl flush-caches 2>/dev/null || true
@@ -2451,14 +2511,14 @@ dns_apply() {
 
         if [[ ! -L "$DNS_RESOLV_CONF" ]]; then
             dns_unlock_resolv
-            dns_write_resolv_conf "${dns_list[@]}"
+            dns_write_resolv_conf "${dns_list[@]}" || return 1
         fi
     else
         if [[ -L "$DNS_RESOLV_CONF" ]]; then
-            rm -f "$DNS_RESOLV_CONF" 2>/dev/null || true
+            rm -f "$DNS_RESOLV_CONF" 2>/dev/null || return 1
         fi
         dns_unlock_resolv
-        dns_write_resolv_conf "${dns_list[@]}"
+        dns_write_resolv_conf "${dns_list[@]}" || return 1
     fi
 
     dns_restart_local_resolvers
@@ -2733,16 +2793,17 @@ disable_ssh_login_menu() {
     clear
     local has_password=0
     local has_pubkey=0
-    local pass_auth pubkey_auth
+    local pass_auth pubkey_auth permit_root_login
     local password_login_text pubkey_login_text
     local -a ssh_status
 
     mapfile -t ssh_status < <(ssh_read_status)
+    permit_root_login="${ssh_status[1]}"
     pass_auth="${ssh_status[2]}"
     pubkey_auth="${ssh_status[3]}"
 
-    [[ "$pass_auth" == "yes" ]] && has_password=1
-    [[ "$pubkey_auth" == "yes" ]] && has_pubkey=1
+    [[ "$permit_root_login" == "yes" && "$pass_auth" == "yes" ]] && has_password=1
+    [[ "$permit_root_login" =~ ^(yes|prohibit-password|without-password)$ && "$pubkey_auth" == "yes" ]] && has_pubkey=1
 
     password_login_text=$(ssh_status_label "$pass_auth")
     pubkey_login_text=$(ssh_status_label "$pubkey_auth")
@@ -2765,7 +2826,12 @@ disable_ssh_login_menu() {
     disable_choice=$(read_menu_choice "请输入选项 [0-2]: ")
     case "$disable_choice" in
         1)
-            if [[ $has_password -eq 1 ]]; then
+            if [[ "$pass_auth" == "yes" ]]; then
+                if [[ $has_pubkey -ne 1 ]]; then
+                    echo -e "${RED}关闭密码登录后将没有可确认的 root 登录方式,已取消${PLAIN}"
+                    press_any_key_to_continue
+                    return
+                fi
                 update_sshd_option "PasswordAuthentication" "no"
                 if restart_sshd_safe; then
                     echo -e "${GREEN}[✓]密码登录已关闭${PLAIN}"
@@ -2776,7 +2842,12 @@ disable_ssh_login_menu() {
             press_any_key_to_continue
             ;;
         2)
-            if [[ $has_pubkey -eq 1 ]]; then
+            if [[ "$pubkey_auth" == "yes" ]]; then
+                if [[ $has_password -ne 1 ]]; then
+                    echo -e "${RED}关闭密钥登录后将没有可确认的 root 登录方式,已取消${PLAIN}"
+                    press_any_key_to_continue
+                    return
+                fi
                 update_sshd_option "PubkeyAuthentication" "no"
                 if restart_sshd_safe; then
                     echo -e "${GREEN}[✓]密钥登录已关闭${PLAIN}"
@@ -3139,12 +3210,16 @@ set_swappiness() {
     read -rp "请输入新的 Swappiness 值 (0-100): " new_val
     new_val=$(trim_input "$new_val")
     if swap_is_valid_swappiness "$new_val"; then
-        sysctl vm.swappiness="$new_val"
+        if ! sysctl vm.swappiness="$new_val"; then
+            echo -e "${RED}Swappiness 应用失败${PLAIN}"
+            press_any_key_to_continue
+            return 1
+        fi
         
         if grep -q "^vm.swappiness" /etc/sysctl.conf; then
-            sed -i "s/^vm.swappiness.*/vm.swappiness = $new_val/" /etc/sysctl.conf
+            sed -i "s/^vm.swappiness.*/vm.swappiness = $new_val/" /etc/sysctl.conf || echo -e "${YELLOW}写入 /etc/sysctl.conf 失败,重启后可能失效${PLAIN}"
         else
-            echo "vm.swappiness = $new_val" | tee -a /etc/sysctl.conf >/dev/null
+            echo "vm.swappiness = $new_val" | tee -a /etc/sysctl.conf >/dev/null || echo -e "${YELLOW}写入 /etc/sysctl.conf 失败,重启后可能失效${PLAIN}"
         fi
         
         echo -e "${GREEN}✓ 设置成功！${PLAIN}"
@@ -3821,6 +3896,11 @@ acme_generate_self_signed_cert() {
     read -r -p "$(echo -e "${BLUE}请输入证书域名(默认: ${default_domain}): ${PLAIN}")" domain
     domain=$(trim_input "$domain")
     domain="${domain:-$default_domain}"
+    if ! acme_validate_domain "$domain"; then
+        echo -e "${RED}域名格式不正确${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
 
     key_file="$ACME_CERT_PATH/${domain}.key"
     crt_file="$ACME_CERT_PATH/${domain}.crt"
@@ -3906,8 +3986,7 @@ readonly SNELL_DOWNLOAD_BASE="https://dl.nssurge.com/snell"
 readonly SNELL_CDN_BASE="https://snell-cdn.pages.dev/snell"
 
 snell_pause_and_clear() {
-  press_any_key_to_continue "按任意键继续..."
-  clear
+  pause_any_key_and_clear "按任意键继续..."
 }
 
 snell_command_exists() {
@@ -4131,9 +4210,17 @@ snell_download_and_install() {
     return 1
   fi
   
-  chmod +x snell-server
-  mv -f snell-server "${SNELL_BIN}"
-  mkdir -p "$SNELL_ETC"
+  if ! mkdir -p "$(dirname "$SNELL_BIN")" "$SNELL_ETC"; then
+    echo -e "${RED}创建 Snell 目录失败${PLAIN}"
+    snell_cleanup_tmp
+    return 1
+  fi
+
+  if ! install -m 755 snell-server "${SNELL_BIN}"; then
+    echo -e "${RED}安装 snell-server 可执行文件失败${PLAIN}"
+    snell_cleanup_tmp
+    return 1
+  fi
   snell_cleanup_tmp
   
   echo -e "${GREEN}Snell ${version} 安装成功${PLAIN}"
@@ -4141,7 +4228,16 @@ snell_download_and_install() {
 }
 
 snell_restart_all_services() {
-  systemctl daemon-reload
+  local failed=0
+  command -v systemctl >/dev/null 2>&1 || {
+    echo -e "${RED}未检测到 systemctl,无法重启 Snell 服务${PLAIN}"
+    return 1
+  }
+
+  systemctl daemon-reload || {
+    echo -e "${RED}systemd 重新加载失败${PLAIN}"
+    return 1
+  }
   shopt -s nullglob
   local services=(/etc/systemd/system/snell@*.service)
   shopt -u nullglob
@@ -4154,10 +4250,18 @@ snell_restart_all_services() {
   for svc in "${services[@]}"; do
     local svc_name
     svc_name=$(basename "$svc")
-    systemctl restart "$svc_name"
-    echo -e "${GREEN}已重启服务: $svc_name${PLAIN}"
+    if systemctl restart "$svc_name" >/dev/null 2>&1; then
+      echo -e "${GREEN}已重启服务: $svc_name${PLAIN}"
+    else
+      failed=1
+      echo -e "${RED}服务重启失败: $svc_name${PLAIN}"
+      service_failure_hint "$svc_name"
+    fi
   done
-  echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+  if (( failed == 0 )); then
+    echo -e "${GREEN}所有 Snell 服务已重启${PLAIN}"
+  fi
+  return "$failed"
 }
 
 snell_install() {
@@ -4335,8 +4439,8 @@ User=root
 WantedBy=multi-user.target
 EOF
   
-  systemctl daemon-reload
-  systemctl enable --now "$service_name"
+  systemctl daemon-reload >/dev/null 2>&1 || return 1
+  systemctl enable --now "$service_name" >/dev/null 2>&1
 }
 
 snell_generate_and_enable_config() {
@@ -4421,7 +4525,8 @@ snell_generate_and_enable_config() {
   if snell_create_systemd_service "$config_name" "$config_file"; then
     echo -e "${GREEN}配置 $config_name 已启动并设置为开机自启${PLAIN}"
   else
-    echo -e "${RED}配置 $config_name 创建成功，但服务启动失败，请检查 systemd 日志${PLAIN}"
+    echo -e "${RED}配置 $config_name 已生成,但服务启动失败${PLAIN}"
+    service_failure_hint "$(snell_service_name "$config_name")"
   fi
   snell_pause_and_clear
 }
@@ -4557,13 +4662,32 @@ snell_modify_config() {
   fi
   dns=$(snell_normalize_dns_list "$dns")
 
+  local backup_config
+  backup_config="$(mktemp)" || {
+    echo -e "${RED}创建配置备份失败${PLAIN}"
+    snell_pause_and_clear
+    return 1
+  }
+  cp "$config_file" "$backup_config" || {
+    rm -f "$backup_config"
+    echo -e "${RED}备份配置失败${PLAIN}"
+    snell_pause_and_clear
+    return 1
+  }
+
   snell_generate_config_file "$config_file" "$port" "$psk" "$obfs" "$obfs_host" "$ipv6" "$tfo" "$dns"
 
-  echo -e "${YELLOW}配置已更新,正在重启服务...${PLAIN}"
-  if systemctl restart "$service_name"; then
-    echo -e "${GREEN}服务已重启,新配置已生效${PLAIN}"
+  if systemctl restart "$service_name" >/dev/null 2>&1; then
+    rm -f "$backup_config"
+    echo -e "${GREEN}配置已更新,服务已重启${PLAIN}"
   else
-    echo -e "${RED}服务重启失败,请检查当前配置或 systemd 日志${PLAIN}"
+    if cp "$backup_config" "$config_file" && systemctl restart "$service_name" >/dev/null 2>&1; then
+      echo -e "${YELLOW}新配置启动失败,已回滚到上一份可用配置${PLAIN}"
+    else
+      echo -e "${RED}新配置启动失败,回滚后服务仍未启动${PLAIN}"
+      service_failure_hint "$service_name"
+    fi
+    rm -f "$backup_config"
   fi
   echo -e "${BLUE}------ 当前服务状态 ------${PLAIN}"
   systemctl status "$service_name" --no-pager
@@ -4704,8 +4828,12 @@ snell_stop_or_restart() {
     return 1
   fi
   
-  systemctl stop "$service_name"
-  echo -e "${YELLOW}已停止服务: $service_name${PLAIN}"
+  if systemctl stop "$service_name" >/dev/null 2>&1; then
+    echo -e "${YELLOW}已停止服务: $service_name${PLAIN}"
+  else
+    echo -e "${RED}停止服务失败: $service_name${PLAIN}"
+    service_failure_hint "$service_name"
+  fi
   snell_pause_and_clear
 }
 
@@ -4827,12 +4955,11 @@ shoes_check_supported_os() {
 }
 
 shoes_pause_and_return() {
-    read -rp "$(echo -e "${BLUE}按回车返回...${PLAIN}")"
-    clear
+    pause_enter_and_clear "按回车返回..."
 }
 
 shoes_pause_here() {
-    read -rp "$(echo -e "${BLUE}按回车继续...${PLAIN}")"
+    pause_enter "按回车继续..."
 }
 
 shoes_random_pass() {
@@ -4850,19 +4977,19 @@ shoes_yaml_quote() {
 }
 
 shoes_print_info() {
-    echo -e "${BLUE}$*${PLAIN}"
+    log_info "$*"
 }
 
 shoes_print_ok() {
-    echo -e "${GREEN}$*${PLAIN}"
+    log_ok "$*"
 }
 
 shoes_print_warn() {
-    echo -e "${YELLOW}$*${PLAIN}"
+    log_warn "$*"
 }
 
 shoes_print_err() {
-    echo -e "${RED}$*${PLAIN}"
+    log_err "$*"
 }
 
 shoes_require_commands() {
@@ -4938,10 +5065,7 @@ shoes_read_value() {
 }
 
 shoes_trim_whitespace() {
-    local value="$1"
-    value="${value#"${value%%[![:space:]]*}"}"
-    value="${value%"${value##*[![:space:]]}"}"
-    printf '%s' "$value"
+    trim_input "$1"
 }
 
 shoes_normalize_bind_address() {
@@ -5748,7 +5872,7 @@ shoes_install_config_file() {
 
 shoes_reload_service_unit() {
     shoes_create_systemd_service
-    if ! systemctl daemon-reload; then
+    if ! systemctl daemon-reload >/dev/null 2>&1; then
         shoes_print_err "systemd daemon-reload 失败"
         return 1
     fi
@@ -5763,9 +5887,9 @@ shoes_run_service_action_checked() {
     local action="$1"
     local fail_message="$2"
 
-    if ! systemctl "$action" "$SHOES_SERVICE_NAME"; then
-        shoes_print_err "$fail_message"
-        systemctl --no-pager --full status "$SHOES_SERVICE_NAME" || true
+    if ! systemctl "$action" "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
+        [[ -n "$fail_message" ]] && shoes_print_err "$fail_message"
+        service_failure_hint "$SHOES_SERVICE_NAME"
         return 1
     fi
     return 0
@@ -5819,7 +5943,12 @@ shoes_show_summary() {
     done < <(shoes_protocol_keys)
 
     echo
-    systemctl --no-pager --full status "$SHOES_SERVICE_NAME" || true
+    if systemctl is-active --quiet "$SHOES_SERVICE_NAME"; then
+        shoes_print_ok "服务已启动"
+    else
+        shoes_print_warn "服务未运行"
+        service_failure_hint "$SHOES_SERVICE_NAME"
+    fi
     shoes_pause_and_return
 }
 
@@ -5929,7 +6058,11 @@ shoes_install_binary_from_release() {
         return 1
     fi
 
-    install -m 755 "$bin_path" "$SHOES_EXEC_PATH"
+    if ! install -m 755 "$bin_path" "$SHOES_EXEC_PATH"; then
+        rm -rf "$temp_dir"
+        shoes_print_err "安装 shoes 可执行文件失败"
+        return 1
+    fi
     rm -rf "$temp_dir"
     return 0
 }
@@ -5953,7 +6086,6 @@ shoes_install_shoes() {
         shoes_pause_and_return
         return
     fi
-    shoes_print_ok "shoes 内核安装完成"
     shoes_run_configuration_wizard
 
     if ! shoes_apply_configuration; then
@@ -5961,8 +6093,8 @@ shoes_install_shoes() {
         return
     fi
 
-    shoes_print_ok "安装完成"
-    shoes_show_summary
+    shoes_print_ok "安装完成,服务已启动"
+    shoes_pause_and_return
 }
 
 shoes_protocol_status() {
@@ -6092,7 +6224,7 @@ shoes_show_service_and_config() {
     clear
     echo -e "${BLUE}Shoes 服务状态:${PLAIN}"
     systemctl --no-pager --full status "$SHOES_SERVICE_NAME" || true
-    read -rp "$(echo -e "${BLUE}按回车查看配置...${PLAIN}")"
+    pause_enter "按回车查看配置..."
     clear
     echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
     if [[ -f "$SHOES_CONFIG_PATH" ]]; then
@@ -6227,27 +6359,28 @@ shoes_update_shoes() {
 
     systemctl stop "$SHOES_SERVICE_NAME" 2>/dev/null || true
     if shoes_install_binary_from_release; then
-        if shoes_run_service_action_checked "start" "更新后启动失败"; then
+        if systemctl start "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
             rm -f "$backup_path"
             shoes_print_ok "更新完成"
         else
-            shoes_print_err "更新后启动失败，正在回滚旧版本"
-            if install -m 755 "$backup_path" "$SHOES_EXEC_PATH" && shoes_run_service_action_checked "start" "回滚后启动失败"; then
-                shoes_print_warn "已回滚到旧版本"
+            if install -m 755 "$backup_path" "$SHOES_EXEC_PATH" && systemctl start "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
+                shoes_print_warn "新版本启动失败，已回滚到旧版本"
             else
-                shoes_print_err "回滚失败"
+                shoes_print_err "新版本启动失败，回滚失败"
+                service_failure_hint "$SHOES_SERVICE_NAME"
             fi
             rm -f "$backup_path"
         fi
     else
         install -m 755 "$backup_path" "$SHOES_EXEC_PATH" >/dev/null 2>&1 || true
         rm -f "$backup_path"
-        if ! shoes_run_service_action_checked "start" "恢复旧版本后启动失败"; then
-            shoes_print_err "更新失败，且恢复后的服务未成功启动"
+        if ! systemctl start "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
+            shoes_print_err "更新失败，旧版本未能重新启动"
+            service_failure_hint "$SHOES_SERVICE_NAME"
             shoes_pause_and_return
             return
         fi
-        shoes_print_err "更新失败"
+        shoes_print_err "更新失败，已恢复旧版本"
     fi
     shoes_pause_and_return
 }
@@ -6304,8 +6437,7 @@ MIHOMO_SERVICE_NAME="mihomo"
 MIHOMO_SERVICE_FILE="/etc/systemd/system/mihomo.service"
 
 mihomo_pause_and_return() {
-    read -rp "$(echo -e "${BLUE}按回车返回...${PLAIN}")"
-    clear
+    pause_enter_and_clear "按回车返回..."
 }
 
 mihomo_get_arch() {
@@ -6322,6 +6454,11 @@ mihomo_get_arch() {
 
 mihomo_random_pass() {
     tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12
+}
+
+mihomo_validate_port() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
 }
 
 mihomo_check_ipv4() {
@@ -6446,6 +6583,74 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
     chmod 644 "$MIHOMO_SERVICE_FILE"
+}
+
+mihomo_reload_systemd() {
+    if systemctl daemon-reload >/dev/null 2>&1; then
+        return 0
+    fi
+    echo -e "${RED}systemd 重新加载失败${PLAIN}"
+    return 1
+}
+
+mihomo_show_service_failure() {
+    service_failure_hint "$MIHOMO_SERVICE_NAME"
+}
+
+mihomo_systemctl_checked() {
+    local action="$1"
+    local success_msg="$2"
+    local failure_msg="${3:-Mihomo 服务操作失败}"
+
+    if systemctl "$action" "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+        [[ -n "$success_msg" ]] && echo -e "${GREEN}${success_msg}${PLAIN}"
+        return 0
+    fi
+
+    echo -e "${RED}${failure_msg}${PLAIN}"
+    mihomo_show_service_failure
+    return 1
+}
+
+mihomo_start_checked() {
+    mihomo_systemctl_checked "start" "$1" "${2:-Mihomo 服务启动失败}"
+}
+
+mihomo_restart_checked() {
+    mihomo_systemctl_checked "restart" "$1" "${2:-Mihomo 服务重启失败}"
+}
+
+mihomo_make_config_backup() {
+    local backup
+    backup="$(mktemp)" || return 1
+    cp "$MIHOMO_CONFIG_PATH" "$backup" || {
+        rm -f "$backup"
+        return 1
+    }
+    printf '%s\n' "$backup"
+}
+
+mihomo_restart_with_rollback() {
+    local backup="$1"
+    local success_msg="$2"
+    local failure_msg="${3:-新配置重启失败}"
+
+    if systemctl restart "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+        rm -f "$backup"
+        echo -e "${GREEN}${success_msg}${PLAIN}"
+        return 0
+    fi
+
+    if cp "$backup" "$MIHOMO_CONFIG_PATH" && systemctl restart "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+        rm -f "$backup"
+        echo -e "${YELLOW}${failure_msg},已回滚到上一份可用配置${PLAIN}"
+        return 1
+    fi
+
+    rm -f "$backup"
+    echo -e "${RED}${failure_msg},回滚后服务仍未启动${PLAIN}"
+    mihomo_show_service_failure
+    return 1
 }
 
 mihomo_generate_config() {
@@ -6585,15 +6790,31 @@ mihomo_install() {
     read -r -p "$(echo -e "${BLUE}启用 Trojan?   [y/N]: ${PLAIN}")" enable_trojan
     read -r -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
     read -r -p "$(echo -e "${BLUE}启用 Hysteria? [y/N]: ${PLAIN}")" enable_hy2
+    [[ "$enable_anytls" =~ ^[Yy]$ ]] && enable_anytls="y" || enable_anytls="n"
+    [[ "$enable_trojan" =~ ^[Yy]$ ]] && enable_trojan="y" || enable_trojan="n"
+    [[ "$enable_tuic" =~ ^[Yy]$ ]] && enable_tuic="y" || enable_tuic="n"
+    [[ "$enable_hy2" =~ ^[Yy]$ ]] && enable_hy2="y" || enable_hy2="n"
+
+    if [[ "$enable_anytls" != "y" && "$enable_trojan" != "y" && "$enable_tuic" != "y" && "$enable_hy2" != "y" ]]; then
+        rm -f "$MIHOMO_EXEC_PATH"
+        echo -e "${RED}至少需要启用一个监听器,已取消安装${PLAIN}"
+        mihomo_pause_and_return
+        return
+    fi
     
 
-    if [[ "$enable_anytls" == "y" || "$enable_anytls" == "Y" ]]; then
-        enable_anytls="y"
+    if [[ "$enable_anytls" == "y" ]]; then
         clear
         echo -e "${BLUE}===== AnyTLS 配置 =====${PLAIN}"
         local anytls_port anytls_pass anytls_cert anytls_key
         read -r -p "$(echo -e "${BLUE}端口(默认:8443): ${PLAIN}")" anytls_port
         anytls_port=${anytls_port:-8443}
+        if ! mihomo_validate_port "$anytls_port"; then
+            echo -e "${RED}AnyTLS 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
         read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" anytls_pass
         if [[ -z "$anytls_pass" ]]; then
             anytls_pass=$(mihomo_random_pass)
@@ -6604,13 +6825,18 @@ mihomo_install() {
         anytls_key="$mihomo_key_path"
     fi
     
-    if [[ "$enable_trojan" == "y" || "$enable_trojan" == "Y" ]]; then
-        enable_trojan="y"
+    if [[ "$enable_trojan" == "y" ]]; then
         clear
         echo -e "${BLUE}===== Trojan 配置 =====${PLAIN}"
         local trojan_port trojan_pass trojan_cert trojan_key
         read -r -p "$(echo -e "${BLUE}端口(默认:10819): ${PLAIN}")" trojan_port
         trojan_port=${trojan_port:-10819}
+        if ! mihomo_validate_port "$trojan_port"; then
+            echo -e "${RED}Trojan 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
         read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" trojan_pass
         if [[ -z "$trojan_pass" ]]; then
             trojan_pass=$(mihomo_random_pass)
@@ -6621,13 +6847,18 @@ mihomo_install() {
         trojan_key="$mihomo_key_path"
     fi
 
-    if [[ "$enable_hy2" == "y" || "$enable_hy2" == "Y" ]]; then
-        enable_hy2="y"
+    if [[ "$enable_hy2" == "y" ]]; then
         clear
         echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
         local hy2_port hy2_pass hy2_cert hy2_key
         read -r -p "$(echo -e "${BLUE}端口(默认:18443): ${PLAIN}")" hy2_port
         hy2_port=${hy2_port:-18443}
+        if ! mihomo_validate_port "$hy2_port"; then
+            echo -e "${RED}Hysteria2 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
         read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" hy2_pass
         if [[ -z "$hy2_pass" ]]; then
             hy2_pass=$(mihomo_random_pass)
@@ -6638,13 +6869,18 @@ mihomo_install() {
         hy2_key="$mihomo_key_path"
     fi
 
-    if [[ "$enable_tuic" == "y" || "$enable_tuic" == "Y" ]]; then
-        enable_tuic="y"
+    if [[ "$enable_tuic" == "y" ]]; then
         clear
         echo -e "${BLUE}===== TUIC 配置 =====${PLAIN}"
         local tuic_port tuic_uuid tuic_pass tuic_cert tuic_key
         read -r -p "$(echo -e "${BLUE}端口(默认:28443): ${PLAIN}")" tuic_port
         tuic_port=${tuic_port:-28443}
+        if ! mihomo_validate_port "$tuic_port"; then
+            echo -e "${RED}TUIC 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
         read -r -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" tuic_uuid
         if [[ -z "$tuic_uuid" ]]; then
             tuic_uuid=$(cat /proc/sys/kernel/random/uuid)
@@ -6662,13 +6898,22 @@ mihomo_install() {
 
     mihomo_generate_config
     mihomo_create_systemd_service
-    
-    systemctl daemon-reload
-    systemctl enable "$MIHOMO_SERVICE_NAME"
-    systemctl start "$MIHOMO_SERVICE_NAME"
 
-    echo -e "${GREEN}安装完成!${PLAIN}"
-    systemctl status --no-pager "$MIHOMO_SERVICE_NAME"
+    if ! mihomo_reload_systemd; then
+        mihomo_pause_and_return
+        return
+    fi
+    if ! systemctl enable "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+        echo -e "${RED}Mihomo 设置开机自启失败${PLAIN}"
+        mihomo_pause_and_return
+        return
+    fi
+    if ! mihomo_start_checked "" "Mihomo 服务启动失败"; then
+        mihomo_pause_and_return
+        return
+    fi
+
+    echo -e "${GREEN}安装完成,服务已启动${PLAIN}"
     mihomo_pause_and_return
 }
 
@@ -6688,7 +6933,7 @@ mihomo_manage_service() {
                 clear
                 echo -e "${BLUE}Mihomo 服务状态:${PLAIN}"
                 systemctl status --no-pager "$MIHOMO_SERVICE_NAME"
-                read -r -p "$(echo -e "${BLUE}按回车查看配置...${PLAIN}")"
+                pause_enter "按回车查看配置..."
                 clear
                 echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
                 if [[ -f "$MIHOMO_CONFIG_PATH" ]]; then
@@ -6700,16 +6945,19 @@ mihomo_manage_service() {
                 mihomo_pause_and_return
                 ;;
             2)
+                if [[ ! -f "$MIHOMO_CONFIG_PATH" ]]; then
+                    echo -e "${RED}配置文件不存在${PLAIN}"
+                    mihomo_pause_and_return
+                    continue
+                fi
                 mihomo_modify_config
                 ;;
             3)
-                systemctl stop "$MIHOMO_SERVICE_NAME"
-                echo -e "${GREEN}已停止${PLAIN}"
+                mihomo_systemctl_checked "stop" "已停止" "Mihomo 服务停止失败"
                 mihomo_pause_and_return
                 ;;
             4)
-                systemctl restart "$MIHOMO_SERVICE_NAME"
-                echo -e "${GREEN}已重启${PLAIN}"
+                mihomo_restart_checked "已重启" "Mihomo 服务重启失败"
                 mihomo_pause_and_return
                 ;;
             0) break ;;
@@ -6744,6 +6992,7 @@ mihomo_modify_config() {
             3) mihomo_toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" ;;
             4) mihomo_toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
             0) break ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
         esac
     done
 }
@@ -6773,6 +7022,7 @@ mihomo_toggle_or_modify_listener() {
                 3) mihomo_modify_listener_cert "$name" ;;
                 4) mihomo_disable_listener "$name" "$display_name"; break ;;
                 0) break ;;
+                *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
             esac
         else
             echo -e "${YELLOW}  当前未启用${PLAIN}"
@@ -6795,6 +7045,11 @@ mihomo_add_listener() {
     echo -e "${BLUE}===== 添加 ${display_name} =====${PLAIN}"
     read -r -p "$(echo -e "${BLUE}端口(默认:${default_port}): ${PLAIN}")" port
     port=${port:-$default_port}
+    if ! mihomo_validate_port "$port"; then
+        echo -e "${RED}端口无效${PLAIN}"
+        sleep 1
+        return 1
+    fi
     
     local uuid=""
     if [[ "$name" == "tuicv5-in" ]]; then
@@ -6813,7 +7068,18 @@ mihomo_add_listener() {
     
     mihomo_select_cert
     
-    local tmp_config=$(mktemp)
+    local tmp_config backup
+    tmp_config=$(mktemp) || {
+        echo -e "${RED}创建临时配置失败${PLAIN}"
+        sleep 1
+        return 1
+    }
+    backup=$(mihomo_make_config_backup) || {
+        echo -e "${RED}备份配置失败${PLAIN}"
+        rm -f "$tmp_config"
+        sleep 1
+        return 1
+    }
     case "$name" in
         anytls-in)
             cat > "$tmp_config" <<LISTENER
@@ -6904,12 +7170,16 @@ LISTENER
                 close(tmpfile)
             }
         }
-    ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
-    
+    ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+        echo -e "${RED}配置写入失败${PLAIN}"
+        rm -f "$tmp_config" "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+        sleep 1
+        return 1
+    }
+
     rm -f "$tmp_config"
-    
-    systemctl restart "$MIHOMO_SERVICE_NAME"
-    echo -e "${GREEN}${display_name} 已启用${PLAIN}"
+
+    mihomo_restart_with_rollback "$backup" "${display_name} 已启用" "${display_name} 已写入,但服务重启失败"
     sleep 1
 }
 
@@ -6919,6 +7189,12 @@ mihomo_disable_listener() {
     
     read -r -p "$(echo -e "${RED}确定禁用 ${display_name}? [y/N]: ${PLAIN}")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        local backup
+        backup=$(mihomo_make_config_backup) || {
+            echo -e "${RED}备份配置失败${PLAIN}"
+            sleep 1
+            return 1
+        }
         awk -v name="$name" '
             BEGIN {skip=0}
             /^- name: /{
@@ -6929,10 +7205,14 @@ mihomo_disable_listener() {
             skip && /^rules:/{skip=0; print; next}
             skip && /^[^ -]/{skip=0}
             !skip {print}
-        ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
-        
-        systemctl restart "$MIHOMO_SERVICE_NAME"
-        echo -e "${GREEN}${display_name} 已禁用${PLAIN}"
+        ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+            echo -e "${RED}配置写入失败${PLAIN}"
+            rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+            sleep 1
+            return 1
+        }
+
+        mihomo_restart_with_rollback "$backup" "${display_name} 已禁用" "${display_name} 已移除,但服务重启失败"
     fi
     sleep 1
 }
@@ -6940,14 +7220,26 @@ mihomo_disable_listener() {
 mihomo_modify_listener_port() {
     local name="$1"
     read -r -p "$(echo -e "${BLUE}新端口: ${PLAIN}")" new_port
-    if [[ -n "$new_port" && "$new_port" =~ ^[0-9]+$ ]]; then
+    if mihomo_validate_port "$new_port"; then
+        local backup
+        backup=$(mihomo_make_config_backup) || {
+            echo -e "${RED}备份配置失败${PLAIN}"
+            sleep 1
+            return 1
+        }
         awk -v name="$name" -v port="$new_port" '
             /^- name: /{found=($0 ~ name)}
             found && /^  port:/{$0="  port: "port; found=0}
             {print}
-        ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
-        systemctl restart "$MIHOMO_SERVICE_NAME"
-        echo -e "${GREEN}已更新${PLAIN}"
+        ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+            echo -e "${RED}配置写入失败${PLAIN}"
+            rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+            sleep 1
+            return 1
+        }
+        mihomo_restart_with_rollback "$backup" "已更新" "端口已写入,但服务重启失败"
+    else
+        echo -e "${RED}端口无效${PLAIN}"
     fi
     sleep 1
 }
@@ -6956,27 +7248,48 @@ mihomo_modify_listener_pass() {
     local name="$1"
     read -r -p "$(echo -e "${BLUE}新密码: ${PLAIN}")" new_pass
     if [[ -n "$new_pass" ]]; then
+        local backup
+        backup=$(mihomo_make_config_backup) || {
+            echo -e "${RED}备份配置失败${PLAIN}"
+            sleep 1
+            return 1
+        }
         case "$name" in
             anytls-in)
                 awk -v pass="$new_pass" '
                     /^- name: anytls-in/{found=1}
                     found && /username1:/{$0="    username1: "pass; found=0}
                     {print}
-                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
+                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+                    echo -e "${RED}配置写入失败${PLAIN}"
+                    rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+                    sleep 1
+                    return 1
+                }
                 ;;
             trojan-in)
                 awk -v pass="$new_pass" '
                     /^- name: trojan-in/{found=1}
                     found && /password:/{$0="      password: "pass; found=0}
                     {print}
-                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
+                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+                    echo -e "${RED}配置写入失败${PLAIN}"
+                    rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+                    sleep 1
+                    return 1
+                }
                 ;;
             hysteria2-in)
                 awk -v pass="$new_pass" '
                     /^- name: hysteria2-in/{found=1}
                     found && /user1:/{$0="    user1: "pass; found=0}
                     {print}
-                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
+                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+                    echo -e "${RED}配置写入失败${PLAIN}"
+                    rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+                    sleep 1
+                    return 1
+                }
                 ;;
             tuicv5-in)
                 awk -v pass="$new_pass" '
@@ -6989,11 +7302,15 @@ mihomo_modify_listener_pass() {
                         found=0
                     }
                     {print}
-                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
+                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+                    echo -e "${RED}配置写入失败${PLAIN}"
+                    rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+                    sleep 1
+                    return 1
+                }
                 ;;
         esac
-        systemctl restart "$MIHOMO_SERVICE_NAME"
-        echo -e "${GREEN}已更新${PLAIN}"
+        mihomo_restart_with_rollback "$backup" "已更新" "密码已写入,但服务重启失败"
     fi
     sleep 1
 }
@@ -7001,14 +7318,24 @@ mihomo_modify_listener_pass() {
 mihomo_modify_listener_cert() {
     local name="$1"
     mihomo_select_cert
+    local backup
+    backup=$(mihomo_make_config_backup) || {
+        echo -e "${RED}备份配置失败${PLAIN}"
+        sleep 1
+        return 1
+    }
     awk -v name="$name" -v cert="$mihomo_cert_path" -v key="$mihomo_key_path" '
         /^- name: /{block=($0 ~ name)}
         block && /certificate:/{$0="  certificate: "cert}
         block && /private-key:/{$0="  private-key: "key; block=0}
         {print}
-    ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH"
-    systemctl restart "$MIHOMO_SERVICE_NAME"
-    echo -e "${GREEN}已更新${PLAIN}"
+    ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+        echo -e "${RED}配置写入失败${PLAIN}"
+        rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+        sleep 1
+        return 1
+    }
+    mihomo_restart_with_rollback "$backup" "已更新" "证书已写入,但服务重启失败"
     sleep 1
 }
 
@@ -7048,17 +7375,46 @@ mihomo_update() {
     fi
 
     echo -e "${BLUE}[*] 更新中...${PLAIN}"
-    systemctl stop "$MIHOMO_SERVICE_NAME"
-
-    if mihomo_download_binary "$download_url"; then
-        echo -e "${GREEN}已更新到 ${latest_version}${PLAIN}"
-    else
-        systemctl start "$MIHOMO_SERVICE_NAME" 2>/dev/null || true
+    local backup_exec
+    backup_exec="$(mktemp)" || {
+        echo -e "${RED}创建内核备份失败${PLAIN}"
+        mihomo_pause_and_return
+        return
+    }
+    if ! cp "$MIHOMO_EXEC_PATH" "$backup_exec"; then
+        rm -f "$backup_exec"
+        echo -e "${RED}备份当前内核失败${PLAIN}"
         mihomo_pause_and_return
         return
     fi
-    
-    systemctl start "$MIHOMO_SERVICE_NAME"
+    systemctl stop "$MIHOMO_SERVICE_NAME" 2>/dev/null || true
+
+    if ! mihomo_download_binary "$download_url"; then
+        install -m 755 "$backup_exec" "$MIHOMO_EXEC_PATH" 2>/dev/null || true
+        rm -f "$backup_exec"
+        if systemctl start "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+            echo -e "${RED}更新失败,已恢复旧版本${PLAIN}"
+        else
+            echo -e "${RED}更新失败,旧版本也未能重新启动${PLAIN}"
+            mihomo_show_service_failure
+        fi
+        mihomo_pause_and_return
+        return
+    fi
+
+    if systemctl start "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+        rm -f "$backup_exec"
+        echo -e "${GREEN}更新完成: ${latest_version}${PLAIN}"
+    else
+        if install -m 755 "$backup_exec" "$MIHOMO_EXEC_PATH" && systemctl start "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
+            rm -f "$backup_exec"
+            echo -e "${YELLOW}新版本启动失败,已回滚旧版本${PLAIN}"
+        else
+            rm -f "$backup_exec"
+            echo -e "${RED}新版本启动失败,回滚后仍未启动${PLAIN}"
+            mihomo_show_service_failure
+        fi
+    fi
     mihomo_pause_and_return
 }
 
@@ -7070,7 +7426,7 @@ mihomo_delete() {
         systemctl disable "$MIHOMO_SERVICE_NAME" 2>/dev/null || true
         rm -f "$MIHOMO_SERVICE_FILE" "$MIHOMO_EXEC_PATH"
         rm -rf "$MIHOMO_CONFIG_DIR"
-        systemctl daemon-reload
+        mihomo_reload_systemd || true
         echo -e "${GREEN}已删除${PLAIN}"
     fi
     mihomo_pause_and_return
@@ -7102,6 +7458,7 @@ mihomo_menu() {
             3) mihomo_update ;;
             4) mihomo_delete ;;
             0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
         esac
     done
 }
@@ -7110,10 +7467,10 @@ CYAN="\033[0;36m"
 BOLD="\033[1m"
 NC="\033[0m"
 
-wireproxy_info()  { echo -e "${CYAN}[INFO]${NC} $1"; }
-wireproxy_ok()    { echo -e "${GREEN}[ OK ]${NC} $1"; }
-wireproxy_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-wireproxy_err()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+wireproxy_info()  { log_prefixed "$CYAN" "[INFO]" "$*"; }
+wireproxy_ok()    { log_prefixed "$GREEN" "[ OK ]" "$*"; }
+wireproxy_warn()  { log_prefixed "$YELLOW" "[WARN]" "$*"; }
+wireproxy_err()   { log_prefixed "$RED" "[ERROR]" "$*"; exit 1; }
 
 WIREPROXY_BIN="/usr/local/bin/wireproxy"
 WIREPROXY_CONF_DIR="/etc/wireproxy"
@@ -7253,7 +7610,10 @@ wireproxy_download_binary() {
         wireproxy_err "压缩包中未找到 wireproxy 可执行文件"
     }
 
-    install -m 755 "$bin_path" "$WIREPROXY_BIN"
+    if ! install -m 755 "$bin_path" "$WIREPROXY_BIN"; then
+        rm -rf "$tmpdir"
+        wireproxy_err "安装 wireproxy 可执行文件失败"
+    fi
     rm -rf "$tmpdir"
     wireproxy_ok "wireproxy 已安装到 ${WIREPROXY_BIN}"
 }
@@ -7538,21 +7898,26 @@ wireproxy_validate_config() {
 }
 
 wireproxy_try_restart_service() {
+    local quiet="${1:-0}"
+
     if ! wireproxy_validate_config; then
-        cat /tmp/wireproxy-configtest.log
+        if (( quiet == 0 )); then
+            wireproxy_warn "配置校验失败"
+            cat /tmp/wireproxy-configtest.log
+        fi
         return 1
     fi
 
     wireproxy_create_service
-    systemctl daemon-reload || return 1
+    systemctl daemon-reload >/dev/null 2>&1 || return 1
     systemctl enable "$WIREPROXY_SERVICE_NAME" >/dev/null 2>&1 || wireproxy_warn "设置开机自启失败"
 
-    if systemctl restart "$WIREPROXY_SERVICE_NAME"; then
+    if systemctl restart "$WIREPROXY_SERVICE_NAME" >/dev/null 2>&1; then
         return 0
-    else
-        systemctl --no-pager --full status "$WIREPROXY_SERVICE_NAME" || true
-        return 1
     fi
+
+    (( quiet == 0 )) && service_failure_hint "$WIREPROXY_SERVICE_NAME"
+    return 1
 }
 
 wireproxy_restart_service() {
@@ -7576,20 +7941,20 @@ wireproxy_make_backup() {
 wireproxy_restart_service_with_backup() {
     local backup="$1" target="$2"
 
-    if wireproxy_try_restart_service; then
+    if wireproxy_try_restart_service 1; then
         rm -f "$backup"
         wireproxy_ok "${WIREPROXY_SERVICE_NAME} 已启动"
         return 0
     fi
 
-    wireproxy_warn "新配置启动失败，正在回滚..."
     cp "$backup" "$target" || true
     rm -f "$backup"
 
-    if wireproxy_try_restart_service; then
-        wireproxy_warn "已回滚到上一份可用配置"
+    if wireproxy_try_restart_service 1; then
+        wireproxy_warn "新配置启动失败，已回滚到上一份可用配置"
     else
-        wireproxy_warn "回滚后服务仍未启动，请手动检查配置"
+        wireproxy_warn "新配置启动失败，回滚后服务仍未启动"
+        wireproxy_try_restart_service 0 >/dev/null 2>&1 || service_failure_hint "$WIREPROXY_SERVICE_NAME"
     fi
 
     return 1
@@ -7613,7 +7978,7 @@ wireproxy_finish_install() {
 }
 
 wireproxy_service_running() {
-    systemctl is-active --quiet "$WIREPROXY_SERVICE_NAME"
+    command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$WIREPROXY_SERVICE_NAME"
 }
 
 wireproxy_show_proxy_status() {
@@ -8020,7 +8385,7 @@ wireproxy_show_menu() {
 }
 
 wireproxy_pause() {
-    read -rp "回车继续..." _
+    pause_enter "回车继续..."
 }
 
 wireproxy_menu_divider() {
@@ -8047,10 +8412,10 @@ wireproxy_menu() {
     done
 }
 
-warpstack_info()  { echo -e "${CYAN}[INFO]${NC} $1"; }
-warpstack_ok()    { echo -e "${GREEN}[ OK ]${NC} $1"; }
-warpstack_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-warpstack_err()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+warpstack_info()  { log_prefixed "$CYAN" "[INFO]" "$*"; }
+warpstack_ok()    { log_prefixed "$GREEN" "[ OK ]" "$*"; }
+warpstack_warn()  { log_prefixed "$YELLOW" "[WARN]" "$*"; }
+warpstack_err()   { log_prefixed "$RED" "[ERROR]" "$*"; exit 1; }
 
 WARPSTACK_WG_CONF="/etc/wireguard/wg0.conf"
 WARPSTACK_WGCF_BIN="/usr/local/bin/wgcf"
@@ -8747,7 +9112,7 @@ warpstack_show_menu() {
 }
 
 warpstack_pause() {
-    read -rp "回车继续..." _
+    pause_enter "回车继续..."
 }
 
 warpstack_menu_divider() {
@@ -9726,8 +10091,7 @@ port_jump_set() {
     fi
 
     if (( (need_v4 == 1 && ok_v4 == 0) || (need_v6 == 1 && ok_v6 == 0) )); then
-        echo -e "${RED}端口跳跃规则未能完整写入,正在回滚本次修改...${PLAIN}"
-        firewall_restore_with_notice "$backup" "已恢复到修改前的端口跳跃状态" "回滚失败,请手动检查当前 NAT 规则"
+        firewall_restore_with_notice "$backup" "端口跳跃规则写入失败,已回滚到修改前状态" "端口跳跃规则写入失败,回滚失败,请检查 NAT 规则"
         firewall_dispose_backup "$backup"
         press_any_key_to_continue
         return 1
@@ -9771,8 +10135,7 @@ port_jump_delete() {
 
     echo -e "${BLUE}正在删除端口跳跃规则...${PLAIN}"
     if ! port_jump_clear_managed_rules; then
-        echo -e "${RED}删除端口跳跃规则失败${PLAIN}"
-        firewall_restore_with_notice "$backup" "已恢复删除前的端口跳跃状态" "回滚失败,请手动检查 NAT 规则"
+        firewall_restore_with_notice "$backup" "删除端口跳跃规则失败,已恢复原状态" "删除端口跳跃规则失败,回滚失败,请检查 NAT 规则"
         firewall_dispose_backup "$backup"
         press_any_key_to_continue
         return 1
@@ -9859,6 +10222,11 @@ handle_firewall_action_choice() {
 
             read -r -p "请输入端口（如 443 或 1000-2000，可空格分隔多个）: " input_ports
             input_ports=$(trim_input "$input_ports")
+            if [[ -z "$input_ports" ]]; then
+                echo -e "${YELLOW}[!] 未输入端口,已取消本次操作${PLAIN}"
+                press_any_key_to_continue
+                return 0
+            fi
             action_failed=0
             firewall_require_backup "本次操作" || {
                 press_any_key_to_continue
@@ -9929,7 +10297,7 @@ handle_firewall_action_choice() {
             if (( action_failed == 0 )); then
                 firewall_save_rules || true
             else
-                firewall_restore_with_notice "$backup" "[!] 本次操作存在失败项,已回滚到修改前状态" "[!] 本次操作存在失败项,且回滚失败,请立即检查规则"
+                firewall_restore_with_notice "$backup" "本次操作存在失败项,已回滚到修改前状态" "本次操作存在失败项,回滚失败,请检查规则"
             fi
             firewall_dispose_backup "$backup"
             press_any_key_to_continue
@@ -9946,7 +10314,7 @@ handle_firewall_action_choice() {
                 echo -e "${GREEN}[✓] 已清空本脚本管理的规则,不再改动系统原有 INPUT/FORWARD/OUTPUT 策略${PLAIN}"
             else
                 echo -e "${RED}[!] 清空规则失败${PLAIN}"
-                firewall_restore_with_notice "$backup" "已恢复到清空前的状态" "回滚失败,请手动检查当前规则"
+                firewall_restore_with_notice "$backup" "清空规则失败,已恢复到清空前状态" "清空规则失败,回滚失败,请检查当前规则"
             fi
             firewall_dispose_backup "$backup"
             press_any_key_to_continue
@@ -9964,7 +10332,7 @@ handle_firewall_action_choice() {
                 echo -e "${GREEN}[✓] 已应用仅留 SSH 的入站规则${PLAIN}"
             else
                 echo -e "${RED}[!] 写入仅保留 SSH 规则失败${PLAIN}"
-                firewall_restore_with_notice "$backup" "已恢复到修改前的状态" "回滚失败,请手动检查当前规则"
+                firewall_restore_with_notice "$backup" "写入规则失败,已恢复到修改前状态" "写入规则失败,回滚失败,请检查当前规则"
             fi
             firewall_dispose_backup "$backup"
             press_any_key_to_continue
