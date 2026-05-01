@@ -4941,10 +4941,8 @@ SHOES_SERVICE_NAME="shoes"
 SHOES_SERVICE_FILE="/etc/systemd/system/shoes.service"
 SHOES_RELEASE_REPO="sukurain/shoes"
 SHOES_LATEST_API_URL="https://api.github.com/repos/${SHOES_RELEASE_REPO}/releases/latest"
-SHOES_RELEASE_ASSET_NAME_GNU="shoes.tar.gz"
-SHOES_RELEASE_ASSET_NAME_MUSL="shoes-musl.tar.gz"
-SHOES_CURRENT_DEBIAN_STABLE_MAJOR="13"
-SHOES_CURRENT_UBUNTU_RELEASE_VERSION="25.10"
+SHOES_RELEASE_ASSET_NAME="shoes-musl.tar.gz"
+SHOES_SS_DEFAULT_CIPHER="2022-blake3-aes-128-gcm"
 
 shoes_check_supported_os() {
     local os_id os_name
@@ -4981,6 +4979,63 @@ shoes_random_pass() {
     tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
 }
 
+shoes_shadowsocks_cipher_key_len() {
+    case "$1" in
+        2022-blake3-aes-128-gcm) printf '16' ;;
+        2022-blake3-aes-256-gcm) printf '32' ;;
+        *) return 1 ;;
+    esac
+}
+
+shoes_shadowsocks_cipher_label() {
+    case "$1" in
+        2022-blake3-aes-128-gcm) printf '2022-128' ;;
+        2022-blake3-aes-256-gcm) printf '2022-256' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+shoes_normalize_shadowsocks_cipher() {
+    case "$1" in
+        2022-128)
+            printf '2022-blake3-aes-128-gcm'
+            ;;
+        2022-256)
+            printf '2022-blake3-aes-256-gcm'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+shoes_generate_shadowsocks_2022_password() {
+    local cipher="$1"
+    local key_len output password
+
+    if [[ -x "$SHOES_EXEC_PATH" ]]; then
+        output="$("$SHOES_EXEC_PATH" generate-shadowsocks-2022-password "$cipher" 2>/dev/null || true)"
+        password="$(printf '%s\n' "$output" | awk -F': ' '/^Password:/ {print $2; exit}')"
+        if [[ -n "$password" ]]; then
+            printf '%s' "$password"
+            return 0
+        fi
+    fi
+
+    key_len="$(shoes_shadowsocks_cipher_key_len "$cipher")" || return 1
+    head -c "$key_len" /dev/urandom | base64 | tr -d '\n'
+}
+
+shoes_validate_shadowsocks_2022_password() {
+    local cipher="$1"
+    local password="$2"
+    local key_len decoded_len
+
+    key_len="$(shoes_shadowsocks_cipher_key_len "$cipher")" || return 0
+    decoded_len="$(printf '%s' "$password" | base64 -d 2>/dev/null | wc -c | tr -d '[:space:]')"
+    [[ "$decoded_len" == "$key_len" ]]
+}
+
 shoes_random_uuid() {
     cat /proc/sys/kernel/random/uuid
 }
@@ -5010,7 +5065,7 @@ shoes_print_err() {
 shoes_require_commands() {
     local missing=()
     local cmd
-    for cmd in curl tar systemctl; do
+    for cmd in curl tar systemctl base64; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
@@ -5058,6 +5113,12 @@ shoes_extract_scalar_from_block() {
     local block="$1"
     local field="$2"
     printf '%s\n' "$block" | sed -nE "s/^[[:space:]-]*${field}:[[:space:]]*\"?([^\"]*)\"?$/\1/p" | head -n1
+}
+
+shoes_extract_last_scalar_from_block() {
+    local block="$1"
+    local field="$2"
+    printf '%s\n' "$block" | sed -nE "s/^[[:space:]-]*${field}:[[:space:]]*\"?([^\"]*)\"?$/\1/p" | tail -n1
 }
 
 shoes_load_current_config() {
@@ -5116,6 +5177,28 @@ shoes_read_address_value() {
     printf -v "$__var" '%s' "$input"
 }
 
+shoes_bind_port_display() {
+    local value="$1"
+
+    if [[ "$value" =~ ^\[.*\]:([0-9]+)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return
+    fi
+
+    if [[ "$value" =~ :([0-9]+)$ ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+        return
+    fi
+
+    printf '%s' "$value"
+}
+
+shoes_read_port_value() {
+    local var_name="$1"
+    local current_value="${!var_name}"
+    shoes_read_address_value "$var_name" "端口(默认:$(shoes_bind_port_display "$current_value")): " "$current_value"
+}
+
 shoes_read_password_or_random() {
     local __var="$1"
     local prompt="$2"
@@ -5126,6 +5209,51 @@ shoes_read_password_or_random() {
         shoes_print_ok "密码: ${input}"
     fi
     printf -v "$__var" '%s' "$input"
+}
+
+shoes_read_shadowsocks_password_or_random() {
+    local __var="$1"
+    local prompt="$2"
+    local cipher="$3"
+    local input=""
+
+    while true; do
+        read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
+        if [[ -z "$input" ]]; then
+            input="$(shoes_generate_shadowsocks_2022_password "$cipher")" || input="$(shoes_random_pass)"
+            shoes_print_ok "密码: ${input}"
+            break
+        fi
+
+        if shoes_validate_shadowsocks_2022_password "$cipher" "$input"; then
+            break
+        fi
+
+        shoes_print_warn "2022 密码格式不正确，请重新输入，或直接回车随机生成"
+    done
+
+    printf -v "$__var" '%s' "$input"
+}
+
+shoes_read_shadowsocks_cipher_value() {
+    local __var="$1"
+    local current_value="${!__var}"
+    local input=""
+
+    while true; do
+        read -r -p "$(echo -e "${BLUE}加密(默认:$(shoes_shadowsocks_cipher_label "$current_value")): ${PLAIN}")" input
+        if [[ -z "$input" ]]; then
+            input="$current_value"
+        elif ! input="$(shoes_normalize_shadowsocks_cipher "$input")"; then
+            shoes_print_warn "只支持 2022-128 或 2022-256"
+            continue
+        fi
+        if shoes_shadowsocks_cipher_key_len "$input" >/dev/null; then
+            printf -v "$__var" '%s' "$input"
+            return 0
+        fi
+        shoes_print_warn "只支持 2022-128 或 2022-256"
+    done
 }
 
 shoes_read_uuid_or_random() {
@@ -5163,6 +5291,14 @@ shoes_ask_yes_no() {
             *) shoes_print_warn "请输入 y 或 n" ;;
         esac
     done
+}
+
+shoes_bool_label() {
+    if [[ "$1" == "true" ]]; then
+        echo "${GREEN}开启${PLAIN}"
+    else
+        echo "${RED}关闭${PLAIN}"
+    fi
 }
 
 shoes_select_cert() {
@@ -5236,11 +5372,11 @@ shoes_derive_name_from_cert_path() {
 
 shoes_protocol_metadata() {
     cat <<'EOF'
-anytls|ENABLE_ANYTLS|shoes_reset_anytls_state|shoes_load_anytls_config|shoes_configure_anytls|shoes_append_anytls|shoes_modify_anytls|shoes_print_anytls_summary|AnyTLS|Anytls
-trojan|ENABLE_TROJAN|shoes_reset_trojan_state|shoes_load_trojan_config|shoes_configure_trojan|shoes_append_trojan|shoes_modify_trojan|shoes_print_trojan_summary|Trojan|Trojan
-tuic|ENABLE_TUIC|shoes_reset_tuic_state|shoes_load_tuic_config|shoes_configure_tuic|shoes_append_tuic|shoes_modify_tuic|shoes_print_tuic_summary|Tuicv5|Tuicv5
-hy2|ENABLE_HY2|shoes_reset_hysteria2_state|shoes_load_hysteria2_config|shoes_configure_hysteria2|shoes_append_hysteria2|shoes_modify_hysteria|shoes_print_hysteria2_summary|Hysteria|Hysteria
-shadowsocks|ENABLE_SS|shoes_reset_shadowsocks_state|shoes_load_shadowsocks_config|shoes_configure_shadowsocks|shoes_append_shadowsocks|shoes_modify_shadowsocks|shoes_print_shadowsocks_summary|Shadowsocks|Shadowsocks
+anytls|ENABLE_ANYTLS|shoes_reset_anytls_state|shoes_load_anytls_config|shoes_configure_anytls|shoes_append_anytls|shoes_modify_anytls|AnyTLS|Anytls
+trojan|ENABLE_TROJAN|shoes_reset_trojan_state|shoes_load_trojan_config|shoes_configure_trojan|shoes_append_trojan|shoes_modify_trojan|Trojan|Trojan
+tuic|ENABLE_TUIC|shoes_reset_tuic_state|shoes_load_tuic_config|shoes_configure_tuic|shoes_append_tuic|shoes_modify_tuic|Tuicv5|Tuicv5
+hy2|ENABLE_HY2|shoes_reset_hysteria2_state|shoes_load_hysteria2_config|shoes_configure_hysteria2|shoes_append_hysteria2|shoes_modify_hysteria|Hysteria|Hysteria
+shadowsocks|ENABLE_SS|shoes_reset_shadowsocks_state|shoes_load_shadowsocks_config|shoes_configure_shadowsocks|shoes_append_shadowsocks|shoes_modify_shadowsocks|Shadowsocks|Shadowsocks
 EOF
 }
 
@@ -5260,9 +5396,8 @@ shoes_protocol_meta_value() {
         configure_fn) field_index=5 ;;
         append_fn) field_index=6 ;;
         modify_fn) field_index=7 ;;
-        summary_fn) field_index=8 ;;
-        prompt_label) field_index=9 ;;
-        menu_label) field_index=10 ;;
+        prompt_label) field_index=8 ;;
+        menu_label) field_index=9 ;;
         *) return 1 ;;
     esac
 
@@ -5290,9 +5425,11 @@ shoes_set_protocol_enabled() {
 shoes_reset_shadowsocks_state() {
     ENABLE_SS="n"
     SS_ADDRESS="[::]:8388"
-    SS_CIPHER="aes-256-gcm"
+    SS_CIPHER="$SHOES_SS_DEFAULT_CIPHER"
     SS_PASSWORD=""
-    SS_UDP_ENABLED="true"
+    SS_SHADOWTLS_ENABLED="false"
+    SS_CERT=""
+    SS_KEY=""
 }
 
 shoes_load_shadowsocks_config() {
@@ -5302,27 +5439,59 @@ shoes_load_shadowsocks_config() {
         ENABLE_SS="y"
         SS_ADDRESS="$(shoes_extract_scalar_from_block "$block" "address")"
         SS_CIPHER="$(shoes_extract_scalar_from_block "$block" "cipher")"
-        SS_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
-        SS_UDP_ENABLED="$(shoes_extract_scalar_from_block "$block" "udp_enabled")"
+        SS_PASSWORD="$(shoes_extract_last_scalar_from_block "$block" "password")"
+        if printf '%s\n' "$block" | grep -q 'shadowtls_targets:'; then
+            SS_SHADOWTLS_ENABLED="true"
+            SS_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
+            SS_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
+        else
+            SS_SHADOWTLS_ENABLED="false"
+        fi
     fi
 }
 
 shoes_configure_shadowsocks() {
     clear
-    echo -e "${BLUE}===== Shadowsocks 配置 =====${PLAIN}"
-    shoes_read_address_value "SS_ADDRESS" "监听地址(默认:${SS_ADDRESS}): " "$SS_ADDRESS"
-    shoes_read_value "SS_CIPHER" "加密方式(默认:${SS_CIPHER}): " "$SS_CIPHER"
-    shoes_read_value "SS_PASSWORD" "密码(回车随机): " "$SS_PASSWORD"
-    if [[ -z "$SS_PASSWORD" ]]; then
-        SS_PASSWORD="$(shoes_random_pass)"
-        shoes_print_ok "密码: ${SS_PASSWORD}"
+    echo -e "${BLUE}===== Shadowsocks =====${PLAIN}"
+    shoes_read_port_value "SS_ADDRESS"
+    shoes_read_shadowsocks_cipher_value "SS_CIPHER"
+    shoes_read_shadowsocks_password_or_random "SS_PASSWORD" "密码(回车随机): " "$SS_CIPHER"
+    if shoes_ask_yes_no "STLS:" "$([[ "$SS_SHADOWTLS_ENABLED" == "true" ]] && echo y || echo n)"; then
+        SS_SHADOWTLS_ENABLED="true"
+        shoes_select_cert "$SS_CERT" "$SS_KEY"
+        SS_CERT="$cert_path"
+        SS_KEY="$key_path"
+    else
+        SS_SHADOWTLS_ENABLED="false"
     fi
-    SS_UDP_ENABLED="true"
-    shoes_print_ok "UDP: 已默认开启"
 }
 
 shoes_append_shadowsocks() {
     local out="$1"
+    local ss_sni
+    if [[ "$SS_SHADOWTLS_ENABLED" == "true" ]]; then
+        ss_sni="$(shoes_derive_name_from_cert_path "$SS_CERT")"
+        cat >> "$out" <<EOF
+# shoes-managed: protocol=shadowsocks
+- address: $(shoes_yaml_quote "$SS_ADDRESS")
+  protocol:
+    type: tls
+    shadowtls_targets:
+      $(shoes_yaml_quote "$ss_sni"):
+        password: $(shoes_yaml_quote "$SS_PASSWORD")
+        handshake:
+          cert: $(shoes_yaml_quote "$SS_CERT")
+          key: $(shoes_yaml_quote "$SS_KEY")
+        protocol:
+          type: shadowsocks
+          cipher: $(shoes_yaml_quote "$SS_CIPHER")
+          password: $(shoes_yaml_quote "$SS_PASSWORD")
+          udp_enabled: true
+
+EOF
+        return
+    fi
+
     cat >> "$out" <<EOF
 # shoes-managed: protocol=shadowsocks
 - address: $(shoes_yaml_quote "$SS_ADDRESS")
@@ -5330,7 +5499,7 @@ shoes_append_shadowsocks() {
     type: shadowsocks
     cipher: $(shoes_yaml_quote "$SS_CIPHER")
     password: $(shoes_yaml_quote "$SS_PASSWORD")
-    udp_enabled: ${SS_UDP_ENABLED}
+    udp_enabled: true
 
 EOF
 }
@@ -5344,17 +5513,19 @@ shoes_modify_shadowsocks() {
             echo -e "${GREEN}  1.${PLAIN}修改端口"
             echo -e "${GREEN}  2.${PLAIN}修改加密"
             echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}切换UDP"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  4.${PLAIN}切换STLS (当前: $(shoes_bool_label "$SS_SHADOWTLS_ENABLED"))"
+            echo -e "${GREEN}  5.${PLAIN}修改STLS证书"
+            echo -e "${GREEN}  6.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
             case "$opt" in
                 1) shoes_apply_address_update "SS_ADDRESS" ;;
-                2) shoes_apply_value_update "SS_CIPHER" "新加密方式" ;;
-                3) shoes_apply_password_update "SS_PASSWORD" ;;
-                4) shoes_apply_boolean_toggle "SS_UDP_ENABLED" ;;
-                5)
+                2) shoes_apply_shadowsocks_cipher_update ;;
+                3) shoes_apply_shadowsocks_password_update ;;
+                4) shoes_apply_shadowsocks_shadowtls_toggle ;;
+                5) shoes_apply_shadowsocks_cert_update ;;
+                6)
                     if shoes_disable_protocol_with_confirmation "ENABLE_SS" "Shadowsocks"; then
                         break
                     fi
@@ -5369,10 +5540,6 @@ shoes_modify_shadowsocks() {
             fi
         fi
     done
-}
-
-shoes_print_shadowsocks_summary() {
-    echo -e "${GREEN}Shadowsocks${PLAIN}  地址: ${SS_ADDRESS}  密码: ${SS_PASSWORD}  cipher: ${SS_CIPHER}"
 }
 
 shoes_reset_trojan_state() {
@@ -5399,9 +5566,9 @@ shoes_load_trojan_config() {
 
 shoes_configure_trojan() {
     clear
-    echo -e "${BLUE}===== Trojan over WebSocket 配置 =====${PLAIN}"
-    shoes_read_address_value "TROJAN_ADDRESS" "监听地址(默认:${TROJAN_ADDRESS}): " "$TROJAN_ADDRESS"
-    shoes_read_value "TROJAN_WS_PATH" "WebSocket 路径(默认:${TROJAN_WS_PATH}): " "$TROJAN_WS_PATH"
+    echo -e "${BLUE}===== Trojan =====${PLAIN}"
+    shoes_read_port_value "TROJAN_ADDRESS"
+    shoes_read_value "TROJAN_WS_PATH" "路径(默认:${TROJAN_WS_PATH}): " "$TROJAN_WS_PATH"
     shoes_read_value "TROJAN_PASSWORD" "密码(回车随机): " "$TROJAN_PASSWORD"
     if [[ -z "$TROJAN_PASSWORD" ]]; then
         TROJAN_PASSWORD="$(shoes_random_pass)"
@@ -5452,9 +5619,9 @@ shoes_modify_trojan() {
 
             case "$opt" in
                 1) shoes_apply_address_update "TROJAN_ADDRESS" ;;
-                2) shoes_apply_value_update "TROJAN_WS_PATH" "新 WS 路径" ;;
+                2) shoes_apply_value_update "TROJAN_WS_PATH" "新路径" ;;
                 3) shoes_apply_password_update "TROJAN_PASSWORD" ;;
-                4) shoes_apply_cert_update "TROJAN_CERT" "TROJAN_KEY" "y" ;;
+                4) shoes_apply_cert_update "TROJAN_CERT" "TROJAN_KEY" ;;
                 5)
                     if shoes_disable_protocol_with_confirmation "ENABLE_TROJAN" "Trojan"; then
                         break
@@ -5472,23 +5639,17 @@ shoes_modify_trojan() {
     done
 }
 
-shoes_print_trojan_summary() {
-    local trojan_sni
-    trojan_sni="$(shoes_derive_name_from_cert_path "$TROJAN_CERT")"
-    echo -e "${GREEN}Trojan+WS${PLAIN}   地址: ${TROJAN_ADDRESS}  SNI: ${trojan_sni}  Path: ${TROJAN_WS_PATH}  密码: ${TROJAN_PASSWORD}"
-}
-
 shoes_reset_hysteria2_state() {
     ENABLE_HY2="n"
     HY2_ADDRESS="[::]:8443"
     HY2_PASSWORD=""
     HY2_CERT=""
     HY2_KEY=""
-    HY2_UDP_ENABLED="true"
+    HY2_BBR_ENABLED="false"
 }
 
 shoes_load_hysteria2_config() {
-    local block
+    local block congestion
     block="$(shoes_extract_protocol_block "hysteria2")"
     if [[ -n "$block" ]]; then
         ENABLE_HY2="y"
@@ -5496,21 +5657,25 @@ shoes_load_hysteria2_config() {
         HY2_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
         HY2_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
         HY2_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-        HY2_UDP_ENABLED="$(shoes_extract_scalar_from_block "$block" "udp_enabled")"
+        congestion="$(shoes_extract_scalar_from_block "$block" "congestion")"
+        [[ "$congestion" == "bbr" ]] && HY2_BBR_ENABLED="true" || HY2_BBR_ENABLED="false"
     fi
 }
 
 shoes_configure_hysteria2() {
     clear
-    echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
-    shoes_read_address_value "HY2_ADDRESS" "监听地址(默认:${HY2_ADDRESS}): " "$HY2_ADDRESS"
+    echo -e "${BLUE}===== Hysteria2 =====${PLAIN}"
+    shoes_read_port_value "HY2_ADDRESS"
     shoes_read_value "HY2_PASSWORD" "密码(回车随机): " "$HY2_PASSWORD"
     if [[ -z "$HY2_PASSWORD" ]]; then
         HY2_PASSWORD="$(shoes_random_pass)"
         shoes_print_ok "密码: ${HY2_PASSWORD}"
     fi
-    HY2_UDP_ENABLED="true"
-    shoes_print_ok "UDP: 已默认开启"
+    if shoes_ask_yes_no "BBR:" "$([[ "$HY2_BBR_ENABLED" == "true" ]] && echo y || echo n)"; then
+        HY2_BBR_ENABLED="true"
+    else
+        HY2_BBR_ENABLED="false"
+    fi
     shoes_select_cert "$HY2_CERT" "$HY2_KEY"
     HY2_CERT="$cert_path"
     HY2_KEY="$key_path"
@@ -5527,10 +5692,17 @@ shoes_append_hysteria2() {
     key: $(shoes_yaml_quote "$HY2_KEY")
     alpn_protocols:
       - "h3"
+EOF
+    if [[ "$HY2_BBR_ENABLED" == "true" ]]; then
+        cat >> "$out" <<EOF
+    congestion: bbr
+EOF
+    fi
+    cat >> "$out" <<EOF
   protocol:
     type: hysteria2
     password: $(shoes_yaml_quote "$HY2_PASSWORD")
-    udp_enabled: ${HY2_UDP_ENABLED}
+    udp_enabled: true
 
 EOF
 }
@@ -5544,7 +5716,7 @@ shoes_modify_hysteria() {
             echo -e "${GREEN}  1.${PLAIN}修改端口"
             echo -e "${GREEN}  2.${PLAIN}修改密码"
             echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}切换UDP"
+            echo -e "${GREEN}  4.${PLAIN}切换BBR (当前: $(shoes_bool_label "$HY2_BBR_ENABLED"))"
             echo -e "${GREEN}  5.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
@@ -5553,7 +5725,7 @@ shoes_modify_hysteria() {
                 1) shoes_apply_address_update "HY2_ADDRESS" ;;
                 2) shoes_apply_password_update "HY2_PASSWORD" ;;
                 3) shoes_apply_cert_update "HY2_CERT" "HY2_KEY" ;;
-                4) shoes_apply_boolean_toggle "HY2_UDP_ENABLED" ;;
+                4) shoes_apply_boolean_toggle "HY2_BBR_ENABLED" ;;
                 5)
                     if shoes_disable_protocol_with_confirmation "ENABLE_HY2" "Hysteria2"; then
                         break
@@ -5571,10 +5743,6 @@ shoes_modify_hysteria() {
     done
 }
 
-shoes_print_hysteria2_summary() {
-    echo -e "${GREEN}Hysteria2${PLAIN}  地址: ${HY2_ADDRESS}  密码: ${HY2_PASSWORD}"
-}
-
 shoes_reset_tuic_state() {
     ENABLE_TUIC="n"
     TUIC_ADDRESS="[::]:9443"
@@ -5582,10 +5750,11 @@ shoes_reset_tuic_state() {
     TUIC_PASSWORD=""
     TUIC_CERT=""
     TUIC_KEY=""
+    TUIC_BBR_ENABLED="false"
 }
 
 shoes_load_tuic_config() {
-    local block
+    local block congestion
     block="$(shoes_extract_protocol_block "tuic")"
     if [[ -n "$block" ]]; then
         ENABLE_TUIC="y"
@@ -5594,13 +5763,15 @@ shoes_load_tuic_config() {
         TUIC_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
         TUIC_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
         TUIC_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
+        congestion="$(shoes_extract_scalar_from_block "$block" "congestion")"
+        [[ "$congestion" == "bbr" ]] && TUIC_BBR_ENABLED="true" || TUIC_BBR_ENABLED="false"
     fi
 }
 
 shoes_configure_tuic() {
     clear
-    echo -e "${BLUE}===== TUIC v5 配置 =====${PLAIN}"
-    shoes_read_address_value "TUIC_ADDRESS" "监听地址(默认:${TUIC_ADDRESS}): " "$TUIC_ADDRESS"
+    echo -e "${BLUE}===== TUIC v5 =====${PLAIN}"
+    shoes_read_port_value "TUIC_ADDRESS"
     shoes_read_value "TUIC_UUID" "UUID(回车随机): " "$TUIC_UUID"
     if [[ -z "$TUIC_UUID" ]]; then
         TUIC_UUID="$(shoes_random_uuid)"
@@ -5610,6 +5781,11 @@ shoes_configure_tuic() {
     if [[ -z "$TUIC_PASSWORD" ]]; then
         TUIC_PASSWORD="$(shoes_random_pass)"
         shoes_print_ok "密码: ${TUIC_PASSWORD}"
+    fi
+    if shoes_ask_yes_no "BBR:" "$([[ "$TUIC_BBR_ENABLED" == "true" ]] && echo y || echo n)"; then
+        TUIC_BBR_ENABLED="true"
+    else
+        TUIC_BBR_ENABLED="false"
     fi
     shoes_select_cert "$TUIC_CERT" "$TUIC_KEY"
     TUIC_CERT="$cert_path"
@@ -5627,6 +5803,13 @@ shoes_append_tuic() {
     key: $(shoes_yaml_quote "$TUIC_KEY")
     alpn_protocols:
       - "h3"
+EOF
+    if [[ "$TUIC_BBR_ENABLED" == "true" ]]; then
+        cat >> "$out" <<EOF
+    congestion: bbr
+EOF
+    fi
+    cat >> "$out" <<EOF
   protocol:
     type: tuic
     uuid: $(shoes_yaml_quote "$TUIC_UUID")
@@ -5645,7 +5828,8 @@ shoes_modify_tuic() {
             echo -e "${GREEN}  2.${PLAIN}修改UUID"
             echo -e "${GREEN}  3.${PLAIN}修改密码"
             echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  5.${PLAIN}切换BBR (当前: $(shoes_bool_label "$TUIC_BBR_ENABLED"))"
+            echo -e "${GREEN}  6.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
@@ -5654,7 +5838,8 @@ shoes_modify_tuic() {
                 2) shoes_apply_uuid_update "TUIC_UUID" ;;
                 3) shoes_apply_password_update "TUIC_PASSWORD" ;;
                 4) shoes_apply_cert_update "TUIC_CERT" "TUIC_KEY" ;;
-                5)
+                5) shoes_apply_boolean_toggle "TUIC_BBR_ENABLED" ;;
+                6)
                     if shoes_disable_protocol_with_confirmation "ENABLE_TUIC" "TUIC v5"; then
                         break
                     fi
@@ -5671,17 +5856,12 @@ shoes_modify_tuic() {
     done
 }
 
-shoes_print_tuic_summary() {
-    echo -e "${GREEN}TUIC v5${PLAIN}    地址: ${TUIC_ADDRESS}  UUID: ${TUIC_UUID}  密码: ${TUIC_PASSWORD}"
-}
-
 shoes_reset_anytls_state() {
     ENABLE_ANYTLS="n"
     ANYTLS_ADDRESS="[::]:443"
     ANYTLS_PASSWORD=""
     ANYTLS_CERT=""
     ANYTLS_KEY=""
-    ANYTLS_UDP_ENABLED="true"
 }
 
 shoes_load_anytls_config() {
@@ -5693,24 +5873,21 @@ shoes_load_anytls_config() {
         ANYTLS_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
         ANYTLS_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
         ANYTLS_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-        ANYTLS_UDP_ENABLED="$(shoes_extract_scalar_from_block "$block" "udp_enabled")"
     fi
 }
 
 shoes_configure_anytls() {
     clear
-    echo -e "${BLUE}===== AnyTLS 配置 =====${PLAIN}"
-    shoes_read_address_value "ANYTLS_ADDRESS" "监听地址(默认:${ANYTLS_ADDRESS}): " "$ANYTLS_ADDRESS"
+    echo -e "${BLUE}===== AnyTLS =====${PLAIN}"
+    shoes_read_port_value "ANYTLS_ADDRESS"
     shoes_read_value "ANYTLS_PASSWORD" "密码(回车随机): " "$ANYTLS_PASSWORD"
     if [[ -z "$ANYTLS_PASSWORD" ]]; then
         ANYTLS_PASSWORD="$(shoes_random_pass)"
         shoes_print_ok "密码: ${ANYTLS_PASSWORD}"
     fi
-    ANYTLS_UDP_ENABLED="true"
     shoes_select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
     ANYTLS_CERT="$cert_path"
     ANYTLS_KEY="$key_path"
-    shoes_print_ok "UDP: 已默认开启"
 }
 
 shoes_append_anytls() {
@@ -5731,7 +5908,7 @@ shoes_append_anytls() {
           users:
             - name: "user1"
               password: $(shoes_yaml_quote "$ANYTLS_PASSWORD")
-          udp_enabled: ${ANYTLS_UDP_ENABLED}
+          udp_enabled: true
           padding_scheme:
             - "stop=8"
             - "0=30-30"
@@ -5755,17 +5932,15 @@ shoes_modify_anytls() {
             echo -e "${GREEN}  1.${PLAIN}修改端口"
             echo -e "${GREEN}  2.${PLAIN}修改密码"
             echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}切换UDP"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
+            echo -e "${GREEN}  4.${PLAIN}禁用服务"
             echo -e "${GREEN}  0.${PLAIN}返回上级"
             read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
             case "$opt" in
                 1) shoes_apply_address_update "ANYTLS_ADDRESS" ;;
                 2) shoes_apply_password_update "ANYTLS_PASSWORD" ;;
-                3) shoes_apply_cert_update "ANYTLS_CERT" "ANYTLS_KEY" "y" ;;
-                4) shoes_apply_boolean_toggle "ANYTLS_UDP_ENABLED" ;;
-                5)
+                3) shoes_apply_cert_update "ANYTLS_CERT" "ANYTLS_KEY" ;;
+                4)
                     if shoes_disable_protocol_with_confirmation "ENABLE_ANYTLS" "AnyTLS"; then
                         break
                     fi
@@ -5780,12 +5955,6 @@ shoes_modify_anytls() {
             fi
         fi
     done
-}
-
-shoes_print_anytls_summary() {
-    local anytls_sni
-    anytls_sni="$(shoes_derive_name_from_cert_path "$ANYTLS_CERT")"
-    echo -e "${GREEN}AnyTLS${PLAIN}     地址: ${ANYTLS_ADDRESS}  SNI: ${anytls_sni}  密码: ${ANYTLS_PASSWORD}"
 }
 
 shoes_protocol_count() {
@@ -5945,47 +6114,8 @@ shoes_apply_configuration() {
     shoes_run_service_action_checked "restart" "重启 shoes 服务失败"
 }
 
-shoes_show_summary() {
-    local protocol_key summary_fn
-    clear
-    echo -e "${BLUE}部署信息${PLAIN}"
-
-    while IFS= read -r protocol_key; do
-        if shoes_protocol_enabled "$protocol_key"; then
-            summary_fn="$(shoes_protocol_meta_value "$protocol_key" "summary_fn")"
-            "$summary_fn"
-        fi
-    done < <(shoes_protocol_keys)
-
-    echo
-    if systemctl is-active --quiet "$SHOES_SERVICE_NAME"; then
-        shoes_print_ok "服务已启动"
-    else
-        shoes_print_warn "服务未运行"
-        service_failure_hint "$SHOES_SERVICE_NAME"
-    fi
-    shoes_pause_and_return
-}
-
 shoes_get_release_json() {
     curl -fsSL "$SHOES_LATEST_API_URL"
-}
-
-shoes_select_release_asset_name() {
-    local os_id version_id major_version
-
-    source /etc/os-release
-    os_id="${ID:-}"
-    version_id="${VERSION_ID:-}"
-    major_version="${version_id%%.*}"
-
-    if [[ "$os_id" == "debian" && "$major_version" == "$SHOES_CURRENT_DEBIAN_STABLE_MAJOR" ]]; then
-        printf '%s\n' "$SHOES_RELEASE_ASSET_NAME_GNU"
-    elif [[ "$os_id" == "ubuntu" && "$version_id" == "$SHOES_CURRENT_UBUNTU_RELEASE_VERSION" ]]; then
-        printf '%s\n' "$SHOES_RELEASE_ASSET_NAME_GNU"
-    else
-        printf '%s\n' "$SHOES_RELEASE_ASSET_NAME_MUSL"
-    fi
 }
 
 shoes_extract_tag_name() {
@@ -6031,20 +6161,19 @@ shoes_get_current_installed_version() {
 }
 
 shoes_install_binary_from_release() {
-    local asset_name release_json download_url temp_dir bin_path latest_tag
+    local asset_name release_json download_url temp_dir bin_path
 
     if [[ "$(uname -m)" != "x86_64" && "$(uname -m)" != "amd64" ]]; then
         shoes_print_err "当前架构 $(uname -m) 不支持此预编译 shoes 二进制"
         return 1
     fi
-    asset_name="$(shoes_select_release_asset_name)"
+    asset_name="$SHOES_RELEASE_ASSET_NAME"
 
     shoes_print_info "[*] 获取 shoes 最新版本..."
     release_json="$(shoes_get_release_json)" || {
         shoes_print_err "获取 release 信息失败"
         return 1
     }
-    latest_tag="$(printf '%s\n' "$release_json" | shoes_extract_tag_name)"
 
     download_url="$(printf '%s\n' "$release_json" | shoes_extract_download_url "$asset_name")"
     if [[ -z "$download_url" ]]; then
@@ -6157,7 +6286,7 @@ shoes_disable_protocol() {
 shoes_apply_address_update() {
     local var_name="$1"
     local current_value="${!var_name}"
-    shoes_read_address_value "$var_name" "新监听地址(当前:${current_value}): " "$current_value"
+    shoes_read_address_value "$var_name" "新端口(当前:$(shoes_bind_port_display "$current_value")): " "$current_value"
     shoes_commit_changes
 }
 
@@ -6175,6 +6304,44 @@ shoes_apply_password_update() {
     shoes_commit_changes
 }
 
+shoes_apply_shadowsocks_password_update() {
+    shoes_read_shadowsocks_password_or_random "SS_PASSWORD" "新密码(回车随机): " "$SS_CIPHER"
+    shoes_commit_changes
+}
+
+shoes_apply_shadowsocks_cipher_update() {
+    shoes_read_shadowsocks_cipher_value "SS_CIPHER"
+    if ! shoes_validate_shadowsocks_2022_password "$SS_CIPHER" "$SS_PASSWORD"; then
+        SS_PASSWORD="$(shoes_generate_shadowsocks_2022_password "$SS_CIPHER")" || SS_PASSWORD="$(shoes_random_pass)"
+        shoes_print_ok "已按新加密重新生成密码: ${SS_PASSWORD}"
+    fi
+    shoes_commit_changes
+}
+
+shoes_apply_shadowsocks_shadowtls_toggle() {
+    if [[ "$SS_SHADOWTLS_ENABLED" == "true" ]]; then
+        SS_SHADOWTLS_ENABLED="false"
+        shoes_commit_changes
+        return
+    fi
+
+    SS_SHADOWTLS_ENABLED="true"
+    shoes_select_cert "$SS_CERT" "$SS_KEY"
+    SS_CERT="$cert_path"
+    SS_KEY="$key_path"
+    shoes_commit_changes
+}
+
+shoes_apply_shadowsocks_cert_update() {
+    if [[ "$SS_SHADOWTLS_ENABLED" != "true" ]]; then
+        shoes_print_warn "请先开启 STLS"
+        sleep 1
+        return 1
+    fi
+
+    shoes_apply_cert_update "SS_CERT" "SS_KEY"
+}
+
 shoes_apply_uuid_update() {
     local var_name="$1"
     shoes_read_uuid_or_random "$var_name" "新 UUID(回车随机): "
@@ -6184,15 +6351,10 @@ shoes_apply_uuid_update() {
 shoes_apply_cert_update() {
     local cert_var="$1"
     local key_var="$2"
-    local show_sni_sync="${3:-n}"
 
     shoes_select_cert "${!cert_var}" "${!key_var}"
     printf -v "$cert_var" '%s' "$cert_path"
     printf -v "$key_var" '%s' "$key_path"
-
-    if [[ "$show_sni_sync" == "y" ]]; then
-        shoes_print_ok "域名/SNI 已同步为: $(shoes_derive_name_from_cert_path "${!cert_var}")"
-    fi
 
     shoes_commit_changes
 }
