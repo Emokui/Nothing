@@ -1363,6 +1363,8 @@ BBR_REPO_FILE="/etc/apt/sources.list.d/xanmod-release.list"
 BBR_PERSIST_SERVICE="/etc/systemd/system/bbr-optimize-persist.service"
 BBR_PERSIST_SERVICE_NAME="bbr-optimize-persist.service"
 BBR_PERSIST_SCRIPT="/usr/local/bin/bbr-optimize-apply.sh"
+BBR_SPEEDTEST_BIN="/usr/local/bin/speedtest"
+BBR_SPEEDTEST_MARKER="/usr/local/bin/.zero-bbr-speedtest.sha256"
 
 bbr_confirm() {
     local prompt="$1"
@@ -1602,21 +1604,12 @@ bbr_download_url_to_file() {
     fi
 }
 
-bbr_extract_speedtest_version() {
-    local input="$1"
-    printf '%s\n' "$input" | sed -nE 's#.*ookla-speedtest-([0-9.]+)-linux-x86_64\.tgz.*#\1#p'
-}
-
 bbr_get_speedtest_download_url() {
     local page_content download_url
     page_content=$(bbr_fetch_text_url "https://speedtest-static-dev.speedtest.dev/apps/cli") || return 1
     download_url=$(printf '%s\n' "$page_content" | grep -Eo 'https://install\.speedtest\.net/app/cli/ookla-speedtest-[0-9.]+-linux-x86_64\.tgz' | head -n 1)
     [[ -n "$download_url" ]] || return 1
     echo "$download_url"
-}
-
-bbr_get_installed_speedtest_version() {
-    speedtest --version 2>/dev/null | sed -nE 's/^Speedtest by Ookla ([0-9]+\.[0-9]+\.[0-9]+)(\.[0-9]+)?.*/\1/p'
 }
 
 bbr_install_speedtest_from_url() {
@@ -1633,16 +1626,47 @@ bbr_install_speedtest_from_url() {
         return 1
     }
 
-    install -m 0755 "${speedtest_tmp}/speedtest" /usr/local/bin/speedtest || {
+    install -m 0755 "${speedtest_tmp}/speedtest" "$BBR_SPEEDTEST_BIN" || {
         rm -rf "$speedtest_tmp"
         return 1
     }
 
+    bbr_mark_managed_speedtest
+    hash -r 2>/dev/null || true
     rm -rf "$speedtest_tmp"
 }
 
+bbr_mark_managed_speedtest() {
+    [[ -x "$BBR_SPEEDTEST_BIN" ]] || return 0
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    sha256sum "$BBR_SPEEDTEST_BIN" 2>/dev/null | awk '{print $1}' > "$BBR_SPEEDTEST_MARKER" 2>/dev/null || true
+}
+
+bbr_cleanup_managed_speedtest() {
+    [[ -f "$BBR_SPEEDTEST_MARKER" ]] || return 0
+
+    if [[ ! -e "$BBR_SPEEDTEST_BIN" ]]; then
+        rm -f "$BBR_SPEEDTEST_MARKER"
+        return 0
+    fi
+
+    command -v sha256sum >/dev/null 2>&1 || {
+        rm -f "$BBR_SPEEDTEST_MARKER"
+        return 0
+    }
+
+    local expected current
+    expected=$(head -n 1 "$BBR_SPEEDTEST_MARKER" 2>/dev/null)
+    current=$(sha256sum "$BBR_SPEEDTEST_BIN" 2>/dev/null | awk '{print $1}')
+    if [[ -n "$expected" && "$expected" == "$current" ]]; then
+        rm -f "$BBR_SPEEDTEST_BIN"
+        hash -r 2>/dev/null || true
+    fi
+    rm -f "$BBR_SPEEDTEST_MARKER"
+}
+
 bbr_ensure_speedtest() {
-    local cpu_arch download_url latest_version installed_version
+    local cpu_arch download_url
     cpu_arch=$(uname -m)
 
     case "$cpu_arch" in
@@ -1653,25 +1677,14 @@ bbr_ensure_speedtest() {
             ;;
     esac
 
+    if command -v speedtest >/dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}speedtest 未安装，正在临时安装...${PLAIN}" >&2
     download_url=$(bbr_get_speedtest_download_url 2>/dev/null || true)
     if [[ -z "$download_url" ]]; then
         download_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz"
-    fi
-    latest_version=$(bbr_extract_speedtest_version "$download_url")
-
-    if command -v speedtest >/dev/null 2>&1; then
-        installed_version=$(bbr_get_installed_speedtest_version)
-        if [[ -n "$installed_version" && -n "$latest_version" && "$installed_version" == "$latest_version" ]]; then
-            return 0
-        fi
-
-        if [[ -n "$installed_version" && -n "$latest_version" ]]; then
-            echo -e "${YELLOW}检测到 speedtest 新版本 ${latest_version}，正在更新...${PLAIN}" >&2
-        else
-            return 0
-        fi
-    else
-        echo -e "${YELLOW}speedtest 未安装，正在安装...${PLAIN}" >&2
     fi
 
     bbr_install_speedtest_from_url "$download_url" || return 1
@@ -1693,6 +1706,7 @@ bbr_detect_bandwidth() {
             echo -e "${YELLOW}正在运行 speedtest 自动测速...${PLAIN}" >&2
             bbr_ensure_speedtest >/dev/null 2>&1 || {
                 echo -e "${YELLOW}测速工具安装失败，使用默认值 1000 Mbps${PLAIN}" >&2
+                bbr_cleanup_managed_speedtest
                 echo "1000"
                 return 1
             }
@@ -1748,6 +1762,7 @@ bbr_detect_bandwidth() {
 
             if [[ -z "$upload_speed" ]] || echo "$speedtest_output" | grep -qi "FAILED\|error"; then
                 echo -e "${YELLOW}测速失败，使用默认值 1000 Mbps${PLAIN}" >&2
+                bbr_cleanup_managed_speedtest
                 echo "1000"
                 return 1
             fi
@@ -1755,11 +1770,13 @@ bbr_detect_bandwidth() {
             upload_mbps=${upload_speed%.*}
             if ! [[ "$upload_mbps" =~ ^[0-9]+$ ]] || (( upload_mbps <= 0 )); then
                 echo -e "${YELLOW}检测值异常 (${upload_speed})，使用默认值 1000 Mbps${PLAIN}" >&2
+                bbr_cleanup_managed_speedtest
                 echo "1000"
                 return 1
             fi
 
             echo -e "${GREEN}检测到上传带宽: ${upload_mbps} Mbps${PLAIN}" >&2
+            bbr_cleanup_managed_speedtest
             echo "$upload_mbps"
             ;;
         2)
@@ -2301,6 +2318,7 @@ bbr_uninstall_xanmod_kernel() {
         rm -f "$BBR_SYSCTL_CONF" /etc/sysctl.d/99-zero-bbr.conf /etc/modules-load.d/bbr.conf
         bbr_apply_mss_clamp disable
         bbr_cleanup_persist
+        bbr_cleanup_managed_speedtest
         echo -e "${GREEN}XanMod 内核已卸载${PLAIN}"
         bbr_prompt_reboot
     else
@@ -3287,7 +3305,8 @@ acme_install_dependencies() {
 }
 
 acme_install_port80_hook_scripts() {
-    install -d -m 700 /usr/local/bin /run/zero-acme-port80 || return 1
+    mkdir -p /usr/local/bin || return 1
+    install -d -m 700 /run/zero-acme-port80 || return 1
 
     cat > "$ACME_PORT80_OPEN_HOOK" <<'EOF'
 #!/bin/sh
@@ -3503,10 +3522,17 @@ acme_require_installed() {
         press_any_key_to_continue
         return 1
     }
+}
+
+acme_require_port80_hook_scripts() {
     acme_install_port80_hook_scripts && return 0
     echo -e "${RED}ACME 80 端口钩子脚本安装失败${PLAIN}"
     press_any_key_to_continue
     return 1
+}
+
+acme_port80_hooks_referenced() {
+    grep -Rqs -e "$ACME_PORT80_OPEN_HOOK" -e "$ACME_PORT80_CLOSE_HOOK" "$ACME_HOME" 2>/dev/null
 }
 
 acme_get_cert_list() {
@@ -3732,6 +3758,7 @@ acme_issue_standalone() {
     local domain
 
     acme_require_installed || return
+    acme_require_port80_hook_scripts || return
 
     acme_check_port_80 || {
         press_any_key_to_continue
@@ -3860,6 +3887,9 @@ acme_revoke_cert() {
 
 acme_renew_cert() {
     acme_require_installed || return
+    if acme_port80_hooks_referenced; then
+        acme_require_port80_hook_scripts || return
+    fi
 
     if acme_exec --cron; then
         echo -e "${GREEN}证书续期任务已执行${PLAIN}"
