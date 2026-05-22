@@ -8,10 +8,40 @@ BLUE="\033[0;34m"
 RED="\033[0;31m"
 PLAIN="\033[0m"
 
+check_supported_system() {
+    local os_id arch
+
+    if [[ ! -r /etc/os-release ]]; then
+        echo -e "${RED}不支持${PLAIN}"
+        return 1
+    fi
+
+    source /etc/os-release
+    os_id="${ID:-}"
+    case "$os_id" in
+        debian|ubuntu) ;;
+        *)
+            echo -e "${RED}不支持${PLAIN}"
+            return 1
+            ;;
+    esac
+
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) return 0 ;;
+        *)
+            echo -e "${RED}不支持${PLAIN}"
+            return 1
+            ;;
+    esac
+}
+
 if [[ $EUID -ne 0 ]]; then
   echo -e "${RED}请用 root 用户运行本脚本${PLAIN}"
   exit 1
 fi
+
+check_supported_system || exit 1
 
 get_root_home() {
     getent passwd root | cut -d: -f6
@@ -4060,14 +4090,11 @@ snell_get_arch() {
   local uname_arch
   uname_arch=$(uname -m)
   case "$uname_arch" in
-    i686|i386)
-      echo "i386" ;;
-    armv7*|armv6l)
-      echo "armv7l" ;;
-    armv8*|aarch64|arm64)
-      echo "aarch64" ;;
-    *)
+    x86_64|amd64)
       echo "amd64" ;;
+    *)
+      echo -e "${RED}不支持${PLAIN}" >&2
+      return 1 ;;
   esac
 }
 
@@ -4975,23 +5002,22 @@ SHOES_RELEASE_ASSET_NAME="shoes-musl.tar.gz"
 SHOES_SS_DEFAULT_CIPHER="2022-blake3-aes-128-gcm"
 
 shoes_check_supported_os() {
-    local os_id os_name
+    local os_id
 
     if [[ ! -r /etc/os-release ]]; then
-        shoes_print_err "无法识别系统类型，仅支持 Debian 和 Ubuntu"
+        shoes_print_err "不支持"
         return 1
     fi
 
     source /etc/os-release
     os_id="${ID:-}"
-    os_name="${PRETTY_NAME:-${NAME:-未知系统}}"
 
     case "$os_id" in
         debian|ubuntu)
             return 0
             ;;
         *)
-            shoes_print_err "当前系统为 ${os_name}，此脚本仅支持 Debian 和 Ubuntu"
+            shoes_print_err "不支持"
             return 1
             ;;
     esac
@@ -6642,6 +6668,7 @@ MIHOMO_CONFIG_DIR="/etc/mihomo"
 MIHOMO_CONFIG_PATH="${MIHOMO_CONFIG_DIR}/config.yaml"
 MIHOMO_SERVICE_NAME="mihomo"
 MIHOMO_SERVICE_FILE="/etc/systemd/system/mihomo.service"
+MIHOMO_ALPHA_TAG="Prerelease-Alpha"
 
 mihomo_pause_and_return() {
     pause_enter_and_clear "按回车返回..."
@@ -6652,10 +6679,10 @@ mihomo_get_arch() {
     arch=$(uname -m)
     case "$arch" in
         x86_64|amd64) echo "amd64" ;;
-        aarch64|arm64) echo "arm64" ;;
-        armv7l) echo "armv7" ;;
-        i386|i686) echo "386" ;;
-        *) echo "$arch" ;;
+        *)
+            echo -e "${RED}不支持${PLAIN}" >&2
+            return 1
+            ;;
     esac
 }
 
@@ -6668,35 +6695,86 @@ mihomo_validate_port() {
     [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
 }
 
-mihomo_check_ipv4() {
-    curl -s -4 --max-time 2 https://www.google.com > /dev/null 2>&1
+mihomo_channel_label() {
+    case "$1" in
+        alpha) echo "测试版" ;;
+        release) echo "正式版" ;;
+        *) return 1 ;;
+    esac
 }
 
-mihomo_get_latest_download_url() {
-    local arch="$1"
-    local latest_version asset_name download_url base_url api_url
-
-    if mihomo_check_ipv4; then
-        base_url="https://github.com"
-        api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-    else
-        base_url="https://mihomo.nicycc.workers.dev"
-        api_url="https://api.nicycc.workers.dev/repos/MetaCubeX/mihomo/releases/latest"
+mihomo_get_current_version_label() {
+    local version_line current_version
+    version_line=$("$MIHOMO_EXEC_PATH" -v 2>/dev/null | head -1)
+    current_version=$(echo "$version_line" | grep -oE 'alpha-[0-9a-f]+' | head -1)
+    if [[ -n "$current_version" ]]; then
+        echo "$current_version"
+        return
     fi
 
-    latest_version=$(curl -s "$api_url" | grep '"tag_name":' | sed 's/.*"tag_name": *"\(v[0-9.]*\)".*/\1/')
-    
-    if [[ -z "$latest_version" ]]; then
+    current_version=$(echo "$version_line" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    echo "${current_version:-未知}"
+}
+
+mihomo_select_asset_name() {
+    local release_json="$1"
+    local arch="$2"
+    local channel="$3"
+    local asset_names asset_pattern asset_name
+
+    asset_names=$(echo "$release_json" | grep -oE '"name":[[:space:]]*"mihomo-linux-[^"]+\.gz"' | sed -E 's/^"name":[[:space:]]*"//; s/"$//')
+    if [[ -z "$asset_names" ]]; then
         return 1
     fi
-    
-    if [[ "$arch" == "amd64" ]]; then
-        asset_name="mihomo-linux-${arch}-v3-go123-${latest_version}.gz"
-    else
-        asset_name="mihomo-linux-${arch}-${latest_version}.gz"
+
+    case "$channel" in
+        alpha)
+            [[ "$arch" == "amd64" ]] || return 1
+            asset_pattern='^mihomo-linux-amd64-v3-alpha-[0-9a-f]+\.gz$'
+            ;;
+        release)
+            [[ "$arch" == "amd64" ]] || return 1
+            asset_pattern='^mihomo-linux-amd64-v3-v[0-9]+\.[0-9]+\.[0-9]+\.gz$'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    asset_name=$(echo "$asset_names" | grep -E "$asset_pattern" | head -1)
+    [[ -n "$asset_name" ]] || return 1
+    echo "$asset_name"
+}
+
+mihomo_get_download_info() {
+    local arch="$1"
+    local channel="$2"
+    local release_path latest_version asset_name download_url api_url release_json asset_version display_version
+
+    case "$channel" in
+        alpha) release_path="releases/tags/${MIHOMO_ALPHA_TAG}" ;;
+        release) release_path="releases/latest" ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    api_url="https://api.github.com/repos/MetaCubeX/mihomo/${release_path}"
+
+    release_json=$(curl -fsSL "$api_url") || return 1
+    latest_version=$(echo "$release_json" | grep '"tag_name":' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/' | head -1)
+    [[ -n "$latest_version" ]] || return 1
+
+    asset_name=$(mihomo_select_asset_name "$release_json" "$arch" "$channel") || return 1
+    download_url="https://github.com/MetaCubeX/mihomo/releases/download/${latest_version}/${asset_name}"
+
+    display_version="$latest_version"
+    if [[ "$channel" == "alpha" ]]; then
+        asset_version=$(echo "$asset_name" | grep -oE 'alpha-[0-9a-f]+' | tail -1)
+        display_version="${MIHOMO_ALPHA_TAG} (${asset_version})"
     fi
-    download_url="${base_url}/MetaCubeX/mihomo/releases/download/${latest_version}/${asset_name}"
-    echo "${download_url}|${latest_version}"
+
+    echo "${download_url}|${display_version}|${asset_name}"
 }
 
 mihomo_download_binary() {
@@ -6870,13 +6948,11 @@ log-level: silent
 ipv6: true
 dns:
   enable: true
-  listen: :53
+  listen: :1053
   ipv6: false
   nameserver:
-    - 1.1.1.1
+    - system
   enhanced-mode: redir-host
-profile:
-  store-selected: true
 listeners:
 EOF
 
@@ -6920,23 +6996,6 @@ EOF
 EOF
     fi
     
-    if [[ "$enable_hy2" == "y" ]]; then
-        cat >> "$MIHOMO_CONFIG_PATH" <<EOF
-- name: hysteria2-in
-  type: hysteria2
-  port: ${hy2_port}
-  listen: ::0
-  users:
-    user1: ${hy2_pass}
-  masquerade: ""
-  alpn:
-  - h3
-  certificate: ${hy2_cert}
-  private-key: ${hy2_key}
-
-EOF
-    fi
-
     if [[ "$enable_tuic" == "y" ]]; then
         cat >> "$MIHOMO_CONFIG_PATH" <<EOF
 - name: tuicv5-in
@@ -6957,6 +7016,45 @@ EOF
 EOF
     fi
 
+    if [[ "$enable_snell" == "y" ]]; then
+        cat >> "$MIHOMO_CONFIG_PATH" <<EOF
+- name: snellv5-in
+  type: snell
+  port: ${snell_port}
+  listen: ::0
+  psk: ${snell_pass}
+  version: 5
+  udp: true
+EOF
+        if [[ "$snell_obfs" == "y" ]]; then
+            cat >> "$MIHOMO_CONFIG_PATH" <<EOF
+  obfs-opts:
+    mode: http
+    host: ${snell_obfs_host}
+EOF
+        fi
+        cat >> "$MIHOMO_CONFIG_PATH" <<EOF
+
+EOF
+    fi
+
+    if [[ "$enable_hy2" == "y" ]]; then
+        cat >> "$MIHOMO_CONFIG_PATH" <<EOF
+- name: hysteria2-in
+  type: hysteria2
+  port: ${hy2_port}
+  listen: ::0
+  users:
+    user1: ${hy2_pass}
+  masquerade: ""
+  alpn:
+  - h3
+  certificate: ${hy2_cert}
+  private-key: ${hy2_key}
+
+EOF
+    fi
+
     cat >> "$MIHOMO_CONFIG_PATH" <<EOF
 rules:
   - MATCH,DIRECT
@@ -6971,43 +7069,50 @@ mihomo_install() {
         return
     fi
 
-    echo -e "${BLUE}[*] 下载 Mihomo...${PLAIN}"
     mkdir -p "$MIHOMO_CONFIG_DIR"
-    
-    local ARCH result download_url
-    ARCH=$(mihomo_get_arch)
-    if ! result=$(mihomo_get_latest_download_url "$ARCH"); then
-        echo -e "${RED}获取 Mihomo 最新版本失败${PLAIN}"
+
+    clear
+    echo -e "${BLUE}选择要启用的监听器:${PLAIN}"
+    local enable_anytls enable_trojan enable_tuic enable_hy2 enable_snell
+    read -r -p "$(echo -e "${BLUE}启用 Anytls?   [y/N]: ${PLAIN}")" enable_anytls
+    read -r -p "$(echo -e "${BLUE}启用 Trojan?   [y/N]: ${PLAIN}")" enable_trojan
+    read -r -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
+    read -r -p "$(echo -e "${BLUE}启用 Snellv5?  [y/N]: ${PLAIN}")" enable_snell
+    read -r -p "$(echo -e "${BLUE}启用 Hysteria? [y/N]: ${PLAIN}")" enable_hy2
+    [[ "$enable_anytls" =~ ^[Yy]$ ]] && enable_anytls="y" || enable_anytls="n"
+    [[ "$enable_trojan" =~ ^[Yy]$ ]] && enable_trojan="y" || enable_trojan="n"
+    [[ "$enable_tuic" =~ ^[Yy]$ ]] && enable_tuic="y" || enable_tuic="n"
+    [[ "$enable_snell" =~ ^[Yy]$ ]] && enable_snell="y" || enable_snell="n"
+    [[ "$enable_hy2" =~ ^[Yy]$ ]] && enable_hy2="y" || enable_hy2="n"
+
+    if [[ "$enable_anytls" != "y" && "$enable_trojan" != "y" && "$enable_tuic" != "y" && "$enable_hy2" != "y" && "$enable_snell" != "y" ]]; then
+        echo -e "${RED}至少需要启用一个监听器,已取消安装${PLAIN}"
         mihomo_pause_and_return
         return
     fi
-    download_url="${result%|*}"
+
+    local install_label ARCH result download_url target_version target_asset
+    install_label=$(mihomo_channel_label "release")
+    echo -e "${BLUE}[*] 下载 Mihomo ${install_label}...${PLAIN}"
+    
+    if ! ARCH=$(mihomo_get_arch); then
+        mihomo_pause_and_return
+        return
+    fi
+    if ! result=$(mihomo_get_download_info "$ARCH" "release"); then
+        echo -e "${RED}获取 Mihomo ${install_label}失败${PLAIN}"
+        mihomo_pause_and_return
+        return
+    fi
+    IFS='|' read -r download_url target_version target_asset <<< "$result"
     
     if ! mihomo_download_binary "$download_url"; then
         mihomo_pause_and_return
         return
     fi
 
-    echo -e "${GREEN}内核安装完成${PLAIN}"
-
-    clear
-    echo -e "${BLUE}选择要启用的监听器:${PLAIN}"
-    local enable_anytls enable_trojan enable_tuic enable_hy2
-    read -r -p "$(echo -e "${BLUE}启用 Anytls?   [y/N]: ${PLAIN}")" enable_anytls
-    read -r -p "$(echo -e "${BLUE}启用 Trojan?   [y/N]: ${PLAIN}")" enable_trojan
-    read -r -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
-    read -r -p "$(echo -e "${BLUE}启用 Hysteria? [y/N]: ${PLAIN}")" enable_hy2
-    [[ "$enable_anytls" =~ ^[Yy]$ ]] && enable_anytls="y" || enable_anytls="n"
-    [[ "$enable_trojan" =~ ^[Yy]$ ]] && enable_trojan="y" || enable_trojan="n"
-    [[ "$enable_tuic" =~ ^[Yy]$ ]] && enable_tuic="y" || enable_tuic="n"
-    [[ "$enable_hy2" =~ ^[Yy]$ ]] && enable_hy2="y" || enable_hy2="n"
-
-    if [[ "$enable_anytls" != "y" && "$enable_trojan" != "y" && "$enable_tuic" != "y" && "$enable_hy2" != "y" ]]; then
-        rm -f "$MIHOMO_EXEC_PATH"
-        echo -e "${RED}至少需要启用一个监听器,已取消安装${PLAIN}"
-        mihomo_pause_and_return
-        return
-    fi
+    echo -e "${GREEN}内核安装完成: ${target_version}${PLAIN}"
+    local random_summary=""
     
 
     if [[ "$enable_anytls" == "y" ]]; then
@@ -7025,7 +7130,8 @@ mihomo_install() {
         read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" anytls_pass
         if [[ -z "$anytls_pass" ]]; then
             anytls_pass=$(mihomo_random_pass)
-            echo -e "${GREEN}密码: $anytls_pass${PLAIN}"
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="AnyTLS 密码: $anytls_pass"
         fi
         mihomo_select_cert
         anytls_cert="$mihomo_cert_path"
@@ -7047,33 +7153,12 @@ mihomo_install() {
         read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" trojan_pass
         if [[ -z "$trojan_pass" ]]; then
             trojan_pass=$(mihomo_random_pass)
-            echo -e "${GREEN}密码: $trojan_pass${PLAIN}"
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="Trojan 密码: $trojan_pass"
         fi
         mihomo_select_cert
         trojan_cert="$mihomo_cert_path"
         trojan_key="$mihomo_key_path"
-    fi
-
-    if [[ "$enable_hy2" == "y" ]]; then
-        clear
-        echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
-        local hy2_port hy2_pass hy2_cert hy2_key
-        read -r -p "$(echo -e "${BLUE}端口(默认:18443): ${PLAIN}")" hy2_port
-        hy2_port=${hy2_port:-18443}
-        if ! mihomo_validate_port "$hy2_port"; then
-            echo -e "${RED}Hysteria2 端口无效${PLAIN}"
-            rm -f "$MIHOMO_EXEC_PATH"
-            mihomo_pause_and_return
-            return
-        fi
-        read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" hy2_pass
-        if [[ -z "$hy2_pass" ]]; then
-            hy2_pass=$(mihomo_random_pass)
-            echo -e "${GREEN}密码: $hy2_pass${PLAIN}"
-        fi
-        mihomo_select_cert
-        hy2_cert="$mihomo_cert_path"
-        hy2_key="$mihomo_key_path"
     fi
 
     if [[ "$enable_tuic" == "y" ]]; then
@@ -7091,16 +7176,75 @@ mihomo_install() {
         read -r -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" tuic_uuid
         if [[ -z "$tuic_uuid" ]]; then
             tuic_uuid=$(cat /proc/sys/kernel/random/uuid)
-            echo -e "${GREEN}UUID: $tuic_uuid${PLAIN}"
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="TUIC UUID: $tuic_uuid"
         fi
         read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" tuic_pass
         if [[ -z "$tuic_pass" ]]; then
             tuic_pass=$(mihomo_random_pass)
-            echo -e "${GREEN}密码: $tuic_pass${PLAIN}"
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="TUIC 密码: $tuic_pass"
         fi
         mihomo_select_cert
         tuic_cert="$mihomo_cert_path"
         tuic_key="$mihomo_key_path"
+    fi
+
+    if [[ "$enable_snell" == "y" ]]; then
+        clear
+        echo -e "${BLUE}===== Snell v5 配置 =====${PLAIN}"
+        local snell_port snell_pass snell_obfs snell_obfs_host
+        read -r -p "$(echo -e "${BLUE}端口(默认:10815): ${PLAIN}")" snell_port
+        snell_port=${snell_port:-10815}
+        if ! mihomo_validate_port "$snell_port"; then
+            echo -e "${RED}Snell v5 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
+        read -r -p "$(echo -e "${BLUE}PSK(回车随机): ${PLAIN}")" snell_pass
+        if [[ -z "$snell_pass" ]]; then
+            snell_pass=$(mihomo_random_pass)
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="Snellv5 PSK: $snell_pass"
+        fi
+        read -r -p "$(echo -e "${BLUE}启用 OBFS(http)? [y/N]: ${PLAIN}")" snell_obfs
+        if [[ "$snell_obfs" == "y" || "$snell_obfs" == "Y" ]]; then
+            snell_obfs="y"
+            read -r -p "$(echo -e "${BLUE}OBFS Host(默认:icloud.com.cn): ${PLAIN}")" snell_obfs_host
+            snell_obfs_host=${snell_obfs_host:-icloud.com.cn}
+        else
+            snell_obfs="n"
+            snell_obfs_host="icloud.com.cn"
+        fi
+    fi
+
+    if [[ "$enable_hy2" == "y" ]]; then
+        clear
+        echo -e "${BLUE}===== Hysteria2 配置 =====${PLAIN}"
+        local hy2_port hy2_pass hy2_cert hy2_key
+        read -r -p "$(echo -e "${BLUE}端口(默认:18443): ${PLAIN}")" hy2_port
+        hy2_port=${hy2_port:-18443}
+        if ! mihomo_validate_port "$hy2_port"; then
+            echo -e "${RED}Hysteria2 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
+        read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" hy2_pass
+        if [[ -z "$hy2_pass" ]]; then
+            hy2_pass=$(mihomo_random_pass)
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="Hysteria2 密码: $hy2_pass"
+        fi
+        mihomo_select_cert
+        hy2_cert="$mihomo_cert_path"
+        hy2_key="$mihomo_key_path"
+    fi
+
+    if [[ -n "$random_summary" ]]; then
+        echo -e "${GREEN}随机凭据:${PLAIN}"
+        echo -e "${GREEN}${random_summary}${PLAIN}"
     fi
 
     mihomo_generate_config
@@ -7179,17 +7323,20 @@ mihomo_modify_config() {
         local trojan_status="未启用"
         local hy2_status="未启用"
         local tuic_status="未启用"
+        local snell_status="未启用"
         grep -q "name: anytls-in" "$MIHOMO_CONFIG_PATH" && anytls_status="已启用"
         grep -q "name: trojan-in" "$MIHOMO_CONFIG_PATH" && trojan_status="已启用"
         grep -q "name: tuicv5-in" "$MIHOMO_CONFIG_PATH" && tuic_status="已启用"
         grep -q "name: hysteria2-in" "$MIHOMO_CONFIG_PATH" && hy2_status="已启用"
+        grep -q "name: snellv5-in" "$MIHOMO_CONFIG_PATH" && snell_status="已启用"
         
         clear
         echo -e "${BLUE}✦ Modify_Conf ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}Anytls  [${YELLOW}${anytls_status}${PLAIN}]"
         echo -e "${GREEN}  2.${PLAIN}Trojan  [${YELLOW}${trojan_status}${PLAIN}]"
         echo -e "${GREEN}  3.${PLAIN}Tuicv5  [${YELLOW}${tuic_status}${PLAIN}]"
-        echo -e "${GREEN}  4.${PLAIN}Hysteria[${YELLOW}${hy2_status}${PLAIN}]"
+        echo -e "${GREEN}  4.${PLAIN}Snellv5 [${YELLOW}${snell_status}${PLAIN}]"
+        echo -e "${GREEN}  5.${PLAIN}Hysteria[${YELLOW}${hy2_status}${PLAIN}]"
         echo -e "${GREEN}  0.${PLAIN}Return"
         read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
         
@@ -7197,7 +7344,8 @@ mihomo_modify_config() {
             1) mihomo_toggle_or_modify_listener "anytls-in" "AnyTLS" "8443" ;;
             2) mihomo_toggle_or_modify_listener "trojan-in" "Trojan" "10819" ;;
             3) mihomo_toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" ;;
-            4) mihomo_toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
+            4) mihomo_toggle_or_modify_listener "snellv5-in" "Snellv5" "10815" ;;
+            5) mihomo_toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
             0) break ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
         esac
@@ -7216,21 +7364,41 @@ mihomo_toggle_or_modify_listener() {
         clear
         echo -e "${BLUE}✦ ${display_name}_Conf ✦${PLAIN}"
         if [[ "$is_enabled" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改密码"
-            echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-            
-            case "$opt" in
-                1) mihomo_modify_listener_port "$name" ;;
-                2) mihomo_modify_listener_pass "$name" ;;
-                3) mihomo_modify_listener_cert "$name" ;;
-                4) mihomo_disable_listener "$name" "$display_name"; break ;;
-                0) break ;;
-                *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
-            esac
+            if [[ "$name" == "snellv5-in" ]]; then
+                local snell_obfs_status="关闭"
+                mihomo_snell_obfs_enabled && snell_obfs_status="开启"
+                echo -e "${GREEN}  1.${PLAIN}修改端口"
+                echo -e "${GREEN}  2.${PLAIN}修改PSK"
+                echo -e "${GREEN}  3.${PLAIN}切换OBFS (当前: ${snell_obfs_status})"
+                echo -e "${GREEN}  4.${PLAIN}禁用服务"
+                echo -e "${GREEN}  0.${PLAIN}返回上级"
+                read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+
+                case "$opt" in
+                    1) mihomo_modify_listener_port "$name" ;;
+                    2) mihomo_modify_listener_pass "$name" ;;
+                    3) mihomo_toggle_snell_obfs ;;
+                    4) mihomo_disable_listener "$name" "$display_name"; break ;;
+                    0) break ;;
+                    *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+                esac
+            else
+                echo -e "${GREEN}  1.${PLAIN}修改端口"
+                echo -e "${GREEN}  2.${PLAIN}修改密码"
+                echo -e "${GREEN}  3.${PLAIN}修改证书"
+                echo -e "${GREEN}  4.${PLAIN}禁用服务"
+                echo -e "${GREEN}  0.${PLAIN}返回上级"
+                read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
+                
+                case "$opt" in
+                    1) mihomo_modify_listener_port "$name" ;;
+                    2) mihomo_modify_listener_pass "$name" ;;
+                    3) mihomo_modify_listener_cert "$name" ;;
+                    4) mihomo_disable_listener "$name" "$display_name"; break ;;
+                    0) break ;;
+                    *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+                esac
+            fi
         else
             echo -e "${YELLOW}  当前未启用${PLAIN}"
             read -r -p "$(echo -e "${BLUE}是否启用? [y/N]: ${PLAIN}")" enable
@@ -7258,22 +7426,44 @@ mihomo_add_listener() {
         return 1
     fi
     
-    local uuid=""
+    local uuid="" uuid_random="n" pass_random="n" snell_obfs="n" snell_obfs_host="icloud.com.cn"
     if [[ "$name" == "tuicv5-in" ]]; then
         read -r -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" uuid
         if [[ -z "$uuid" ]]; then
             uuid=$(cat /proc/sys/kernel/random/uuid)
-            echo -e "${GREEN}UUID: $uuid${PLAIN}"
+            uuid_random="y"
         fi
     fi
     
-    read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" pass
+    if [[ "$name" == "snellv5-in" ]]; then
+        read -r -p "$(echo -e "${BLUE}PSK(回车随机): ${PLAIN}")" pass
+    else
+        read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" pass
+    fi
     if [[ -z "$pass" ]]; then
         pass=$(mihomo_random_pass)
-        echo -e "${GREEN}密码: $pass${PLAIN}"
+        pass_random="y"
+    fi
+
+    if [[ "$name" == "snellv5-in" ]]; then
+        read -r -p "$(echo -e "${BLUE}启用 OBFS(http)? [y/N]: ${PLAIN}")" snell_obfs
+        if [[ "$snell_obfs" == "y" || "$snell_obfs" == "Y" ]]; then
+            snell_obfs="y"
+            read -r -p "$(echo -e "${BLUE}OBFS Host(默认:icloud.com.cn): ${PLAIN}")" snell_obfs_host
+            snell_obfs_host=${snell_obfs_host:-icloud.com.cn}
+        else
+            snell_obfs="n"
+            snell_obfs_host="icloud.com.cn"
+        fi
     fi
     
-    mihomo_select_cert
+    if [[ "$name" != "snellv5-in" ]]; then
+        mihomo_select_cert
+        [[ "$uuid_random" == "y" ]] && echo -e "${GREEN}UUID: $uuid${PLAIN}"
+        [[ "$pass_random" == "y" ]] && echo -e "${GREEN}密码: $pass${PLAIN}"
+    else
+        [[ "$pass_random" == "y" ]] && echo -e "${GREEN}PSK: $pass${PLAIN}"
+    fi
     
     local tmp_config backup
     tmp_config=$(mktemp) || {
@@ -7361,6 +7551,27 @@ LISTENER
 
 LISTENER
             ;;
+        snellv5-in)
+            cat > "$tmp_config" <<LISTENER
+- name: snellv5-in
+  type: snell
+  port: ${port}
+  listen: ::0
+  psk: ${pass}
+  version: 5
+  udp: true
+LISTENER
+            if [[ "$snell_obfs" == "y" ]]; then
+                cat >> "$tmp_config" <<LISTENER
+  obfs-opts:
+    mode: http
+    host: ${snell_obfs_host}
+LISTENER
+            fi
+            cat >> "$tmp_config" <<LISTENER
+
+LISTENER
+            ;;
     esac
     
     awk -v tmpfile="$tmp_config" '
@@ -7387,6 +7598,73 @@ LISTENER
     rm -f "$tmp_config"
 
     mihomo_restart_with_rollback "$backup" "${display_name} 已启用" "${display_name} 已写入,但服务重启失败"
+    sleep 1
+}
+
+mihomo_snell_obfs_enabled() {
+    awk '
+        /^- name: /{block=($0 ~ "snellv5-in")}
+        block && /^  obfs-opts:/{found=1}
+        END {exit found ? 0 : 1}
+    ' "$MIHOMO_CONFIG_PATH"
+}
+
+mihomo_toggle_snell_obfs() {
+    local backup host
+
+    if mihomo_snell_obfs_enabled; then
+        read -r -p "$(echo -e "${RED}确定关闭 Snell OBFS? [y/N]: ${PLAIN}")" confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            return
+        fi
+
+        backup=$(mihomo_make_config_backup) || {
+            echo -e "${RED}备份配置失败${PLAIN}"
+            sleep 1
+            return 1
+        }
+        awk '
+            /^- name: /{block=($0 ~ "snellv5-in"); skip=0}
+            block && /^  obfs-opts:/{skip=1; next}
+            block && skip && /^    /{next}
+            {skip=0; print}
+        ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+            echo -e "${RED}配置写入失败${PLAIN}"
+            rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+            sleep 1
+            return 1
+        }
+
+        mihomo_restart_with_rollback "$backup" "OBFS 已关闭" "OBFS 已移除,但服务重启失败"
+        sleep 1
+        return
+    fi
+
+    read -r -p "$(echo -e "${BLUE}OBFS Host(默认:icloud.com.cn): ${PLAIN}")" host
+    host=${host:-icloud.com.cn}
+
+    backup=$(mihomo_make_config_backup) || {
+        echo -e "${RED}备份配置失败${PLAIN}"
+        sleep 1
+        return 1
+    }
+    awk -v host="$host" '
+        /^- name: /{block=($0 ~ "snellv5-in")}
+        {print}
+        block && /^  udp:/ && !inserted {
+            print "  obfs-opts:"
+            print "    mode: http"
+            print "    host: " host
+            inserted=1
+        }
+    ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+        echo -e "${RED}配置写入失败${PLAIN}"
+        rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+        sleep 1
+        return 1
+    }
+
+    mihomo_restart_with_rollback "$backup" "OBFS 已开启" "OBFS 已写入,但服务重启失败"
     sleep 1
 }
 
@@ -7453,7 +7731,14 @@ mihomo_modify_listener_port() {
 
 mihomo_modify_listener_pass() {
     local name="$1"
-    read -r -p "$(echo -e "${BLUE}新密码: ${PLAIN}")" new_pass
+    local prompt_label="新密码"
+    local failure_msg="密码已写入,但服务重启失败"
+    if [[ "$name" == "snellv5-in" ]]; then
+        prompt_label="新PSK"
+        failure_msg="PSK已写入,但服务重启失败"
+    fi
+
+    read -r -p "$(echo -e "${BLUE}${prompt_label}: ${PLAIN}")" new_pass
     if [[ -n "$new_pass" ]]; then
         local backup
         backup=$(mihomo_make_config_backup) || {
@@ -7514,10 +7799,22 @@ mihomo_modify_listener_pass() {
                     rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
                     sleep 1
                     return 1
+                }            
+                ;;
+            snellv5-in)
+                awk -v pass="$new_pass" '
+                    /^- name: snellv5-in/{found=1}
+                    found && /^  psk:/{$0="  psk: "pass; found=0}
+                    {print}
+                ' "$MIHOMO_CONFIG_PATH" > "${MIHOMO_CONFIG_PATH}.tmp" && mv "${MIHOMO_CONFIG_PATH}.tmp" "$MIHOMO_CONFIG_PATH" || {
+                    echo -e "${RED}配置写入失败${PLAIN}"
+                    rm -f "${MIHOMO_CONFIG_PATH}.tmp" "$backup"
+                    sleep 1
+                    return 1
                 }
                 ;;
         esac
-        mihomo_restart_with_rollback "$backup" "已更新" "密码已写入,但服务重启失败"
+        mihomo_restart_with_rollback "$backup" "已更新" "$failure_msg"
     fi
     sleep 1
 }
@@ -7546,7 +7843,10 @@ mihomo_modify_listener_cert() {
     sleep 1
 }
 
-mihomo_update() {
+mihomo_update_channel() {
+    local channel="$1"
+    local channel_label current_version ARCH result download_url target_version target_asset confirm backup_exec
+
     clear
     if [ ! -f "$MIHOMO_EXEC_PATH" ]; then
         echo -e "${RED}未安装${PLAIN}"
@@ -7554,35 +7854,36 @@ mihomo_update() {
         return
     fi
 
-    local current_version ARCH result download_url latest_version
-    current_version=$($MIHOMO_EXEC_PATH -v 2>/dev/null | head -1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
-    current_version=${current_version:-"未知"}
+    channel_label=$(mihomo_channel_label "$channel")
+    current_version=$(mihomo_get_current_version_label)
     
-    ARCH=$(mihomo_get_arch)
-    if ! result=$(mihomo_get_latest_download_url "$ARCH"); then
-        echo -e "${RED}获取 Mihomo 最新版本失败${PLAIN}"
+    if ! ARCH=$(mihomo_get_arch); then
         mihomo_pause_and_return
         return
     fi
-    download_url="${result%|*}"
-    latest_version="${result#*|}"
+    if ! result=$(mihomo_get_download_info "$ARCH" "$channel"); then
+        echo -e "${RED}获取 Mihomo ${channel_label}失败${PLAIN}"
+        mihomo_pause_and_return
+        return
+    fi
+    IFS='|' read -r download_url target_version target_asset <<< "$result"
     
     echo -e "${BLUE}当前版本: ${YELLOW}${current_version}${PLAIN}"
-    echo -e "${BLUE}最新版本: ${YELLOW}${latest_version}${PLAIN}"
+    echo -e "${BLUE}目标版本: ${YELLOW}${target_version}${PLAIN}"
+    echo -e "${BLUE}目标文件: ${YELLOW}${target_asset}${PLAIN}"
     
-    if [[ "$current_version" == "$latest_version" ]]; then
+    if [[ "$channel" == "release" && "$current_version" == "$target_version" ]]; then
         echo -e "${GREEN}已是最新版本${PLAIN}"
         mihomo_pause_and_return
         return
     fi
-    
-    read -r -p "$(echo -e "${BLUE}是否更新? [y/N]: ${PLAIN}")" confirm
+
+    read -r -p "$(echo -e "${BLUE}是否更新到 Mihomo ${channel_label}? [y/N]: ${PLAIN}")" confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         return
     fi
 
-    echo -e "${BLUE}[*] 更新中...${PLAIN}"
-    local backup_exec
+    echo -e "${BLUE}[*] 更新 Mihomo ${channel_label}中...${PLAIN}"
     backup_exec="$(mktemp)" || {
         echo -e "${RED}创建内核备份失败${PLAIN}"
         mihomo_pause_and_return
@@ -7611,7 +7912,7 @@ mihomo_update() {
 
     if systemctl start "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
         rm -f "$backup_exec"
-        echo -e "${GREEN}更新完成: ${latest_version}${PLAIN}"
+        echo -e "${GREEN}更新完成: ${target_version}${PLAIN}"
     else
         if install -m 755 "$backup_exec" "$MIHOMO_EXEC_PATH" && systemctl start "$MIHOMO_SERVICE_NAME" >/dev/null 2>&1; then
             rm -f "$backup_exec"
@@ -7623,6 +7924,26 @@ mihomo_update() {
         fi
     fi
     mihomo_pause_and_return
+}
+
+mihomo_update() {
+    local option
+
+    while true; do
+        clear
+        echo -e "${BLUE}✦ Mihomo_Update ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}更新测试版"
+        echo -e "${GREEN}  2.${PLAIN}更新正式版"
+        echo -e "${GREEN}  0.${PLAIN}返回上级"
+        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
+
+        case "$option" in
+            1) mihomo_update_channel "alpha" ;;
+            2) mihomo_update_channel "release" ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
 }
 
 mihomo_delete() {
@@ -7644,7 +7965,7 @@ mihomo_menu() {
 
     while true; do
         clear
-        echo -e "${BLUE}✦ Mihomo_Ver.1.3 ✦${PLAIN}"
+        echo -e "${BLUE}✦ Mihomo_Ver.1.6 ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}安装服务"
         echo -e "${GREEN}  2.${PLAIN}管理服务"
         echo -e "${GREEN}  3.${PLAIN}更新内核"
@@ -7728,14 +8049,6 @@ wireproxy_detect_arch() {
         x86_64|amd64)
             WIREPROXY_ARCH="amd64"
             WIREPROXY_WGCF_ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            WIREPROXY_ARCH="arm64"
-            WIREPROXY_WGCF_ARCH="arm64"
-            ;;
-        armv7l)
-            WIREPROXY_ARCH="arm"
-            WIREPROXY_WGCF_ARCH="armv7"
             ;;
         *)
             wireproxy_err "不支持的架构: $(uname -m)"
@@ -8757,9 +9070,7 @@ warpstack_detect_arch() {
     local arch
     arch=$(uname -m)
     case "$arch" in
-        x86_64)  WARPSTACK_WGCF_ARCH="amd64" ;;
-        aarch64) WARPSTACK_WGCF_ARCH="arm64" ;;
-        armv7l)  WARPSTACK_WGCF_ARCH="armv7" ;;
+        x86_64|amd64) WARPSTACK_WGCF_ARCH="amd64" ;;
         *)       warpstack_err "不支持的架构: $arch" ;;
     esac
 }
