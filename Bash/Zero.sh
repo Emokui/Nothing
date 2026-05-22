@@ -6996,26 +6996,6 @@ EOF
 EOF
     fi
     
-    if [[ "$enable_tuic" == "y" ]]; then
-        cat >> "$MIHOMO_CONFIG_PATH" <<EOF
-- name: tuicv5-in
-  type: tuic
-  port: ${tuic_port}
-  listen: ::0
-  users:
-    ${tuic_uuid}: ${tuic_pass}
-  certificate: ${tuic_cert}
-  private-key: ${tuic_key}
-  congestion-controller: bbr
-  max-idle-time: 15000
-  authentication-timeout: 3000
-  alpn:
-    - h3
-  max-udp-relay-packet-size: 1472
-
-EOF
-    fi
-
     if [[ "$enable_snell" == "y" ]]; then
         cat >> "$MIHOMO_CONFIG_PATH" <<EOF
 - name: snellv5-in
@@ -7034,6 +7014,26 @@ EOF
 EOF
         fi
         cat >> "$MIHOMO_CONFIG_PATH" <<EOF
+
+EOF
+    fi
+
+    if [[ "$enable_tuic" == "y" ]]; then
+        cat >> "$MIHOMO_CONFIG_PATH" <<EOF
+- name: tuicv5-in
+  type: tuic
+  port: ${tuic_port}
+  listen: ::0
+  users:
+    ${tuic_uuid}: ${tuic_pass}
+  certificate: ${tuic_cert}
+  private-key: ${tuic_key}
+  congestion-controller: bbr
+  max-idle-time: 15000
+  authentication-timeout: 3000
+  alpn:
+    - h3
+  max-udp-relay-packet-size: 1472
 
 EOF
     fi
@@ -7073,16 +7073,16 @@ mihomo_install() {
 
     clear
     echo -e "${BLUE}选择要启用的监听器:${PLAIN}"
-    local enable_anytls enable_trojan enable_tuic enable_hy2 enable_snell
+    local enable_anytls enable_trojan enable_snell enable_tuic enable_hy2
     read -r -p "$(echo -e "${BLUE}启用 Anytls?   [y/N]: ${PLAIN}")" enable_anytls
     read -r -p "$(echo -e "${BLUE}启用 Trojan?   [y/N]: ${PLAIN}")" enable_trojan
-    read -r -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
     read -r -p "$(echo -e "${BLUE}启用 Snellv5?  [y/N]: ${PLAIN}")" enable_snell
+    read -r -p "$(echo -e "${BLUE}启用 Tuicv5?   [y/N]: ${PLAIN}")" enable_tuic
     read -r -p "$(echo -e "${BLUE}启用 Hysteria? [y/N]: ${PLAIN}")" enable_hy2
     [[ "$enable_anytls" =~ ^[Yy]$ ]] && enable_anytls="y" || enable_anytls="n"
     [[ "$enable_trojan" =~ ^[Yy]$ ]] && enable_trojan="y" || enable_trojan="n"
-    [[ "$enable_tuic" =~ ^[Yy]$ ]] && enable_tuic="y" || enable_tuic="n"
     [[ "$enable_snell" =~ ^[Yy]$ ]] && enable_snell="y" || enable_snell="n"
+    [[ "$enable_tuic" =~ ^[Yy]$ ]] && enable_tuic="y" || enable_tuic="n"
     [[ "$enable_hy2" =~ ^[Yy]$ ]] && enable_hy2="y" || enable_hy2="n"
 
     if [[ "$enable_anytls" != "y" && "$enable_trojan" != "y" && "$enable_tuic" != "y" && "$enable_hy2" != "y" && "$enable_snell" != "y" ]]; then
@@ -7161,35 +7161,6 @@ mihomo_install() {
         trojan_key="$mihomo_key_path"
     fi
 
-    if [[ "$enable_tuic" == "y" ]]; then
-        clear
-        echo -e "${BLUE}===== TUIC 配置 =====${PLAIN}"
-        local tuic_port tuic_uuid tuic_pass tuic_cert tuic_key
-        read -r -p "$(echo -e "${BLUE}端口(默认:28443): ${PLAIN}")" tuic_port
-        tuic_port=${tuic_port:-28443}
-        if ! mihomo_validate_port "$tuic_port"; then
-            echo -e "${RED}TUIC 端口无效${PLAIN}"
-            rm -f "$MIHOMO_EXEC_PATH"
-            mihomo_pause_and_return
-            return
-        fi
-        read -r -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" tuic_uuid
-        if [[ -z "$tuic_uuid" ]]; then
-            tuic_uuid=$(cat /proc/sys/kernel/random/uuid)
-            [[ -n "$random_summary" ]] && random_summary+=$'\n'
-            random_summary+="TUIC UUID: $tuic_uuid"
-        fi
-        read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" tuic_pass
-        if [[ -z "$tuic_pass" ]]; then
-            tuic_pass=$(mihomo_random_pass)
-            [[ -n "$random_summary" ]] && random_summary+=$'\n'
-            random_summary+="TUIC 密码: $tuic_pass"
-        fi
-        mihomo_select_cert
-        tuic_cert="$mihomo_cert_path"
-        tuic_key="$mihomo_key_path"
-    fi
-
     if [[ "$enable_snell" == "y" ]]; then
         clear
         echo -e "${BLUE}===== Snell v5 配置 =====${PLAIN}"
@@ -7217,6 +7188,35 @@ mihomo_install() {
             snell_obfs="n"
             snell_obfs_host="icloud.com.cn"
         fi
+    fi
+
+    if [[ "$enable_tuic" == "y" ]]; then
+        clear
+        echo -e "${BLUE}===== TUIC 配置 =====${PLAIN}"
+        local tuic_port tuic_uuid tuic_pass tuic_cert tuic_key
+        read -r -p "$(echo -e "${BLUE}端口(默认:28443): ${PLAIN}")" tuic_port
+        tuic_port=${tuic_port:-28443}
+        if ! mihomo_validate_port "$tuic_port"; then
+            echo -e "${RED}TUIC 端口无效${PLAIN}"
+            rm -f "$MIHOMO_EXEC_PATH"
+            mihomo_pause_and_return
+            return
+        fi
+        read -r -p "$(echo -e "${BLUE}UUID(回车随机): ${PLAIN}")" tuic_uuid
+        if [[ -z "$tuic_uuid" ]]; then
+            tuic_uuid=$(cat /proc/sys/kernel/random/uuid)
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="TUIC UUID: $tuic_uuid"
+        fi
+        read -r -p "$(echo -e "${BLUE}密码(回车随机): ${PLAIN}")" tuic_pass
+        if [[ -z "$tuic_pass" ]]; then
+            tuic_pass=$(mihomo_random_pass)
+            [[ -n "$random_summary" ]] && random_summary+=$'\n'
+            random_summary+="TUIC 密码: $tuic_pass"
+        fi
+        mihomo_select_cert
+        tuic_cert="$mihomo_cert_path"
+        tuic_key="$mihomo_key_path"
     fi
 
     if [[ "$enable_hy2" == "y" ]]; then
@@ -7326,16 +7326,16 @@ mihomo_modify_config() {
         local snell_status="未启用"
         grep -q "name: anytls-in" "$MIHOMO_CONFIG_PATH" && anytls_status="已启用"
         grep -q "name: trojan-in" "$MIHOMO_CONFIG_PATH" && trojan_status="已启用"
+        grep -q "name: snellv5-in" "$MIHOMO_CONFIG_PATH" && snell_status="已启用"
         grep -q "name: tuicv5-in" "$MIHOMO_CONFIG_PATH" && tuic_status="已启用"
         grep -q "name: hysteria2-in" "$MIHOMO_CONFIG_PATH" && hy2_status="已启用"
-        grep -q "name: snellv5-in" "$MIHOMO_CONFIG_PATH" && snell_status="已启用"
         
         clear
         echo -e "${BLUE}✦ Modify_Conf ✦${PLAIN}"
         echo -e "${GREEN}  1.${PLAIN}Anytls  [${YELLOW}${anytls_status}${PLAIN}]"
         echo -e "${GREEN}  2.${PLAIN}Trojan  [${YELLOW}${trojan_status}${PLAIN}]"
-        echo -e "${GREEN}  3.${PLAIN}Tuicv5  [${YELLOW}${tuic_status}${PLAIN}]"
-        echo -e "${GREEN}  4.${PLAIN}Snellv5 [${YELLOW}${snell_status}${PLAIN}]"
+        echo -e "${GREEN}  3.${PLAIN}Snellv5 [${YELLOW}${snell_status}${PLAIN}]"
+        echo -e "${GREEN}  4.${PLAIN}Tuicv5  [${YELLOW}${tuic_status}${PLAIN}]"
         echo -e "${GREEN}  5.${PLAIN}Hysteria[${YELLOW}${hy2_status}${PLAIN}]"
         echo -e "${GREEN}  0.${PLAIN}Return"
         read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
@@ -7343,8 +7343,8 @@ mihomo_modify_config() {
         case "$opt" in
             1) mihomo_toggle_or_modify_listener "anytls-in" "AnyTLS" "8443" ;;
             2) mihomo_toggle_or_modify_listener "trojan-in" "Trojan" "10819" ;;
-            3) mihomo_toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" ;;
-            4) mihomo_toggle_or_modify_listener "snellv5-in" "Snellv5" "10815" ;;
+            3) mihomo_toggle_or_modify_listener "snellv5-in" "Snellv5" "10815" ;;
+            4) mihomo_toggle_or_modify_listener "tuicv5-in" "TUIC" "28443" ;;
             5) mihomo_toggle_or_modify_listener "hysteria2-in" "Hysteria2" "18443" ;;
             0) break ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
@@ -7365,11 +7365,9 @@ mihomo_toggle_or_modify_listener() {
         echo -e "${BLUE}✦ ${display_name}_Conf ✦${PLAIN}"
         if [[ "$is_enabled" == "y" ]]; then
             if [[ "$name" == "snellv5-in" ]]; then
-                local snell_obfs_status="关闭"
-                mihomo_snell_obfs_enabled && snell_obfs_status="开启"
                 echo -e "${GREEN}  1.${PLAIN}修改端口"
                 echo -e "${GREEN}  2.${PLAIN}修改PSK"
-                echo -e "${GREEN}  3.${PLAIN}切换OBFS (当前: ${snell_obfs_status})"
+                echo -e "${GREEN}  3.${PLAIN}切换OBFS"
                 echo -e "${GREEN}  4.${PLAIN}禁用服务"
                 echo -e "${GREEN}  0.${PLAIN}返回上级"
                 read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
@@ -7516,19 +7514,24 @@ LISTENER
 
 LISTENER
             ;;
-        hysteria2-in)
+        snellv5-in)
             cat > "$tmp_config" <<LISTENER
-- name: hysteria2-in
-  type: hysteria2
+- name: snellv5-in
+  type: snell
   port: ${port}
   listen: ::0
-  users:
-    user1: ${pass}
-  masquerade: ""
-  alpn:
-  - h3
-  certificate: ${mihomo_cert_path}
-  private-key: ${mihomo_key_path}
+  psk: ${pass}
+  version: 5
+  udp: true
+LISTENER
+            if [[ "$snell_obfs" == "y" ]]; then
+                cat >> "$tmp_config" <<LISTENER
+  obfs-opts:
+    mode: http
+    host: ${snell_obfs_host}
+LISTENER
+            fi
+            cat >> "$tmp_config" <<LISTENER
 
 LISTENER
             ;;
@@ -7551,24 +7554,19 @@ LISTENER
 
 LISTENER
             ;;
-        snellv5-in)
+        hysteria2-in)
             cat > "$tmp_config" <<LISTENER
-- name: snellv5-in
-  type: snell
+- name: hysteria2-in
+  type: hysteria2
   port: ${port}
   listen: ::0
-  psk: ${pass}
-  version: 5
-  udp: true
-LISTENER
-            if [[ "$snell_obfs" == "y" ]]; then
-                cat >> "$tmp_config" <<LISTENER
-  obfs-opts:
-    mode: http
-    host: ${snell_obfs_host}
-LISTENER
-            fi
-            cat >> "$tmp_config" <<LISTENER
+  users:
+    user1: ${pass}
+  masquerade: ""
+  alpn:
+  - h3
+  certificate: ${mihomo_cert_path}
+  private-key: ${mihomo_key_path}
 
 LISTENER
             ;;
@@ -7613,6 +7611,7 @@ mihomo_toggle_snell_obfs() {
     local backup host
 
     if mihomo_snell_obfs_enabled; then
+        echo -e "${BLUE}当前OBFS: 开启${PLAIN}"
         read -r -p "$(echo -e "${RED}确定关闭 Snell OBFS? [y/N]: ${PLAIN}")" confirm
         if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
             return
@@ -7640,6 +7639,7 @@ mihomo_toggle_snell_obfs() {
         return
     fi
 
+    echo -e "${BLUE}当前OBFS: 关闭${PLAIN}"
     read -r -p "$(echo -e "${BLUE}OBFS Host(默认:icloud.com.cn): ${PLAIN}")" host
     host=${host:-icloud.com.cn}
 
