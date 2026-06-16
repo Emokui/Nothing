@@ -1,4 +1,6 @@
 # LemFi
+DOMAIN,api.ipify.org
+DOMAIN-SUFFIX,lemfi.com
 DOMAIN-SUFFIX,branch.io
 DOMAIN,cdp-eu.customer.io
 DOMAIN-SUFFIX,de.sentry.io
