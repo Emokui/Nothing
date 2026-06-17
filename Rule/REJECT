@@ -1,7 +1,10 @@
 DOMAIN,api.segment.io
+DOMAIN,graph.facebook.com
 DOMAIN,analytics.adjust.io
 DOMAIN,analytics.adjust.com
+DOMIAN,inapps.appsflyer.com
+DOMAIN,gcdsdk.appsflyer.com
+DOMAIN,launches.appsflyer.com
 DOMAIN,app-analytics-services.com
 DOMAIN,crashlyticsreports-pa.googleapis.com
-PROCESS-NAME,CleanMyMac_5
 AND,((OR,((DEST-PORT,3478), (DEST-PORT,19302))), (PROTOCOL,UDP))
