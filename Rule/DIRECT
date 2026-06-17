@@ -1,3 +1,4 @@
+DOMAIN-SUFFIX,jd.com
 DOMAIN-SUFFIX,wise.com
 DOMAIN-SUFFIX,300hu.com
 DOMAIN-SUFFIX,zhenidc.cn
@@ -5,6 +6,7 @@ DOMAIN-SUFFIX,jddebug.com
 DOMAIN-SUFFIX,jdcloud-oss.com
 DOMAIN-SUFFIX,smogflycloud.com
 DOMAIN-SUFFIX,ahdohpiechei.com
+DOMAIN-SUFFIX,go-mpulse.net
 DOMAIN-SUFFIX,nexitech.cn
 DOMAIN-SUFFIX,huya.com
 DOMAIN-SUFFIX,huyagame.cn
@@ -35,6 +37,8 @@ DOMAIN-SUFFIX,bangdao-tech.com
 DOMAIN-SUFFIX,zhisanzhao.com
 DOMAIN-SUFFIX,gylm2020.com
 DOMAIN-SUFFIX,manmanbuy.com
+DOMAIN,tb.ele.me
+DOMAIN,secure.globalsign.com
 DOMAIN,api.25mao.com
 DOMAIN,apd-pcdnwxlogin.teg.tencent-cloud.net
 DOMAIN,dldir1.qq.com
