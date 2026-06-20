@@ -409,18 +409,17 @@ EOF
 }
 
 get_pid() {
-    ps -axo pid=,command= 2>/dev/null | awk \
+    ps axww -o pid= -o command= 2>/dev/null | awk \
         -v bin="$BIN_PATH" \
-        -v work_dir="$WORK_DIR" \
+        -v bin_name="$BIN_NAME" \
         -v config_path="$CONFIG_PATH" '
         {
             pid = $1
             sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", $0)
-            if (($0 == bin || index($0, bin " ") == 1) &&
-                index($0, " -d " work_dir) > 0 &&
-                index($0, " -f " config_path) > 0) {
+            if (index($0, config_path) > 0 &&
+                ($0 == bin || index($0, bin " ") == 1 ||
+                 $0 == bin_name || index($0, bin_name " ") == 1)) {
                 print pid
-                exit
             }
         }
     '
@@ -465,32 +464,48 @@ start_process() {
 
 stop_process() {
     local pid=""
+    local pids=""
     local i=0
+    local running=""
 
-    pid="$(get_pid)"
-    if [ -z "$pid" ]; then
+    pids="$(get_pid)"
+    if [ -z "$pids" ]; then
         log_msg "[提示] 当前未运行"
         return 0
     fi
 
-    log_msg "[信息] 正在停止 PID: $pid ..."
-    kill "$pid" 2>/dev/null || true
+    log_msg "[信息] 正在停止 PID: $(printf '%s' "$pids" | tr '\n' ' ')..."
+    for pid in $pids; do
+        kill "$pid" 2>/dev/null || true
+    done
 
-    while kill -0 "$pid" 2>/dev/null; do
+    while :; do
+        running=""
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                running=1
+                break
+            fi
+        done
+        [ -z "$running" ] && break
         i=$((i + 1))
         [ "$i" -ge 10 ] && break
         sleep 1
     done
 
-    if kill -0 "$pid" 2>/dev/null; then
-        kill -9 "$pid" 2>/dev/null || true
-        sleep 1
-    fi
+    for pid in $pids; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    done
+    sleep 1
 
-    if kill -0 "$pid" 2>/dev/null; then
-        echo "[错误] 停止进程失败"
-        return 1
-    fi
+    for pid in $pids; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "[错误] 停止进程失败: $pid"
+            return 1
+        fi
+    done
 
     log_msg "[成功] 已停止"
     return 0
@@ -501,7 +516,7 @@ show_status() {
 
     pid="$(get_pid)"
     if [ -n "$pid" ]; then
-        echo "[成功] 正在运行（PID: $pid）"
+        echo "[成功] 正在运行（PID: $(printf '%s' "$pid" | tr '\n' ' ')）"
     else
         echo "[提示] 当前未运行"
     fi
