@@ -49,16 +49,13 @@ WORK_DIR="${WORK_DIR:-$HOME_DIR/blog}"
 BIN_NAME="${BIN_NAME:-mihomo}"
 BIN_PATH="${BIN_PATH:-$WORK_DIR/$BIN_NAME}"
 CONFIG_PATH="${CONFIG_PATH:-$WORK_DIR/config.yaml}"
-PID_FILE="${PID_FILE:-$WORK_DIR/blog.pid}"
 RESTART_LOG="${RESTART_LOG:-$WORK_DIR/blog.log}"
 ARCHIVE_PATH="${ARCHIVE_PATH:-$WORK_DIR/$RELEASE_ASSET}"
-VERSION_FILE="${VERSION_FILE:-$WORK_DIR/mihomo.version}"
-DOWNLOAD_VERSION=""
 
 require_commands() {
     local missing=""
     local cmd
-    for cmd in awk gzip kill nohup sed; do
+    for cmd in awk gzip kill nohup ps sed; do
         command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
     done
 
@@ -221,16 +218,13 @@ download_url() {
 
 download_release() {
     local release_info=""
-    local latest_version=""
     local url=""
 
     release_info="$(get_latest_release_info)" || {
         echo "[错误] 未在 mihomo 最新 release 中找到匹配资产: $MIHOMO_ASSET_PATTERN" >&2
         return 1
     }
-    latest_version="$(printf '%s\n' "$release_info" | sed -n '1p')"
     url="$(printf '%s\n' "$release_info" | sed -n '2p')"
-    DOWNLOAD_VERSION="$latest_version"
 
     download_url "$url"
 }
@@ -251,17 +245,9 @@ extract_binary() {
         return 1
     }
     rm -f "$ARCHIVE_PATH" || return 1
-    if [ -n "$DOWNLOAD_VERSION" ]; then
-        printf '%s\n' "$DOWNLOAD_VERSION" > "$VERSION_FILE" || return 1
-    fi
 }
 
 get_installed_version() {
-    if [ -s "$VERSION_FILE" ]; then
-        sed -n '1p' "$VERSION_FILE"
-        return 0
-    fi
-
     [ -x "$BIN_PATH" ] || return 1
     "$BIN_PATH" -v 2>/dev/null | awk '
         NR == 1 {
@@ -291,7 +277,6 @@ update_if_needed() {
     current_version="$(get_installed_version 2>/dev/null)"
 
     if [ "$current_version" = "$latest_version" ]; then
-        printf '%s\n' "$latest_version" > "$VERSION_FILE" 2>/dev/null || true
         echo "[信息] mihomo 已是最新版本: $latest_version"
         return 0
     fi
@@ -302,7 +287,6 @@ update_if_needed() {
         echo "[信息] 检测到 mihomo 新版本: $latest_version"
     fi
 
-    DOWNLOAD_VERSION="$latest_version"
     download_url "$url" || {
         echo "[警告] mihomo 更新下载失败，继续使用当前版本"
         return 0
@@ -348,6 +332,9 @@ allow-lan: false
 mode: rule
 log-level: silent
 ipv6: false
+profile:
+  store-selected: false
+  store-fake-ip: false
 dns:
   enable: true
   listen: :1053
@@ -395,39 +382,21 @@ EOF
 }
 
 get_pid() {
-    local pid=""
-
-    if [ -f "$PID_FILE" ]; then
-        pid="$(cat "$PID_FILE" 2>/dev/null)"
-        if pid_matches_process "$pid"; then
-            printf '%s\n' "$pid"
-            return 0
-        fi
-        rm -f "$PID_FILE"
-    fi
-
-    return 1
-}
-
-pid_matches_process() {
-    local pid="$1"
-    local command_line=""
-
-    [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null || return 1
-
-    if command -v ps >/dev/null 2>&1; then
-        command_line="$(ps -p "$pid" -o command= 2>/dev/null)"
-        [ -n "$command_line" ] || return 1
-        case "$command_line" in
-            "$BIN_PATH"|"$BIN_PATH"" "*)
-                return 0
-                ;;
-        esac
-        return 1
-    fi
-
-    return 0
+    ps -axo pid=,command= 2>/dev/null | awk \
+        -v bin="$BIN_PATH" \
+        -v work_dir="$WORK_DIR" \
+        -v config_path="$CONFIG_PATH" '
+        {
+            pid = $1
+            sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", $0)
+            if (($0 == bin || index($0, bin " ") == 1) &&
+                index($0, " -d " work_dir) > 0 &&
+                index($0, " -f " config_path) > 0) {
+                print pid
+                exit
+            }
+        }
+    '
 }
 
 is_running() {
@@ -454,7 +423,6 @@ start_process() {
 
     nohup "$BIN_PATH" -d "$WORK_DIR" -f "$CONFIG_PATH" >/dev/null 2>&1 &
     pid=$!
-    echo "$pid" > "$PID_FILE"
     sleep 2
 
     if kill -0 "$pid" 2>/dev/null; then
@@ -463,7 +431,6 @@ start_process() {
         return 0
     fi
 
-    rm -f "$PID_FILE"
     echo "[错误] 启动失败"
     is_interactive || log_restart_event "启动失败"
     return 1
@@ -498,7 +465,6 @@ stop_process() {
         return 1
     fi
 
-    rm -f "$PID_FILE"
     log_msg "[成功] 已停止"
     return 0
 }
