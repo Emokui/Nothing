@@ -171,10 +171,10 @@ normalize_ws_path() {
 }
 
 fetch_release_api() {
-    if command -v fetch >/dev/null 2>&1; then
-        fetch -qo - "$RELEASE_API_URL"
-    else
+    if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$RELEASE_API_URL"
+    else
+        fetch -qo - "$RELEASE_API_URL"
     fi
 }
 
@@ -204,27 +204,53 @@ get_latest_release_info() {
     '
 }
 
+validate_release_info() {
+    local latest_version="$1"
+    local url="$2"
+
+    case "$latest_version" in
+        v[0-9]*)
+            ;;
+        *)
+            echo "[错误] 版本解析异常: $latest_version" >&2
+            return 1
+            ;;
+    esac
+
+    case "$url" in
+        https://github.com/*/mihomo-freebsd-amd64-compatible-"$latest_version".gz)
+            ;;
+        *)
+            echo "[错误] 下载地址解析异常: $url"
+            return 1
+            ;;
+    esac
+}
+
 download_url() {
     local url="$1"
 
     echo "[信息] 正在下载 mihomo FreeBSD ..."
 
-    if command -v fetch >/dev/null 2>&1; then
-        fetch -o "$ARCHIVE_PATH" "$url" || return 1
-    else
+    if command -v curl >/dev/null 2>&1; then
         curl -fL "$url" -o "$ARCHIVE_PATH" || return 1
+    else
+        fetch -o "$ARCHIVE_PATH" "$url" || return 1
     fi
 }
 
 download_release() {
     local release_info=""
+    local latest_version=""
     local url=""
 
     release_info="$(get_latest_release_info)" || {
         echo "[错误] 未在 mihomo 最新 release 中找到匹配资产: $MIHOMO_ASSET_PATTERN" >&2
         return 1
     }
+    latest_version="$(printf '%s\n' "$release_info" | sed -n '1p')"
     url="$(printf '%s\n' "$release_info" | sed -n '2p')"
+    validate_release_info "$latest_version" "$url" || return 1
 
     download_url "$url"
 }
@@ -274,6 +300,7 @@ update_if_needed() {
     }
     latest_version="$(printf '%s\n' "$release_info" | sed -n '1p')"
     url="$(printf '%s\n' "$release_info" | sed -n '2p')"
+    validate_release_info "$latest_version" "$url" || return 0
     current_version="$(get_installed_version 2>/dev/null)"
 
     if [ "$current_version" = "$latest_version" ]; then
