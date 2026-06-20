@@ -10463,6 +10463,7 @@ firewall_lockdown_all() {
         firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -i lo -j ACCEPT || return 1
         firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -p tcp --dport "$current_ssh_port" -j ACCEPT || return 1
         if [[ "$cmd" == "ip6tables" ]]; then
+            firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -s fe80::/10 -p udp --sport 547 --dport 546 -j ACCEPT || return 1
             firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -p ipv6-icmp -j ACCEPT || return 1
         fi
         firewall_ensure_rule_present "$cmd" filter "$ZERO_FW_CHAIN" -j DROP || return 1
