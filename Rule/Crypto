@@ -21,7 +21,7 @@ DOMAIN-KEYWORD,bunq
 DOMAIN-SUFFIX,bunq.com
 DOMAIN,ota.lokalise.com
 DOMAIN-SUFFIX,eu.sardine.ai
-DOMAIN_SUFFIX,ingest.sentry.io
+DOMAIN-SUFFIX,ingest.sentry.io
 DOMAIN-SUFFIX,eu.amplitude.com
 DOMAIN-SUFFIX,app-ads-services.com
 DOMAIN,bunq-prod-model-storage-public.s3.eu-central-1.amazonaws.com
