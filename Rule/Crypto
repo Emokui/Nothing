@@ -7,14 +7,7 @@ DOMAIN-SUFFIX,de.sentry.io
 DOMAIN-SUFFIX,lemonade.finance
 DOMAIN,consumer.inapp.customer.io
 DOMAIN,mobile-collector.newrelic.com
-# Bunq
-DOMAIN-KEYWORD,bunq
-DOMAIN-SUFFIX,bunq.com
-DOMAIN,ota.lokalise.com
-DOMAIN-SUFFIX,eu.sardine.ai
-DOMAIN-SUFFIX,eu.amplitude.com
-DOMAIN,bunq-prod-model-storage-public.s3.eu-central-1.amazonaws.com
-# Kra
+# Krak
 DOMAIN,u.expo.dev
 DOMAIN-SUFFIX,sardine.ai
 DOMAIN-SUFFIX,kraken.com
@@ -23,6 +16,13 @@ DOMAIN-SUFFIX,nsureapi.com
 DOMAIN-SUFFIX,launchdarkly.com
 DOMAIN-SUFFIX,appsflyersdk.com
 DOMAIN,cdn-settings.segment.com
+# Bunq
+DOMAIN-KEYWORD,bunq
+DOMAIN-SUFFIX,bunq.com
+DOMAIN,ota.lokalise.com
+DOMAIN-SUFFIX,eu.sardine.ai
+DOMAIN-SUFFIX,eu.amplitude.com
+DOMAIN,bunq-prod-model-storage-public.s3.eu-central-1.amazonaws.com
 # N26
 DOMAIN-KEYWORD,n26
 DOMAIN,cdn.braze.eu
@@ -37,6 +37,7 @@ DOMAIN,images.ctfassets.net
 DOMAIN-SUFFIX,usercentrics.eu
 DOMAIN,beyondwickedmapping.org
 # Bybit Eu
+DOMAIN-KEYWORD,bybit
 DOMAIN-SUFFIX,bybit.eu
 DOMAIN,api3.byd3c3.com
 DOMAIN,api3.bybdc6.com
