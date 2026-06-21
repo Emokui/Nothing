@@ -21,11 +21,13 @@ DOMAIN-KEYWORD,bunq
 DOMAIN-SUFFIX,bunq.com
 DOMAIN,ota.lokalise.com
 DOMAIN-SUFFIX,eu.sardine.ai
+DOMAIN_SUFFIX,ingest.sentry.io
 DOMAIN-SUFFIX,eu.amplitude.com
+DOMAIN-SUFFIX,app-ads-services.com
 DOMAIN,bunq-prod-model-storage-public.s3.eu-central-1.amazonaws.com
 # N26
 DOMAIN-KEYWORD,n26
-DOMAIN,cdn.braze.eu
+DOMAIN,braze.eu
 DOMAIN-SUFFIX,n26.com
 DOMAIN,cdn.number26.de
 DOMAIN-SUFFIX,tech26.de
