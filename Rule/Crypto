@@ -36,3 +36,22 @@ DOMAIN-SUFFIX,bugsnag.com
 DOMAIN,images.ctfassets.net
 DOMAIN-SUFFIX,usercentrics.eu
 DOMAIN,beyondwickedmapping.org
+# Bybit Eu
+DOMAIN-SUFFIX,bybit.eu
+DOMAIN,api3.byd3c3.com
+DOMAIN,api3.bybdc6.com
+DOMAIN-SUFFIX,bybit.com
+DOMAIN-SUFFIX,bycsi.com
+DOMAIN,api3.byabcde.com
+DOMAIN,api.wsot2022.com
+DOMAIN,ocsp.usertrust.com
+DOMAIN,content.byabcd.com
+DOMAIN,www.turingfraud.net
+DOMAIN-SUFFIX,nintendo.com
+DOMAIN,resources.triple.app
+DOMAIN,h64.online-metrix.net
+DOMAIN,cookies-data.onetrust.io
+DOMAIN,api.ffbbbdc6d3c353211fe2ba39c9f744cd.com
+DOMAIN,sc-abtest.ffe390afd658c19dcbf707e0597b846d.de
+DOMAIN,sc-datasink.ffbbbdc6d3c353211fe2ba39c9f744cd.com
+DOMAIN,monitor-frontend-collector.ffbbbdc6d3c353211fe2ba39c9f744cd.com
