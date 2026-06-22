@@ -7153,11 +7153,11 @@ EOF
   certificate: ${tuic_cert}
   private-key: ${tuic_key}
   congestion-controller: bbr
-  max-idle-time: 15000
-  authentication-timeout: 3000
+  max-idle-time: 80000
+  authentication-timeout: 8000
   alpn:
     - h3
-  max-udp-relay-packet-size: 1472
+  max-udp-relay-packet-size: 1408
 
 EOF
     fi
