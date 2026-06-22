@@ -1853,59 +1853,162 @@ bbr_detect_bandwidth() {
     esac
 }
 
-bbr_calculate_buffer_size() {
-    local bandwidth="$1"
-    local region="${2:-asia}"
-    local buffer_mb
+bbr_profile_label() {
+    case "$1" in
+        download) echo "下载增强" ;;
+        *) echo "代理均衡" ;;
+    esac
+}
 
-    if ! [[ "$bandwidth" =~ ^[0-9]+$ ]] || (( bandwidth <= 0 )); then
-        [[ "$region" == "overseas" ]] && echo 32 || echo 16
+bbr_buffer_memory_cap_mb() {
+    local mem_total="$1"
+    local profile="${2:-balanced}"
+
+    if ! [[ "$mem_total" =~ ^[0-9]+$ ]] || (( mem_total <= 0 )); then
+        [[ "$profile" == "download" ]] && echo 96 || echo 64
         return 0
     fi
 
-    if [[ "$region" == "overseas" ]]; then
-        if (( bandwidth <= 100 )); then
-            buffer_mb=8
-        elif (( bandwidth <= 200 )); then
-            buffer_mb=16
-        elif (( bandwidth <= 300 )); then
-            buffer_mb=20
-        elif (( bandwidth <= 500 )); then
-            buffer_mb=32
-        elif (( bandwidth <= 700 )); then
-            buffer_mb=48
+    if (( mem_total < 768 )); then
+        echo 8
+    elif (( mem_total < 1024 )); then
+        echo 12
+    elif (( mem_total < 2048 )); then
+        echo 24
+    elif (( mem_total < 4096 )); then
+        echo 48
+    elif [[ "$profile" == "download" ]]; then
+        echo 96
+    else
+        echo 64
+    fi
+}
+
+bbr_calculate_buffer_size() {
+    local bandwidth="$1"
+    local region="${2:-asia}"
+    local profile="${3:-balanced}"
+    local mem_total="${4:-0}"
+    local buffer_mb
+
+    if ! [[ "$bandwidth" =~ ^[0-9]+$ ]] || (( bandwidth <= 0 )); then
+        case "$profile:$region" in
+            download:overseas) buffer_mb=48 ;;
+            download:*) buffer_mb=24 ;;
+            *:overseas) buffer_mb=32 ;;
+            *) buffer_mb=16 ;;
+        esac
+    elif [[ "$profile" == "download" ]]; then
+        if [[ "$region" == "overseas" ]]; then
+            if (( bandwidth <= 100 )); then
+                buffer_mb=8
+            elif (( bandwidth <= 200 )); then
+                buffer_mb=16
+            elif (( bandwidth <= 300 )); then
+                buffer_mb=24
+            elif (( bandwidth <= 500 )); then
+                buffer_mb=32
+            elif (( bandwidth <= 700 )); then
+                buffer_mb=40
+            elif (( bandwidth <= 1000 )); then
+                buffer_mb=48
+            elif (( bandwidth <= 1500 )); then
+                buffer_mb=64
+            elif (( bandwidth <= 2500 )); then
+                buffer_mb=80
+            else
+                buffer_mb=96
+            fi
         else
-            buffer_mb=64
+            if (( bandwidth <= 100 )); then
+                buffer_mb=6
+            elif (( bandwidth <= 200 )); then
+                buffer_mb=8
+            elif (( bandwidth <= 300 )); then
+                buffer_mb=12
+            elif (( bandwidth <= 500 )); then
+                buffer_mb=16
+            elif (( bandwidth <= 700 )); then
+                buffer_mb=20
+            elif (( bandwidth <= 1000 )); then
+                buffer_mb=24
+            elif (( bandwidth <= 1500 )); then
+                buffer_mb=32
+            elif (( bandwidth <= 2000 )); then
+                buffer_mb=40
+            elif (( bandwidth <= 2500 )); then
+                buffer_mb=48
+            else
+                buffer_mb=64
+            fi
         fi
     else
-        if (( bandwidth <= 100 )); then
-            buffer_mb=6
-        elif (( bandwidth <= 200 )); then
-            buffer_mb=8
-        elif (( bandwidth <= 300 )); then
-            buffer_mb=10
-        elif (( bandwidth <= 500 )); then
-            buffer_mb=12
-        elif (( bandwidth <= 700 )); then
-            buffer_mb=14
-        elif (( bandwidth <= 1000 )); then
-            buffer_mb=16
-        elif (( bandwidth <= 1500 )); then
-            buffer_mb=20
-        elif (( bandwidth <= 2000 )); then
-            buffer_mb=24
-        elif (( bandwidth <= 2500 )); then
-            buffer_mb=28
+        if [[ "$region" == "overseas" ]]; then
+            if (( bandwidth <= 100 )); then
+                buffer_mb=8
+            elif (( bandwidth <= 200 )); then
+                buffer_mb=12
+            elif (( bandwidth <= 300 )); then
+                buffer_mb=16
+            elif (( bandwidth <= 500 )); then
+                buffer_mb=20
+            elif (( bandwidth <= 700 )); then
+                buffer_mb=28
+            elif (( bandwidth <= 1000 )); then
+                buffer_mb=32
+            elif (( bandwidth <= 1500 )); then
+                buffer_mb=40
+            else
+                buffer_mb=48
+            fi
         else
-            buffer_mb=32
+            if (( bandwidth <= 100 )); then
+                buffer_mb=4
+            elif (( bandwidth <= 200 )); then
+                buffer_mb=6
+            elif (( bandwidth <= 300 )); then
+                buffer_mb=8
+            elif (( bandwidth <= 500 )); then
+                buffer_mb=10
+            elif (( bandwidth <= 700 )); then
+                buffer_mb=12
+            elif (( bandwidth <= 1000 )); then
+                buffer_mb=16
+            elif (( bandwidth <= 1500 )); then
+                buffer_mb=20
+            elif (( bandwidth <= 2000 )); then
+                buffer_mb=24
+            else
+                buffer_mb=32
+            fi
         fi
     fi
 
-    echo -e "${YELLOW}推荐缓冲区: ${GREEN}${buffer_mb}MB${PLAIN}" >&2
+    local mem_cap profile_label
+    mem_cap=$(bbr_buffer_memory_cap_mb "$mem_total" "$profile")
+    if [[ "$mem_cap" =~ ^[0-9]+$ ]] && (( buffer_mb > mem_cap )); then
+        echo -e "${YELLOW}内存保护: 物理内存 ${mem_total}MB，缓冲区上限限制为 ${mem_cap}MB${PLAIN}" >&2
+        buffer_mb="$mem_cap"
+    fi
+
+    profile_label=$(bbr_profile_label "$profile")
+    echo -e "${YELLOW}推荐缓冲区(${profile_label}): ${GREEN}${buffer_mb}MB${PLAIN}" >&2
     if bbr_confirm "是否使用推荐值 ${buffer_mb}MB？(Y/N) [Y]: " "Y"; then
         echo "$buffer_mb"
     else
-        [[ "$region" == "overseas" ]] && echo 32 || echo 16
+        local custom_buffer
+        read -r -p "请输入自定义缓冲区大小（MB）[${buffer_mb}]: " custom_buffer
+        custom_buffer=$(trim_input "$custom_buffer")
+        if [[ "$custom_buffer" =~ ^[0-9]+$ ]] && (( custom_buffer > 0 && custom_buffer <= 512 )); then
+            if [[ "$mem_cap" =~ ^[0-9]+$ ]] && (( custom_buffer > mem_cap )); then
+                echo -e "${YELLOW}内存保护: 自定义值超过 ${mem_cap}MB，已使用 ${mem_cap}MB${PLAIN}" >&2
+                echo "$mem_cap"
+                return 0
+            fi
+            echo "$custom_buffer"
+        else
+            echo "$buffer_mb"
+        fi
     fi
 }
 
@@ -1918,9 +2021,26 @@ bbr_clean_sysctl_conf_conflicts() {
     for key in \
         'net\.ipv4\.tcp_wmem' \
         'net\.ipv4\.tcp_rmem' \
+        'net\.ipv4\.tcp_tw_reuse' \
+        'net\.ipv4\.ip_local_port_range' \
+        'net\.ipv4\.tcp_max_syn_backlog' \
+        'net\.ipv4\.tcp_slow_start_after_idle' \
+        'net\.ipv4\.tcp_mtu_probing' \
+        'net\.ipv4\.tcp_notsent_lowat' \
+        'net\.ipv4\.tcp_fin_timeout' \
+        'net\.ipv4\.tcp_max_tw_buckets' \
+        'net\.ipv4\.tcp_fastopen' \
+        'net\.ipv4\.tcp_keepalive_time' \
+        'net\.ipv4\.tcp_keepalive_intvl' \
+        'net\.ipv4\.tcp_keepalive_probes' \
+        'net\.ipv4\.udp_rmem_min' \
+        'net\.ipv4\.udp_wmem_min' \
+        'net\.ipv4\.tcp_syncookies' \
         'net\.core\.rmem_max' \
         'net\.core\.wmem_max' \
         'net\.core\.default_qdisc' \
+        'net\.core\.somaxconn' \
+        'net\.core\.netdev_max_backlog' \
         'net\.ipv4\.tcp_congestion_control'
     do
         sed -i -E "/^[[:space:]]*#?[[:space:]]*${key}[[:space:]]*=/d" /etc/sysctl.conf 2>/dev/null
@@ -1931,7 +2051,7 @@ bbr_check_and_clean_conflicts() {
     echo -e "${BLUE}=== 检查 sysctl 配置冲突 ===${PLAIN}"
     local conflicts=()
     local conf base num
-    local tune_key_regex='net\.(core\.(rmem_max|wmem_max|default_qdisc)|ipv4\.tcp_(rmem|wmem|congestion_control))'
+    local tune_key_regex='net\.(core\.(rmem_max|wmem_max|default_qdisc|somaxconn|netdev_max_backlog)|ipv4\.(ip_local_port_range|udp_(rmem_min|wmem_min)|tcp_(rmem|wmem|congestion_control|tw_reuse|max_syn_backlog|slow_start_after_idle|mtu_probing|notsent_lowat|fin_timeout|max_tw_buckets|fastopen|keepalive_time|keepalive_intvl|keepalive_probes|syncookies)))'
     local active_tune_regex="^[[:space:]]*${tune_key_regex}[[:space:]]*="
     local sysctl_conf_tune_regex="^[[:space:]]*#?[[:space:]]*${tune_key_regex}[[:space:]]*="
 
@@ -2039,11 +2159,6 @@ bbr_configure_direct() {
         return 1
     fi
 
-    bbr_check_and_prepare_swap || {
-        bbr_fail_and_pause "虚拟内存配置失败，已停止本次优化"
-        return 1
-    }
-
     echo -e "${YELLOW}[步骤 1/5] 带宽检测与缓冲区...${PLAIN}"
     local detected_bandwidth
     detected_bandwidth=$(bbr_detect_bandwidth)
@@ -2059,8 +2174,22 @@ bbr_configure_direct() {
     region_choice=$(trim_input "$region_choice")
     [[ "${region_choice:-1}" == "2" ]] && region="overseas"
 
+    local profile="balanced" profile_choice profile_label="代理均衡"
+    echo "1. 代理均衡（网页响应 + 下载速度）"
+    echo "2. 下载增强（大文件/高带宽，仍兼顾网页响应）"
+    read -r -p "请输入优化目标 [1]: " profile_choice
+    profile_choice=$(trim_input "$profile_choice")
+    if [[ "${profile_choice:-1}" == "2" ]]; then
+        profile="download"
+        profile_label="下载增强"
+    fi
+
+    local mem_total
+    mem_total=$(free -m | awk '/Mem:/ {print $2}')
+    [[ "$mem_total" =~ ^[0-9]+$ ]] || mem_total=0
+
     local buffer_mb buffer_bytes
-    buffer_mb=$(bbr_calculate_buffer_size "$detected_bandwidth" "$region")
+    buffer_mb=$(bbr_calculate_buffer_size "$detected_bandwidth" "$region" "$profile" "$mem_total")
     buffer_bytes=$((buffer_mb * 1024 * 1024))
 
     echo -e "${YELLOW}[步骤 2/5] 清理配置冲突...${PLAIN}"
@@ -2068,12 +2197,12 @@ bbr_configure_direct() {
     bbr_check_and_clean_conflicts
 
     echo -e "${YELLOW}[步骤 3/5] 创建配置文件...${PLAIN}"
-    local mem_total vm_swappiness=5 vm_dirty_ratio=15 vm_min_free_kbytes=65536
-    mem_total=$(free -m | awk '/Mem:/ {print $2}')
-    if (( mem_total < 2048 )); then
-        vm_swappiness=20
-        vm_dirty_ratio=20
-        vm_min_free_kbytes=32768
+    local somaxconn=8192 tcp_max_syn_backlog=8192 netdev_max_backlog=5000 tcp_notsent_lowat=32768 tcp_max_tw_buckets=200000
+    if [[ "$profile" == "download" ]]; then
+        tcp_max_syn_backlog=16384
+        netdev_max_backlog=10000
+        tcp_notsent_lowat=131072
+        tcp_max_tw_buckets=300000
     fi
 
     cat > "$BBR_SYSCTL_CONF" <<EOF
@@ -2085,14 +2214,14 @@ net.ipv4.tcp_rmem=4096 87380 ${buffer_bytes}
 net.ipv4.tcp_wmem=4096 65536 ${buffer_bytes}
 net.ipv4.tcp_tw_reuse=1
 net.ipv4.ip_local_port_range=1024 65535
-net.core.somaxconn=4096
-net.ipv4.tcp_max_syn_backlog=8192
-net.core.netdev_max_backlog=5000
+net.core.somaxconn=${somaxconn}
+net.ipv4.tcp_max_syn_backlog=${tcp_max_syn_backlog}
+net.core.netdev_max_backlog=${netdev_max_backlog}
 net.ipv4.tcp_slow_start_after_idle=0
 net.ipv4.tcp_mtu_probing=1
-net.ipv4.tcp_notsent_lowat=16384
+net.ipv4.tcp_notsent_lowat=${tcp_notsent_lowat}
 net.ipv4.tcp_fin_timeout=15
-net.ipv4.tcp_max_tw_buckets=5000
+net.ipv4.tcp_max_tw_buckets=${tcp_max_tw_buckets}
 net.ipv4.tcp_fastopen=3
 net.ipv4.tcp_keepalive_time=300
 net.ipv4.tcp_keepalive_intvl=30
@@ -2100,14 +2229,6 @@ net.ipv4.tcp_keepalive_probes=5
 net.ipv4.udp_rmem_min=8192
 net.ipv4.udp_wmem_min=8192
 net.ipv4.tcp_syncookies=1
-vm.swappiness=${vm_swappiness}
-vm.dirty_ratio=${vm_dirty_ratio}
-vm.dirty_background_ratio=5
-vm.overcommit_memory=1
-vm.min_free_kbytes=${vm_min_free_kbytes}
-vm.vfs_cache_pressure=50
-kernel.sched_autogroup_enabled=0
-kernel.numa_balancing=0
 EOF
 
     echo -e "${YELLOW}[步骤 4/5] 应用所有优化参数...${PLAIN}"
@@ -2176,7 +2297,7 @@ EOF
     if [[ "$actual_qdisc" == "fq" && "$actual_cc" == "bbr" ]] && echo "$available_cc" | grep -qw bbr; then
         if echo "$current_kernel" | grep -qi 'xanmod'; then
             echo -e "${GREEN}✓ fq + bbr 已启用，当前运行内核为 XanMod${PLAIN}"
-            echo -e "配置说明: ${GREEN}${buffer_mb}MB${PLAIN} 缓冲区（${GREEN}${detected_bandwidth} Mbps${PLAIN} 带宽）"
+            echo -e "配置说明: ${GREEN}${profile_label}${PLAIN} / ${GREEN}${buffer_mb}MB${PLAIN} 缓冲区（${GREEN}${detected_bandwidth} Mbps${PLAIN} 带宽）"
         else
             echo -e "${YELLOW}fq + bbr 已启用，但当前运行内核不是 XanMod${PLAIN}"
             echo -e "${YELLOW}如需确认 BBR v3，请先重启进入 XanMod 内核后再验证${PLAIN}"
