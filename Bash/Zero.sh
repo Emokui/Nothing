@@ -1869,18 +1869,20 @@ bbr_buffer_memory_cap_mb() {
         return 0
     fi
 
-    if (( mem_total < 768 )); then
-        echo 8
+    if (( mem_total < 512 )); then
+        [[ "$profile" == "download" ]] && echo 16 || echo 12
+    elif (( mem_total < 768 )); then
+        [[ "$profile" == "download" ]] && echo 32 || echo 24
     elif (( mem_total < 1024 )); then
-        echo 12
+        [[ "$profile" == "download" ]] && echo 64 || echo 48
     elif (( mem_total < 2048 )); then
-        echo 24
+        [[ "$profile" == "download" ]] && echo 80 || echo 64
     elif (( mem_total < 4096 )); then
-        echo 48
+        [[ "$profile" == "download" ]] && echo 96 || echo 80
     elif [[ "$profile" == "download" ]]; then
-        echo 96
+        echo 128
     else
-        echo 64
+        echo 96
     fi
 }
 
@@ -1984,15 +1986,16 @@ bbr_calculate_buffer_size() {
         fi
     fi
 
-    local mem_cap profile_label
+    local raw_buffer_mb mem_cap profile_label
+    raw_buffer_mb="$buffer_mb"
     mem_cap=$(bbr_buffer_memory_cap_mb "$mem_total" "$profile")
     if [[ "$mem_cap" =~ ^[0-9]+$ ]] && (( buffer_mb > mem_cap )); then
-        echo -e "${YELLOW}内存保护: 物理内存 ${mem_total}MB，缓冲区上限限制为 ${mem_cap}MB${PLAIN}" >&2
+        echo -e "${YELLOW}内存保护: 按带宽/地区计算 ${raw_buffer_mb}MB，物理内存 ${mem_total}MB，上限 ${mem_cap}MB${PLAIN}" >&2
         buffer_mb="$mem_cap"
     fi
 
     profile_label=$(bbr_profile_label "$profile")
-    echo -e "${YELLOW}推荐缓冲区(${profile_label}): ${GREEN}${buffer_mb}MB${PLAIN}" >&2
+    echo -e "${YELLOW}推荐缓冲区(${profile_label}): ${GREEN}${buffer_mb}MB${PLAIN}${YELLOW}（带宽/地区: ${raw_buffer_mb}MB，内存上限: ${mem_cap}MB）${PLAIN}" >&2
     if bbr_confirm "是否使用推荐值 ${buffer_mb}MB？(Y/N) [Y]: " "Y"; then
         echo "$buffer_mb"
     else
