@@ -55,12 +55,21 @@ ARCHIVE_PATH="${ARCHIVE_PATH:-$WORK_DIR/$RELEASE_ASSET}"
 require_commands() {
     local missing=""
     local cmd
-    for cmd in awk gzip kill nohup ps sed; do
+    for cmd in awk kill nohup ps sed; do
         command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
     done
 
     if [ -n "$missing" ]; then
         echo "[错误] 缺少依赖命令:$missing"
+        exit 1
+    fi
+}
+
+require_install_commands() {
+    require_commands
+
+    if ! command -v gzip >/dev/null 2>&1; then
+        echo "[错误] 缺少依赖命令: gzip"
         exit 1
     fi
 
@@ -150,6 +159,99 @@ write_multiline_file() {
                 ;;
         esac
     done
+}
+
+prompt_cert_mode() {
+    local mode=""
+
+    while :; do
+        mode="$(prompt_input "请选择证书来源：1.自动生成自签证书  2.手动粘贴证书和私钥" "1")"
+        case "$mode" in
+            1)
+                printf '%s\n' "self"
+                return 0
+                ;;
+            2)
+                printf '%s\n' "manual"
+                return 0
+                ;;
+            *)
+                echo "[警告] 请输入 1 或 2" >&2
+                ;;
+        esac
+    done
+}
+
+generate_self_signed_cert() {
+    local cert_path="$1"
+    local key_path="$2"
+    local cert_name="$3"
+    local conf_path="$WORK_DIR/.selfsigned-openssl.cnf"
+    local status=0
+
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "[错误] 自动生成自签证书需要 openssl，请安装 openssl 后重试，或重新运行脚本选择手动输入证书"
+        return 1
+    fi
+
+    cat > "$conf_path" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+CN = $cert_name
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = $cert_name
+EOF
+
+    echo "[信息] 正在生成自签证书..."
+    openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 3650 \
+        -keyout "$key_path" -out "$cert_path" -config "$conf_path" >/dev/null 2>&1
+    status=$?
+    rm -f "$conf_path"
+
+    if [ "$status" != "0" ]; then
+        rm -f "$cert_path" "$key_path"
+        echo "[错误] 自签证书生成失败"
+        return 1
+    fi
+
+    echo "[成功] 自签证书已生成: $cert_path"
+    echo "[成功] 私钥已生成: $key_path"
+}
+
+prepare_certificate() {
+    local cert_mode=""
+    local cert_name=""
+
+    cert_mode="$(prompt_cert_mode)"
+
+    case "$cert_mode" in
+        self)
+            cert_name="$(prompt_input "请输入自签证书域名" "icloud.com.cn")"
+            PEM_NAME="${cert_name}.pem"
+            KEY_NAME="${cert_name}.key"
+            generate_self_signed_cert "$WORK_DIR/$PEM_NAME" "$WORK_DIR/$KEY_NAME" "$cert_name" || return 1
+            ;;
+        manual)
+            cert_name="$(prompt_input "请输入证书域名" "")"
+            PEM_NAME="${cert_name}.pem"
+            KEY_NAME="${cert_name}.key"
+            write_multiline_file "$WORK_DIR/$PEM_NAME" "$PEM_NAME"
+            write_multiline_file "$WORK_DIR/$KEY_NAME" "$KEY_NAME"
+            ;;
+    esac
+
+    chmod 600 "$WORK_DIR/$PEM_NAME" "$WORK_DIR/$KEY_NAME" 2>/dev/null || true
 }
 
 yaml_escape() {
@@ -408,6 +510,95 @@ EOF
     chmod 600 "$CONFIG_PATH"
 }
 
+show_usage() {
+    echo "用法: $0 [restart|stop]"
+    echo "      $0 trojan PT 端口"
+    echo "      $0 trojan PW 密码"
+    echo "      $0 hysteria PT 端口"
+    echo "      $0 hysteria PW 密码"
+}
+
+update_config_item() {
+    local service="$1"
+    local item="$2"
+    local value="$3"
+    local listener=""
+    local escaped_value=""
+    local tmp_path="${CONFIG_PATH}.tmp.$$"
+
+    case "$service" in
+        trojan)
+            listener="trojan-ws-tls-in"
+            ;;
+        hysteria)
+            listener="hysteria2-in"
+            ;;
+        *)
+            show_usage
+            return 1
+            ;;
+    esac
+
+    case "$item" in
+        PT)
+            escaped_value="$value"
+            ;;
+        PW)
+            escaped_value="$(yaml_escape "$value")"
+            ;;
+        *)
+            show_usage
+            return 1
+            ;;
+    esac
+
+    awk -v listener="$listener" -v item="$item" -v value="$escaped_value" '
+        /^  - name: / {
+            in_target = ($0 == "  - name: " listener)
+        }
+        /^rules:/ {
+            in_target = 0
+        }
+        in_target && item == "PT" && /^    port: / {
+            print "    port: " value
+            next
+        }
+        in_target && item == "PW" && listener == "trojan-ws-tls-in" && /^        password: / {
+            print "        password: \"" value "\""
+            next
+        }
+        in_target && item == "PW" && listener == "hysteria2-in" && /^      user1: / {
+            print "      user1: \"" value "\""
+            next
+        }
+        {
+            print
+        }
+    ' "$CONFIG_PATH" > "$tmp_path" && mv "$tmp_path" "$CONFIG_PATH" || {
+        rm -f "$tmp_path"
+        return 1
+    }
+    chmod 600 "$CONFIG_PATH"
+}
+
+apply_config_change() {
+    if [ "$#" -ne 3 ]; then
+        show_usage
+        return 1
+    fi
+
+    require_commands
+    if ! ensure_installed; then
+        echo "[错误] 尚未安装，请先运行 $0 完成安装"
+        return 1
+    fi
+
+    update_config_item "$1" "$2" "$3" || return 1
+    echo "[成功] 配置已更新，正在重启..."
+    stop_process || return 1
+    start_process
+}
+
 get_pid() {
     ps axww -o pid= -o command= 2>/dev/null | awk \
         -v bin="$BIN_PATH" \
@@ -452,7 +643,7 @@ start_process() {
     sleep 2
 
     if kill -0 "$pid" 2>/dev/null; then
-        echo "[成功] 启动成功（PID: $pid）"
+        echo "[成功] 启动成功（PID: ${pid}）"
         is_interactive || log_restart_event "定时任务自动启动成功"
         return 0
     fi
@@ -523,7 +714,7 @@ show_status() {
 }
 
 setup_install() {
-    require_commands
+    require_install_commands
     mkdir -p "$WORK_DIR" || {
         echo "[错误] 创建目录失败: $WORK_DIR"
         exit 1
@@ -540,11 +731,7 @@ setup_install() {
         exit 1
     }
 
-    PEM_NAME="$(prompt_input "请输入 .pem 文件名" "server.pem")"
-    KEY_NAME="$(prompt_input "请输入 .key 文件名" "server.key")"
-    write_multiline_file "$WORK_DIR/$PEM_NAME" "$PEM_NAME"
-    write_multiline_file "$WORK_DIR/$KEY_NAME" "$KEY_NAME"
-    chmod 600 "$WORK_DIR/$PEM_NAME" "$WORK_DIR/$KEY_NAME" 2>/dev/null || true
+    prepare_certificate || exit 1
 
     TROJAN_PORT="$(prompt_input "请输入 Trojan 监听端口" "24838")"
     WS_PATH="$(normalize_ws_path "$(prompt_input "请输入 WebSocket 路径" "$WS_PATH")")"
@@ -574,11 +761,14 @@ main() {
         stop)
             stop_process
             ;;
+        trojan|hysteria)
+            apply_config_change "$@" || exit 1
+            ;;
         "")
             if ! ensure_installed; then
                 setup_install
             else
-                require_commands
+                require_install_commands
                 update_if_needed || exit 1
                 if is_running; then
                     show_status
@@ -590,7 +780,7 @@ main() {
             ;;
         *)
             echo "[错误] 未知参数: $1"
-            echo "用法: $0 [restart|stop]"
+            show_usage
             exit 1
             ;;
     esac
