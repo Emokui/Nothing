@@ -7,7 +7,21 @@ curl -sL -o Serv00.sh https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/
 ## Serv00/CT8 Trojan/Hysteria2 BY Mihomo
 ```
 curl -sL -o serv00.sh https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/serv00.sh && chmod +x serv00.sh && ./serv00.sh
-
+```
+```
+./serv00.sh [restart|stop]
+```
+```
+./serv00.sh trojan PT 端口
+```
+```
+./serv00.sh trojan PW 密码
+```
+```
+./serv00.sh hysteria PT 端口
+```
+```
+./serv00.sh hysteria PW 密码
 ```
 ## Keepalive
 ```
