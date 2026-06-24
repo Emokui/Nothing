@@ -7077,6 +7077,9 @@ dns:
   nameserver:
     - system
   enhanced-mode: redir-host
+profile:
+  store-selected: false
+  store-fake-ip: false
 listeners:
 EOF
 
