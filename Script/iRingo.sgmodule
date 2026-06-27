@@ -1,5 +1,4 @@
 #!name =  iRingo
-#!desc = 定位检测修改
 #!arguments = GeoCountryCode:"US",Dispatcher.Hybrid:true,Policy:"DIRECT"
 
 [Rule]
