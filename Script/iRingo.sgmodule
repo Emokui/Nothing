@@ -1,4 +1,5 @@
 #!name =  iRingo
+#!desc = Positioning detection modification
 #!arguments = GeoCountryCode:"US",Dispatcher.Hybrid:true,Policy:"DIRECT"
 
 [Rule]
