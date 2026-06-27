@@ -1,8 +1,0 @@
-#!name= 𝗔𝗱𝗕𝗹𝗼𝗰𝗸𝗲𝗿
-#!desc= 𝗨𝗻𝗹𝗼𝗰𝗸 𝗽𝗿𝗼
-
-[Script]
-𝗨𝗻𝗹𝗼𝗰𝗸 = type=http-response, pattern=^https:\/\/api\.adblockpro\.app\/verify, script-path=https://raw.githubusercontent.com/Emokui/Nothing/Zero/Script/JS/AdBlocker.js, requires-body=true, max-size=-1, timeout=60
-
-[MITM]
-hostname = %APPEND% api.adblockpro.app
