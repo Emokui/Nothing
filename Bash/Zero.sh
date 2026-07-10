@@ -6638,7 +6638,7 @@ shoes_manage_service() {
         echo -e "${GREEN}  2.${PLAIN}修改配置"
         echo -e "${GREEN}  3.${PLAIN}停止服务"
         echo -e "${GREEN}  4.${PLAIN}重启服务"
-        echo -e "${GREEN}  0.${PLAIN}返回主页"
+        echo -e "${GREEN}  0.${PLAIN}返回上级"
         read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
         case "$opt" in
@@ -7403,7 +7403,7 @@ mihomo_manage_service() {
         echo -e "${GREEN}  2.${PLAIN}修改配置"
         echo -e "${GREEN}  3.${PLAIN}停止服务"
         echo -e "${GREEN}  4.${PLAIN}重启服务"
-        echo -e "${GREEN}  0.${PLAIN}返回主页"
+        echo -e "${GREEN}  0.${PLAIN}返回上级"
         read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
 
         case "$opt" in
@@ -8128,6 +8128,12 @@ SINGBOX_SERVICE_FILE="/etc/systemd/system/${SINGBOX_SERVICE_NAME}"
 SINGBOX_MANAGED_MARKER="${SINGBOX_CONFIG_DIR}/.zero-managed"
 SINGBOX_RELEASE_API="https://api.github.com/repos/SagerNet/sing-box/releases"
 SINGBOX_SHADOWTLS_TAG="stls-in"
+SINGBOX_WARP_TAG="WARP"
+SINGBOX_WARP_ADDRESS="2606:4700:cf1:1000::1/128"
+SINGBOX_WARP_PRIVATE_KEY="ENfNXXmrGhIQC0OQ7nIXCQqPjb7Gqplsq1LLD5fb328="
+SINGBOX_WARP_SERVER="162.159.193.5"
+SINGBOX_WARP_PORT="4500"
+SINGBOX_WARP_PUBLIC_KEY="bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 
 SINGBOX_STAGE_DIR=""
 SINGBOX_STAGE_BIN=""
@@ -8150,6 +8156,16 @@ singbox_is_managed() {
 
 singbox_is_installed() {
     [[ -x "$SINGBOX_EXEC_PATH" && -f "$SINGBOX_CONFIG_PATH" && -f "$SINGBOX_SERVICE_FILE" ]]
+}
+
+singbox_atomic_install() {
+    local source_file="$1" destination="$2" mode="$3" temp_file
+    temp_file=$(mktemp "${destination}.tmp.XXXXXX") || return 1
+    if install -m "$mode" "$source_file" "$temp_file" && mv -f "$temp_file" "$destination"; then
+        return 0
+    fi
+    rm -f "$temp_file"
+    return 1
 }
 
 singbox_get_arch() {
@@ -8179,6 +8195,10 @@ singbox_install_dependencies() {
 
     command -v systemctl >/dev/null 2>&1 || {
         echo -e "${RED}未检测到 systemctl,无法管理 Sing-box 服务${PLAIN}"
+        return 1
+    }
+    [[ -d /run/systemd/system ]] || {
+        echo -e "${RED}当前环境没有运行 systemd,无法管理 Sing-box 服务${PLAIN}"
         return 1
     }
 
@@ -8781,7 +8801,9 @@ singbox_check_config_with() {
 }
 
 singbox_create_systemd_service() {
-    cat > "$SINGBOX_SERVICE_FILE" <<EOF
+    local temp_file
+    temp_file=$(mktemp) || return 1
+    cat > "$temp_file" <<EOF
 [Unit]
 Description=Sing-box service managed by Zero.sh
 After=network.target network-online.target nss-lookup.target
@@ -8802,12 +8824,17 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
-    chmod 644 "$SINGBOX_SERVICE_FILE"
+    if singbox_atomic_install "$temp_file" "$SINGBOX_SERVICE_FILE" 644; then
+        rm -f "$temp_file"
+        return 0
+    fi
+    rm -f "$temp_file"
+    return 1
 }
 
 singbox_apply_candidate() {
     local candidate="$1" success_msg="$2" failure_msg="${3:-新配置应用失败}"
-    local backup
+    local backup was_active=0
 
     if ! singbox_check_config_with "$SINGBOX_EXEC_PATH" "$candidate"; then
         echo -e "${RED}配置检查失败,未修改当前配置${PLAIN}"
@@ -8820,11 +8847,18 @@ singbox_apply_candidate() {
         rm -f "$backup"
         return 1
     }
+    systemctl is-active --quiet "$SINGBOX_SERVICE_NAME" && was_active=1
 
-    if ! install -m 600 "$candidate" "$SINGBOX_CONFIG_PATH"; then
+    if ! singbox_atomic_install "$candidate" "$SINGBOX_CONFIG_PATH" 600; then
         rm -f "$backup"
         echo -e "${RED}配置写入失败${PLAIN}"
         return 1
+    fi
+
+    if (( was_active == 0 )); then
+        rm -f "$backup"
+        echo -e "${GREEN}${success_msg},服务保持停止状态${PLAIN}"
+        return 0
     fi
 
     if systemctl restart "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
@@ -8833,16 +8867,24 @@ singbox_apply_candidate() {
         return 0
     fi
 
-    if install -m 600 "$backup" "$SINGBOX_CONFIG_PATH" && systemctl restart "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+    if singbox_atomic_install "$backup" "$SINGBOX_CONFIG_PATH" 600 &&
+       systemctl restart "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
         rm -f "$backup"
         echo -e "${YELLOW}${failure_msg},已恢复上一份可用配置${PLAIN}"
         return 1
     fi
 
-    rm -f "$backup"
-    echo -e "${RED}${failure_msg},回滚后服务仍未启动${PLAIN}"
+    echo -e "${RED}${failure_msg},自动恢复失败;备份保留在 ${backup}${PLAIN}"
     service_failure_hint "$SINGBOX_SERVICE_NAME"
     return 1
+}
+
+singbox_apply_and_cleanup() {
+    local candidate="$1" success_msg="$2" failure_msg="$3" result
+    singbox_apply_candidate "$candidate" "$success_msg" "$failure_msg"
+    result=$?
+    rm -f "$candidate"
+    return "$result"
 }
 
 singbox_install() {
@@ -8855,7 +8897,7 @@ singbox_install() {
         singbox_pause_and_return
         return
     fi
-    if [[ -e "$SINGBOX_EXEC_PATH" || -e "$SINGBOX_CONFIG_PATH" || -e "$SINGBOX_SERVICE_FILE" ]]; then
+    if [[ -e "$SINGBOX_EXEC_PATH" || -e "$SINGBOX_CONFIG_DIR" || -e "$SINGBOX_SERVICE_FILE" ]]; then
         echo -e "${RED}检测到现有 Sing-box 文件,为避免覆盖非本脚本安装的服务已停止${PLAIN}"
         echo -e "${YELLOW}请先备份并移除现有安装,或继续使用原管理方式${PLAIN}"
         singbox_pause_and_return
@@ -8964,20 +9006,30 @@ singbox_install() {
         singbox_cleanup_stage
         return 1
     }
-    if ! install -m 755 "$SINGBOX_STAGE_BIN" "$SINGBOX_EXEC_PATH" || ! install -m 600 "$candidate" "$SINGBOX_CONFIG_PATH"; then
+    if ! singbox_atomic_install "$SINGBOX_STAGE_BIN" "$SINGBOX_EXEC_PATH" 755 ||
+       ! singbox_atomic_install "$candidate" "$SINGBOX_CONFIG_PATH" 600 ||
+       ! singbox_create_systemd_service; then
         echo -e "${RED}Sing-box 文件安装失败${PLAIN}"
-        rm -f "$candidate" "$SINGBOX_EXEC_PATH"
+        rm -f "$candidate" "$SINGBOX_EXEC_PATH" "$SINGBOX_SERVICE_FILE"
         rm -rf "$SINGBOX_CONFIG_DIR"
         singbox_cleanup_stage
         singbox_pause_and_return
         return 1
     fi
     rm -f "$candidate"
-    printf 'channel=%s\nversion=%s\n' "$install_channel" "$SINGBOX_STAGE_VERSION" > "$SINGBOX_MANAGED_MARKER"
-    chmod 600 "$SINGBOX_MANAGED_MARKER"
-    singbox_create_systemd_service
+    if ! printf 'managed_by=Zero.sh\n' > "$SINGBOX_MANAGED_MARKER" ||
+       ! chmod 600 "$SINGBOX_MANAGED_MARKER"; then
+        echo -e "${RED}Sing-box 管理标记写入失败${PLAIN}"
+        rm -f "$SINGBOX_SERVICE_FILE" "$SINGBOX_EXEC_PATH"
+        rm -rf "$SINGBOX_CONFIG_DIR"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return 1
+    fi
 
-    if ! systemctl daemon-reload >/dev/null 2>&1 || ! systemctl enable --now "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+    if ! systemctl daemon-reload >/dev/null 2>&1 ||
+       ! systemctl enable "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 ||
+       ! systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
         echo -e "${RED}Sing-box 服务启动失败,已撤销本次安装${PLAIN}"
         systemctl --no-pager --full status "$SINGBOX_SERVICE_NAME" || true
         systemctl disable --now "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
@@ -9014,7 +9066,7 @@ singbox_protocol_status() {
 }
 
 singbox_add_inbound() {
-    local type="$1" label candidate
+    local type="$1" label candidate result=0
     label=$(singbox_label_for_type "$type")
     if [[ "$type" == "snell" ]] && ! singbox_supports_snell; then
         echo -e "${RED}当前 Sing-box 内核不支持 Snell 入站${PLAIN}"
@@ -9036,8 +9088,11 @@ singbox_add_inbound() {
 
     if singbox_apply_candidate "$candidate" "${label} 已启用" "${label} 启动失败"; then
         echo -e "${GREEN}${SINGBOX_NEW_SUMMARY}${PLAIN}"
+    else
+        result=$?
     fi
     rm -f "$candidate"
+    return "$result"
 }
 
 singbox_modify_port() {
@@ -9066,12 +9121,12 @@ singbox_modify_port() {
         rm -f "$candidate"
         return 1
     }
-    singbox_apply_candidate "$candidate" "${label} 端口已更新为 ${new_port}" "${label} 新端口启动失败"
-    rm -f "$candidate"
+    singbox_apply_and_cleanup "$candidate" "${label} 端口已更新为 ${new_port}" "${label} 新端口启动失败"
 }
 
 singbox_modify_auth() {
     local type="$1" tag label password psk uuid current_method bytes candidate
+    local result=0
     tag=$(singbox_tag_for_type "$type") || return 1
     label=$(singbox_label_for_type "$type")
     candidate=$(mktemp) || return 1
@@ -9151,8 +9206,11 @@ singbox_modify_auth() {
         else
             echo -e "${GREEN}密码: ${password}${PLAIN}"
         fi
+    else
+        result=$?
     fi
     rm -f "$candidate"
+    return "$result"
 }
 
 singbox_modify_cert() {
@@ -9169,8 +9227,7 @@ singbox_modify_cert() {
         rm -f "$candidate"
         return 1
     }
-    singbox_apply_candidate "$candidate" "${label} 证书已更新" "${label} 新证书启动失败"
-    rm -f "$candidate"
+    singbox_apply_and_cleanup "$candidate" "${label} 证书已更新" "${label} 新证书启动失败"
 }
 
 singbox_modify_trojan_ws_path() {
@@ -9188,8 +9245,7 @@ singbox_modify_trojan_ws_path() {
         rm -f "$candidate"
         return 1
     }
-    singbox_apply_candidate "$candidate" "Trojan WebSocket 路径已更新为 ${new_path}" "Trojan WebSocket 路径更新后启动失败"
-    rm -f "$candidate"
+    singbox_apply_and_cleanup "$candidate" "Trojan WebSocket 路径已更新为 ${new_path}" "Trojan WebSocket 路径更新后启动失败"
 }
 
 singbox_modify_snell_mode() {
@@ -9236,13 +9292,12 @@ singbox_modify_snell_mode() {
         }
     fi
 
-    singbox_apply_candidate "$candidate" "Snell 已切换为 ${description}" "Snell 模式切换后启动失败"
-    rm -f "$candidate"
+    singbox_apply_and_cleanup "$candidate" "Snell 已切换为 ${description}" "Snell 模式切换后启动失败"
 }
 
 singbox_modify_shadowtls() {
     local tag="$SINGBOX_SHADOWTLS_TAG" password handshake_server handshake_port candidate
-    local current_password current_server current_port
+    local current_password current_server current_port result=0
 
     singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH" || return 1
     current_password=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .users[0].password' "$SINGBOX_CONFIG_PATH")
@@ -9278,8 +9333,11 @@ singbox_modify_shadowtls() {
     if singbox_apply_candidate "$candidate" "ShadowTLS v3 配置已更新" "ShadowTLS v3 新配置启动失败"; then
         echo -e "${GREEN}ShadowTLS 密码: ${password}${PLAIN}"
         echo -e "${GREEN}客户端 SNI: ${handshake_server}${PLAIN}"
+    else
+        result=$?
     fi
     rm -f "$candidate"
+    return "$result"
 }
 
 singbox_remove_inbound() {
@@ -9313,8 +9371,7 @@ singbox_remove_inbound() {
             return 1
         fi
     fi
-    singbox_apply_candidate "$candidate" "${label} 已禁用" "删除 ${label} 后服务启动失败"
-    rm -f "$candidate"
+    singbox_apply_and_cleanup "$candidate" "${label} 已禁用" "删除 ${label} 后服务启动失败"
 }
 
 singbox_manage_protocol() {
@@ -9394,6 +9451,132 @@ singbox_manage_protocol() {
     done
 }
 
+singbox_warp_enabled() {
+    jq -e --arg tag "$SINGBOX_WARP_TAG" \
+        'any(.endpoints[]?; .type == "wireguard" and .tag == $tag)' \
+        "$SINGBOX_CONFIG_PATH" >/dev/null 2>&1
+}
+
+singbox_warp_status() {
+    if singbox_warp_enabled; then
+        echo "已启用"
+    else
+        echo "未启用"
+    fi
+}
+
+singbox_enable_warp() {
+    local candidate
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    if ! jq \
+        --arg tag "$SINGBOX_WARP_TAG" \
+        --arg address "$SINGBOX_WARP_ADDRESS" \
+        --arg private_key "$SINGBOX_WARP_PRIVATE_KEY" \
+        --arg server "$SINGBOX_WARP_SERVER" \
+        --argjson port "$SINGBOX_WARP_PORT" \
+        --arg public_key "$SINGBOX_WARP_PUBLIC_KEY" '
+        def is_plain_sniff:
+            .action == "sniff" and (keys_unsorted | length) == 1;
+        def is_warp_resolve:
+            .action == "resolve" and
+            (((.domain // []) == ["challenges.cloudflare.com"]) or
+             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]));
+        def is_warp_rule:
+            (.outbound // "") == $tag or is_warp_resolve;
+
+        .endpoints = ((.endpoints // []) | map(select(.tag != $tag))) |
+        .endpoints += [{
+            type: "wireguard",
+            tag: $tag,
+            system: false,
+            mtu: 1408,
+            address: [$address],
+            private_key: $private_key,
+            peers: [{
+                address: $server,
+                port: $port,
+                public_key: $public_key,
+                allowed_ips: ["::/0"],
+                persistent_keepalive_interval: 25
+            }]
+        }] |
+        .route = (.route // {}) |
+        .route.rules = ((.route.rules // []) |
+            map(select(((is_warp_rule or is_plain_sniff) | not)))) |
+        .route.rules = [{action: "sniff"}] + [
+            {
+                domain: ["challenges.cloudflare.com"],
+                action: "resolve",
+                strategy: "ipv6_only"
+            },
+            {
+                domain_suffix: ["googlevideo.com", "youtube.com"],
+                action: "resolve",
+                strategy: "ipv6_only"
+            },
+            {
+                domain: ["challenges.cloudflare.com"],
+                action: "route",
+                outbound: $tag
+            },
+            {
+                domain_suffix: ["googlevideo.com", "youtube.com"],
+                action: "route",
+                outbound: $tag
+            }
+        ] + .route.rules
+        ' "$SINGBOX_CONFIG_PATH" > "$candidate"; then
+        rm -f "$candidate"
+        echo -e "${RED}WARP 分流配置生成失败${PLAIN}"
+        return 1
+    fi
+
+    singbox_apply_and_cleanup "$candidate" "WARP 分流已开启" "WARP 分流启用后服务启动失败"
+}
+
+singbox_disable_warp() {
+    local candidate
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    if ! jq --arg tag "$SINGBOX_WARP_TAG" '
+        def is_plain_sniff:
+            .action == "sniff" and (keys_unsorted | length) == 1;
+        def is_warp_resolve:
+            .action == "resolve" and
+            (((.domain // []) == ["challenges.cloudflare.com"]) or
+             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]));
+        def is_warp_rule:
+            (.outbound // "") == $tag or is_warp_resolve;
+
+        .endpoints = ((.endpoints // []) | map(select(.tag != $tag))) |
+        if (.endpoints | length) == 0 then del(.endpoints) else . end |
+        .route = (.route // {}) |
+        .route.rules = ((.route.rules // []) |
+            map(select(((is_warp_rule or is_plain_sniff) | not)))) |
+        if (.route.rules | length) == 0 then del(.route.rules) else . end
+        ' "$SINGBOX_CONFIG_PATH" > "$candidate"; then
+        rm -f "$candidate"
+        echo -e "${RED}WARP 分流配置清理失败${PLAIN}"
+        return 1
+    fi
+
+    singbox_apply_and_cleanup "$candidate" "WARP 分流已关闭" "WARP 分流关闭后服务启动失败"
+}
+
+singbox_manage_warp() {
+    local confirm
+    if singbox_warp_enabled; then
+        read -r -p "$(echo -e "${RED}WARP 分流当前已启用,是否关闭? [y/N]: ${PLAIN}")" confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] && singbox_disable_warp
+    else
+        read -r -p "$(echo -e "${BLUE}WARP 分流当前未启用,是否开启? [y/N]: ${PLAIN}")" confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] && singbox_enable_warp
+    fi
+}
+
 singbox_modify_config() {
     local option snell_status
     while true; do
@@ -9402,15 +9585,16 @@ singbox_modify_config() {
             snell_status="需测试版1.14+"
         fi
         clear
-        echo -e "${BLUE}===== Sing-box 入站管理 =====${PLAIN}"
+        echo -e "${BLUE}===== Sing-box 配置管理 =====${PLAIN}"
         echo -e "${GREEN}1.${PLAIN}AnyTLS          [${YELLOW}$(singbox_protocol_status anytls)${PLAIN}]"
         echo -e "${GREEN}2.${PLAIN}Trojan + WS + TLS [${YELLOW}$(singbox_protocol_status trojan)${PLAIN}]"
         echo -e "${GREEN}3.${PLAIN}Shadowsocks 2022[${YELLOW}$(singbox_protocol_status shadowsocks)${PLAIN}]"
         echo -e "${GREEN}4.${PLAIN}TUIC v5         [${YELLOW}$(singbox_protocol_status tuic)${PLAIN}]"
         echo -e "${GREEN}5.${PLAIN}Hysteria2       [${YELLOW}$(singbox_protocol_status hysteria2)${PLAIN}]"
         echo -e "${GREEN}6.${PLAIN}Snell v5/v6     [${YELLOW}${snell_status}${PLAIN}]"
+        echo -e "${GREEN}7.${PLAIN}WARP 分流       [${YELLOW}$(singbox_warp_status)${PLAIN}]"
         echo -e "${YELLOW}0.${PLAIN}返回上级"
-        read -r -p "$(echo -e "${BLUE}请输入选项 [0-6]: ${PLAIN}")" option
+        read -r -p "$(echo -e "${BLUE}请输入选项 [0-7]: ${PLAIN}")" option
         case "$option" in
             1) singbox_manage_protocol anytls ;;
             2) singbox_manage_protocol trojan ;;
@@ -9418,6 +9602,7 @@ singbox_modify_config() {
             4) singbox_manage_protocol tuic ;;
             5) singbox_manage_protocol hysteria2 ;;
             6) singbox_manage_protocol snell ;;
+            7) singbox_manage_warp; sleep 1 ;;
             0) return ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
         esac
@@ -9531,31 +9716,43 @@ singbox_update_channel() {
         return 1
     }
     systemctl is-active --quiet "$SINGBOX_SERVICE_NAME" && was_active=1
-    (( was_active == 1 )) && systemctl stop "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
-
-    if ! install -m 755 "$SINGBOX_STAGE_BIN" "$SINGBOX_EXEC_PATH"; then
-        install -m 755 "$backup" "$SINGBOX_EXEC_PATH" >/dev/null 2>&1 || true
-        (( was_active == 1 )) && systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
+    if (( was_active == 1 )) && ! systemctl stop "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
         rm -f "$backup"
         singbox_cleanup_stage
-        echo -e "${RED}Sing-box 更新失败,已恢复旧二进制${PLAIN}"
+        echo -e "${RED}无法停止当前 Sing-box 服务,已取消更新${PLAIN}"
+        singbox_pause_and_return
+        return 1
+    fi
+
+    if ! singbox_atomic_install "$SINGBOX_STAGE_BIN" "$SINGBOX_EXEC_PATH" 755; then
+        singbox_cleanup_stage
+        if (( was_active == 0 )) || systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+            rm -f "$backup"
+            echo -e "${RED}Sing-box 更新失败,旧版本未被替换${PLAIN}"
+        else
+            echo -e "${RED}Sing-box 更新失败且旧服务恢复失败;备份保留在 ${backup}${PLAIN}"
+            service_failure_hint "$SINGBOX_SERVICE_NAME"
+        fi
         singbox_pause_and_return
         return 1
     fi
 
     if (( was_active == 0 )) || systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
-        printf 'channel=%s\nversion=%s\n' "$channel" "$SINGBOX_STAGE_VERSION" > "$SINGBOX_MANAGED_MARKER"
-        chmod 600 "$SINGBOX_MANAGED_MARKER"
         rm -f "$backup"
         echo -e "${GREEN}Sing-box 已更新到 ${SINGBOX_STAGE_VERSION}${PLAIN}"
     else
-        if install -m 755 "$backup" "$SINGBOX_EXEC_PATH" && systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+        if systemctl stop "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 &&
+           singbox_atomic_install "$backup" "$SINGBOX_EXEC_PATH" 755 &&
+           systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+            rm -f "$backup"
             echo -e "${YELLOW}新版本启动失败,已恢复旧版本${PLAIN}"
         else
-            echo -e "${RED}新版本启动失败,回滚后服务仍未启动${PLAIN}"
+            echo -e "${RED}新版本启动失败且自动恢复失败;备份保留在 ${backup}${PLAIN}"
             service_failure_hint "$SINGBOX_SERVICE_NAME"
         fi
-        rm -f "$backup"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return 1
     fi
     singbox_cleanup_stage
     singbox_pause_and_return
@@ -9566,13 +9763,13 @@ singbox_update() {
     while true; do
         clear
         echo -e "${BLUE}✦ SingBox_Update ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}更新测试版"
-        echo -e "${GREEN}  2.${PLAIN}更新正式版"
+        echo -e "${GREEN}  1.${PLAIN}更新正式版"
+        echo -e "${GREEN}  2.${PLAIN}更新测试版"
         echo -e "${GREEN}  0.${PLAIN}返回上级"
         read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
         case "$option" in
-            1) singbox_update_channel beta ;;
-            2) singbox_update_channel release ;;
+            1) singbox_update_channel release ;;
+            2) singbox_update_channel beta ;;
             0) return ;;
             *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
         esac
@@ -9589,10 +9786,25 @@ singbox_delete() {
     fi
     read -r -p "$(echo -e "${RED}确定删除 Sing-box、配置和服务? [y/N]: ${PLAIN}")" confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        systemctl disable --now "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
-        rm -f "$SINGBOX_SERVICE_FILE" "$SINGBOX_EXEC_PATH"
-        rm -rf "$SINGBOX_CONFIG_DIR"
-        systemctl daemon-reload >/dev/null 2>&1 || true
+        if systemctl is-active --quiet "$SINGBOX_SERVICE_NAME" &&
+           ! systemctl stop "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+            echo -e "${RED}Sing-box 服务停止失败,已取消删除${PLAIN}"
+            singbox_pause_and_return
+            return 1
+        fi
+        if ! systemctl disable "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+            echo -e "${RED}Sing-box 服务禁用失败,已取消删除${PLAIN}"
+            singbox_pause_and_return
+            return 1
+        fi
+        if ! rm -f "$SINGBOX_SERVICE_FILE" "$SINGBOX_EXEC_PATH" ||
+           ! rm -rf "$SINGBOX_CONFIG_DIR" ||
+           ! systemctl daemon-reload >/dev/null 2>&1; then
+            echo -e "${RED}Sing-box 删除不完整,请检查残留文件${PLAIN}"
+            singbox_pause_and_return
+            return 1
+        fi
+        systemctl reset-failed "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
         echo -e "${GREEN}Sing-box 已删除${PLAIN}"
     fi
     singbox_pause_and_return
