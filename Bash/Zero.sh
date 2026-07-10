@@ -8118,6 +8118,1516 @@ mihomo_menu() {
     done
 }
 
+# ============================ Sing-box ============================
+
+SINGBOX_EXEC_PATH="/usr/local/bin/sing-box"
+SINGBOX_CONFIG_DIR="/etc/sing-box"
+SINGBOX_CONFIG_PATH="${SINGBOX_CONFIG_DIR}/config.json"
+SINGBOX_SERVICE_NAME="sing-box-zero.service"
+SINGBOX_SERVICE_FILE="/etc/systemd/system/${SINGBOX_SERVICE_NAME}"
+SINGBOX_MANAGED_MARKER="${SINGBOX_CONFIG_DIR}/.zero-managed"
+SINGBOX_RELEASE_API="https://api.github.com/repos/SagerNet/sing-box/releases"
+SINGBOX_SHADOWTLS_TAG="stls-in"
+
+SINGBOX_STAGE_DIR=""
+SINGBOX_STAGE_BIN=""
+SINGBOX_STAGE_VERSION=""
+SINGBOX_STAGE_ASSET=""
+SINGBOX_STAGE_URL=""
+SINGBOX_STAGE_DIGEST=""
+SINGBOX_NEW_INBOUND=""
+SINGBOX_NEW_SUMMARY=""
+SINGBOX_CERT_PATH=""
+SINGBOX_KEY_PATH=""
+
+singbox_pause_and_return() {
+    pause_enter_and_clear "按回车返回..."
+}
+
+singbox_is_managed() {
+    [[ -f "$SINGBOX_MANAGED_MARKER" ]]
+}
+
+singbox_is_installed() {
+    [[ -x "$SINGBOX_EXEC_PATH" && -f "$SINGBOX_CONFIG_PATH" && -f "$SINGBOX_SERVICE_FILE" ]]
+}
+
+singbox_get_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        *)
+            echo -e "${RED}Sing-box 暂不支持当前架构: $(uname -m)${PLAIN}" >&2
+            return 1
+            ;;
+    esac
+}
+
+singbox_install_dependencies() {
+    local missing=() package command_name
+    local packages=(curl jq tar ca-certificates openssl coreutils iproute2)
+
+    for package in "${packages[@]}"; do
+        command_name="$package"
+        case "$package" in
+            ca-certificates) command_name="update-ca-certificates" ;;
+            coreutils) command_name="sha256sum" ;;
+            iproute2) command_name="ss" ;;
+        esac
+        command -v "$command_name" >/dev/null 2>&1 || missing+=("$package")
+    done
+
+    command -v systemctl >/dev/null 2>&1 || {
+        echo -e "${RED}未检测到 systemctl,无法管理 Sing-box 服务${PLAIN}"
+        return 1
+    }
+
+    [[ ${#missing[@]} -eq 0 ]] && return 0
+    echo -e "${YELLOW}正在安装 Sing-box 依赖: ${missing[*]}${PLAIN}"
+    apt-get update && apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
+singbox_random_password() {
+    local password
+    password=$(openssl rand -hex 16 2>/dev/null | tr -d '\r\n') || return 1
+    [[ "$password" =~ ^[0-9a-f]{32}$ ]] || return 1
+    printf '%s' "$password"
+}
+
+singbox_random_uuid() {
+    if [[ -r /proc/sys/kernel/random/uuid ]]; then
+        cat /proc/sys/kernel/random/uuid
+    elif command -v uuidgen >/dev/null 2>&1; then
+        uuidgen | tr '[:upper:]' '[:lower:]'
+    else
+        return 1
+    fi
+}
+
+singbox_random_ss_password() {
+    local bytes="$1"
+    openssl rand -base64 "$bytes" 2>/dev/null | tr -d '\r\n'
+}
+
+singbox_validate_snell_psk() {
+    local bytes
+    bytes=$(LC_ALL=C printf '%s' "$1" | wc -c | tr -d ' ')
+    [[ "$bytes" =~ ^[0-9]+$ ]] && (( bytes >= 12 && bytes <= 255 ))
+}
+
+singbox_validate_port() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
+}
+
+singbox_validate_uuid() {
+    [[ "$1" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
+}
+
+singbox_validate_ss_password() {
+    local password="$1"
+    local expected_bytes="$2"
+    local decoded_bytes
+
+    [[ "$password" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || return 1
+    printf '%s' "$password" | base64 -d >/dev/null 2>&1 || return 1
+    decoded_bytes=$(printf '%s' "$password" | base64 -d 2>/dev/null | wc -c | tr -d ' ')
+    [[ "$decoded_bytes" =~ ^[0-9]+$ ]] && (( decoded_bytes == expected_bytes ))
+}
+
+singbox_get_current_version() {
+    local version_line version
+    [[ -x "$SINGBOX_EXEC_PATH" ]] || return 1
+    version_line=$("$SINGBOX_EXEC_PATH" version 2>/dev/null | head -n1)
+    version=$(printf '%s\n' "$version_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?' | head -n1)
+    printf '%s\n' "${version:-未知}"
+}
+
+singbox_version_supports_snell() {
+    local version="${1#v}" core major minor
+    core="${version%%-*}"
+    major="${core%%.*}"
+    core="${core#*.}"
+    minor="${core%%.*}"
+    [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+    (( major > 1 || (major == 1 && minor >= 14) ))
+}
+
+singbox_supports_snell() {
+    local version
+    version=$(singbox_get_current_version) || return 1
+    singbox_version_supports_snell "$version"
+}
+
+singbox_cleanup_stage() {
+    [[ -n "$SINGBOX_STAGE_DIR" && -d "$SINGBOX_STAGE_DIR" ]] && rm -rf "$SINGBOX_STAGE_DIR"
+    SINGBOX_STAGE_DIR=""
+    SINGBOX_STAGE_BIN=""
+    SINGBOX_STAGE_VERSION=""
+    SINGBOX_STAGE_ASSET=""
+    SINGBOX_STAGE_URL=""
+    SINGBOX_STAGE_DIGEST=""
+}
+
+singbox_get_release_object() {
+    local channel="$1"
+
+    case "$channel" in
+        release)
+            curl -fsSL --connect-timeout 10 --max-time 30 \
+                -H 'Accept: application/vnd.github+json' \
+                "${SINGBOX_RELEASE_API}/latest"
+            ;;
+        beta)
+            curl -fsSL --connect-timeout 10 --max-time 30 \
+                -H 'Accept: application/vnd.github+json' \
+                "${SINGBOX_RELEASE_API}?per_page=30" \
+                | jq -c '[.[] | select(.draft == false and .prerelease == true)][0]'
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+singbox_prepare_release() {
+    local channel="$1"
+    local arch release_json tag version asset_name url digest
+
+    singbox_cleanup_stage
+    arch=$(singbox_get_arch) || return 1
+    release_json=$(singbox_get_release_object "$channel") || {
+        echo -e "${RED}获取 Sing-box Release 信息失败${PLAIN}"
+        return 1
+    }
+    [[ -n "$release_json" && "$release_json" != "null" ]] || {
+        echo -e "${RED}未找到可用的 Sing-box Release${PLAIN}"
+        return 1
+    }
+
+    tag=$(printf '%s' "$release_json" | jq -r '.tag_name // empty')
+    version="${tag#v}"
+    [[ -n "$version" ]] || {
+        echo -e "${RED}无法读取 Sing-box 版本号${PLAIN}"
+        return 1
+    }
+
+    asset_name="sing-box-${version}-linux-${arch}.tar.gz"
+    url=$(printf '%s' "$release_json" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .browser_download_url' | head -n1)
+    digest=$(printf '%s' "$release_json" | jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | (.digest // empty)' | head -n1)
+    digest="${digest#sha256:}"
+    digest=$(printf '%s' "$digest" | tr '[:upper:]' '[:lower:]')
+
+    [[ -n "$url" ]] || {
+        echo -e "${RED}Release 中未找到 ${asset_name}${PLAIN}"
+        return 1
+    }
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || {
+        echo -e "${RED}Release 未提供有效 SHA-256,已拒绝安装未校验文件${PLAIN}"
+        return 1
+    }
+
+    SINGBOX_STAGE_VERSION="$version"
+    SINGBOX_STAGE_ASSET="$asset_name"
+    SINGBOX_STAGE_URL="$url"
+    SINGBOX_STAGE_DIGEST="$digest"
+}
+
+singbox_download_prepared_release() {
+    local archive extracted_bin actual_sha
+
+    [[ -n "$SINGBOX_STAGE_VERSION" && -n "$SINGBOX_STAGE_ASSET" && \
+       -n "$SINGBOX_STAGE_URL" && "$SINGBOX_STAGE_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
+        echo -e "${RED}Sing-box Release 信息不完整,无法下载${PLAIN}"
+        return 1
+    }
+
+    SINGBOX_STAGE_DIR=$(mktemp -d /tmp/zero-singbox.XXXXXX) || return 1
+    archive="${SINGBOX_STAGE_DIR}/${SINGBOX_STAGE_ASSET}"
+    echo -e "${BLUE}正在下载 Sing-box ${SINGBOX_STAGE_VERSION} (${SINGBOX_STAGE_ASSET})...${PLAIN}"
+    if ! curl -fL --connect-timeout 10 --max-time 180 "$SINGBOX_STAGE_URL" -o "$archive"; then
+        echo -e "${RED}Sing-box 下载失败${PLAIN}"
+        singbox_cleanup_stage
+        return 1
+    fi
+
+    actual_sha=$(sha256sum "$archive" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    if [[ "$actual_sha" != "$SINGBOX_STAGE_DIGEST" ]]; then
+        echo -e "${RED}Sing-box SHA-256 校验失败,已删除下载文件${PLAIN}"
+        singbox_cleanup_stage
+        return 1
+    fi
+
+    if ! tar -xzf "$archive" -C "$SINGBOX_STAGE_DIR"; then
+        echo -e "${RED}Sing-box 解压失败${PLAIN}"
+        singbox_cleanup_stage
+        return 1
+    fi
+
+    extracted_bin=$(find "$SINGBOX_STAGE_DIR" -type f -name sing-box -perm -u+x | head -n1)
+    [[ -n "$extracted_bin" ]] || {
+        echo -e "${RED}压缩包中未找到 Sing-box 可执行文件${PLAIN}"
+        singbox_cleanup_stage
+        return 1
+    }
+    "$extracted_bin" version >/dev/null 2>&1 || {
+        echo -e "${RED}下载的 Sing-box 无法执行${PLAIN}"
+        singbox_cleanup_stage
+        return 1
+    }
+
+    SINGBOX_STAGE_BIN="$extracted_bin"
+    echo -e "${GREEN}SHA-256 校验通过${PLAIN}"
+}
+
+singbox_stage_release() {
+    local channel="$1"
+    singbox_prepare_release "$channel" && singbox_download_prepared_release
+}
+
+singbox_version_is_newer() {
+    local candidate="${1#v}" current="${2#v}"
+
+    # dpkg 的 ~ 会把 alpha/beta/rc 正确视为正式版之前的预发行版本。
+    candidate="${candidate/-/~}"
+    current="${current/-/~}"
+    dpkg --compare-versions "$candidate" gt "$current"
+}
+
+singbox_select_cert() {
+    local cert_files=() opt i cert_path key_path
+
+    while true; do
+        clear
+        echo -e "${BLUE}===== Sing-box 证书配置 =====${PLAIN}"
+        if compgen -G "/etc/cert/*.crt" >/dev/null 2>&1; then
+            mapfile -t cert_files < <(find /etc/cert -maxdepth 1 -type f -name '*.crt' | sort)
+        else
+            cert_files=()
+        fi
+
+        for ((i=0; i<${#cert_files[@]}; i++)); do
+            echo -e "${GREEN}$((i+1)).${PLAIN}$(basename "${cert_files[$i]}")"
+        done
+        echo -e "${GREEN}0.${PLAIN}自定义路径"
+        read -r -p "$(echo -e "${BLUE}输入选项: ${PLAIN}")" opt
+        opt=$(trim_input "$opt")
+
+        if [[ "$opt" == "0" ]]; then
+            read -r -p "$(echo -e "${BLUE}证书路径: ${PLAIN}")" cert_path
+            read -r -p "$(echo -e "${BLUE}私钥路径: ${PLAIN}")" key_path
+        elif [[ "$opt" =~ ^[0-9]+$ ]] && (( opt >= 1 && opt <= ${#cert_files[@]} )); then
+            cert_path="${cert_files[$((opt-1))]}"
+            key_path="${cert_path%.crt}.key"
+        else
+            echo -e "${YELLOW}无效选项${PLAIN}"
+            sleep 0.5
+            continue
+        fi
+
+        if [[ -r "$cert_path" && -r "$key_path" ]]; then
+            SINGBOX_CERT_PATH="$cert_path"
+            SINGBOX_KEY_PATH="$key_path"
+            return 0
+        fi
+        echo -e "${RED}证书或私钥不存在/不可读${PLAIN}"
+        sleep 1
+    done
+}
+
+singbox_tag_for_type() {
+    case "$1" in
+        anytls) echo "anytls-in" ;;
+        trojan) echo "trojan-in" ;;
+        shadowsocks) echo "ss-in" ;;
+        tuic) echo "tuic-in" ;;
+        hysteria2) echo "hy2-in" ;;
+        snell) echo "snell-in" ;;
+        *) return 1 ;;
+    esac
+}
+
+singbox_default_port_for_type() {
+    case "$1" in
+        anytls) echo 8443 ;;
+        trojan) echo 10819 ;;
+        shadowsocks) echo 10818 ;;
+        tuic) echo 28443 ;;
+        hysteria2) echo 18443 ;;
+        snell) echo 10815 ;;
+        *) return 1 ;;
+    esac
+}
+
+singbox_label_for_type() {
+    case "$1" in
+        anytls) echo "AnyTLS" ;;
+        trojan) echo "Trojan + WS + TLS" ;;
+        shadowsocks) echo "Shadowsocks 2022" ;;
+        tuic) echo "TUIC v5" ;;
+        hysteria2) echo "Hysteria2" ;;
+        snell) echo "Snell" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+singbox_type_uses_tls() {
+    case "$1" in
+        anytls|trojan|tuic|hysteria2) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+singbox_config_has_tag() {
+    local config_file="$1" tag="$2"
+    jq -e --arg tag "$tag" '.inbounds[]? | select(.tag == $tag)' "$config_file" >/dev/null 2>&1
+}
+
+singbox_shadowsocks_uses_shadowtls() {
+    local config_file="$1"
+    jq -e --arg tag "$SINGBOX_SHADOWTLS_TAG" \
+        '.inbounds[]? | select(.type == "shadowtls" and .tag == $tag and .version == 3 and .detour == "ss-in")' \
+        "$config_file" >/dev/null 2>&1
+}
+
+singbox_config_uses_port() {
+    local config_file="$1" port="$2" exclude_tag="${3:-}"
+    jq -e --argjson port "$port" --arg exclude "$exclude_tag" \
+        '.inbounds[]? | select(.listen_port == $port and .tag != $exclude)' \
+        "$config_file" >/dev/null 2>&1
+}
+
+singbox_port_is_listening() {
+    local port="$1"
+    ss -H -lntu 2>/dev/null | awk -v port="$port" '
+        {
+            address=$5
+            if (address ~ (":" port "$")) found=1
+        }
+        END {exit found ? 0 : 1}
+    '
+}
+
+singbox_port_available() {
+    local config_file="$1" port="$2" exclude_tag="${3:-}"
+    if singbox_config_uses_port "$config_file" "$port" "$exclude_tag"; then
+        echo -e "${RED}端口 ${port} 已被另一项 Sing-box 入站使用${PLAIN}" >&2
+        return 1
+    fi
+    if singbox_port_is_listening "$port"; then
+        echo -e "${RED}端口 ${port} 已被系统中的进程占用${PLAIN}" >&2
+        return 1
+    fi
+    return 0
+}
+
+singbox_prompt_password() {
+    local label="$1" value
+    read -r -s -p "${label}(回车随机生成): " value
+    # 本函数通过命令替换返回凭据。交互换行必须写入 stderr，否则会被
+    # $(singbox_prompt_password ...) 一并捕获并成为密码/PSK 的首字符。
+    printf '\n' >&2
+    [[ -n "$value" ]] || value=$(singbox_random_password)
+    value="${value//$'\r'/}"
+    value="${value//$'\n'/}"
+    printf '%s' "$value"
+}
+
+singbox_prompt_port() {
+    local label="$1" default_port="$2" config_file="$3"
+    local port
+
+    while true; do
+        read -r -p "$(echo -e "${BLUE}${label}端口(默认:${default_port}): ${PLAIN}")" port
+        port=$(trim_input "$port")
+        port="${port:-$default_port}"
+        if ! singbox_validate_port "$port"; then
+            echo -e "${RED}端口必须在 1-65535 之间${PLAIN}" >&2
+            continue
+        fi
+        if singbox_port_available "$config_file" "$port"; then
+            printf '%s' "$port"
+            return 0
+        fi
+    done
+}
+
+singbox_validate_ws_path() {
+    [[ "$1" =~ ^/[^[:space:]]*$ ]]
+}
+
+singbox_prompt_ws_path() {
+    local default_path="${1:-/}" path
+
+    while true; do
+        read -r -p "$(echo -e "${BLUE}WebSocket 路径(默认:${default_path}): ${PLAIN}")" path
+        path=$(trim_input "$path")
+        path="${path:-$default_path}"
+        if singbox_validate_ws_path "$path"; then
+            printf '%s' "$path"
+            return 0
+        fi
+        echo -e "${RED}路径必须以 / 开头，且不能包含空白字符${PLAIN}" >&2
+    done
+}
+
+singbox_prompt_shadowsocks() {
+    local config_file="$1" port method="2022-blake3-aes-128-gcm" bytes=16 password
+    local enable_shadowtls shadowtls_password handshake_server handshake_port
+
+    clear
+    echo -e "${BLUE}===== Shadowsocks 2022 配置 =====${PLAIN}"
+    echo -e "${GREEN}加密方式: ${method}${PLAIN}"
+
+    port=$(singbox_prompt_port "Shadowsocks " 10818 "$config_file") || return 1
+    while true; do
+        read -r -s -p "密码(回车生成符合密钥长度的 Base64 密码): " password
+        echo
+        [[ -n "$password" ]] || password=$(singbox_random_ss_password "$bytes")
+        if singbox_validate_ss_password "$password" "$bytes"; then
+            break
+        fi
+        echo -e "${RED}该加密方式要求 Base64 解码后为 ${bytes} 字节${PLAIN}"
+    done
+
+    read -r -p "$(echo -e "${BLUE}开启 ShadowTLS v3? [y/N]: ${PLAIN}")" enable_shadowtls
+    if [[ "$enable_shadowtls" =~ ^[Yy]$ ]]; then
+        while true; do
+            read -r -p "$(echo -e "${BLUE}伪装握手域名: ${PLAIN}")" handshake_server
+            handshake_server=$(trim_input "$handshake_server")
+            [[ -n "$handshake_server" ]] && break
+            echo -e "${RED}伪装握手域名不能为空${PLAIN}"
+        done
+        while true; do
+            read -r -p "$(echo -e "${BLUE}伪装握手端口(默认:443): ${PLAIN}")" handshake_port
+            handshake_port=$(trim_input "$handshake_port")
+            handshake_port="${handshake_port:-443}"
+            singbox_validate_port "$handshake_port" && break
+            echo -e "${RED}端口必须在 1-65535 之间${PLAIN}"
+        done
+        shadowtls_password=$(singbox_prompt_password "ShadowTLS 密码") || return 1
+
+        # ShadowTLS 仅承载 TCP，因此内部 Shadowsocks 入站显式限制为 TCP。
+        SINGBOX_NEW_INBOUND=$(jq -n \
+            --arg stls_tag "$SINGBOX_SHADOWTLS_TAG" \
+            --arg ss_tag "ss-in" \
+            --argjson port "$port" \
+            --arg stls_password "$shadowtls_password" \
+            --arg handshake_server "$handshake_server" \
+            --argjson handshake_port "$handshake_port" \
+            --arg method "$method" \
+            --arg password "$password" \
+            '[
+                {
+                    type:"shadowtls",tag:$stls_tag,listen:"::",listen_port:$port,
+                    version:3,users:[{name:"user1",password:$stls_password}],
+                    handshake:{server:$handshake_server,server_port:$handshake_port},detour:$ss_tag
+                },
+                {type:"shadowsocks",tag:$ss_tag,network:"tcp",method:$method,password:$password}
+            ]')
+        SINGBOX_NEW_SUMMARY="Shadowsocks 端口: ${port}\n加密: ${method}\n密码: ${password}\nShadowTLS: v3 已开启 (仅 TCP)\nShadowTLS 密码: ${shadowtls_password}\n伪装握手域名: ${handshake_server}:${handshake_port}\n客户端 SNI: ${handshake_server}"
+    else
+        SINGBOX_NEW_INBOUND=$(jq -n \
+            --arg tag "ss-in" \
+            --argjson port "$port" \
+            --arg method "$method" \
+            --arg password "$password" \
+            '{type:"shadowsocks",tag:$tag,listen:"::",listen_port:$port,method:$method,password:$password}')
+        SINGBOX_NEW_SUMMARY="Shadowsocks 端口: ${port}\n加密: ${method}\n密码: ${password}"
+    fi
+}
+
+singbox_prompt_snell() {
+    local config_file="$1" port version psk option obfs_mode mode
+
+    clear
+    echo -e "${BLUE}===== Snell 配置 (Sing-box 1.14+) =====${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}Snell v5 (兼容 v4 协议,支持 HTTP 混淆)"
+    echo -e "${GREEN}2.${PLAIN}Snell v6 (支持流量整形)"
+    read -r -p "$(echo -e "${BLUE}协议版本 [1-2,默认1]: ${PLAIN}")" option
+    case "${option:-1}" in
+        1) version=5 ;;
+        2) version=6 ;;
+        *)
+            echo -e "${RED}无效选项${PLAIN}"
+            return 1
+            ;;
+    esac
+
+    port=$(singbox_prompt_port "Snell " 10815 "$config_file") || return 1
+    while true; do
+        psk=$(singbox_prompt_password "PSK") || return 1
+        if singbox_validate_snell_psk "$psk"; then
+            break
+        fi
+        echo -e "${RED}Snell PSK 必须为 12-255 字节${PLAIN}"
+    done
+
+    if (( version == 5 )); then
+        read -r -p "$(echo -e "${BLUE}开启 HTTP 混淆? [y/N]: ${PLAIN}")" option
+        [[ "$option" =~ ^[Yy]$ ]] && obfs_mode="http" || obfs_mode="none"
+        SINGBOX_NEW_INBOUND=$(jq -n \
+            --argjson port "$port" --arg psk "$psk" --arg obfs "$obfs_mode" \
+            '{type:"snell",tag:"snell-in",listen:"::",listen_port:$port,version:5,psk:$psk,obfs_mode:$obfs}')
+        SINGBOX_NEW_SUMMARY="Snell v5 端口: ${port}\nPSK: ${psk}\n混淆: ${obfs_mode}"
+    else
+        echo -e "${GREEN}1.${PLAIN}default (推荐)"
+        echo -e "${GREEN}2.${PLAIN}unshaped"
+        echo -e "${RED}3.${PLAIN}unsafe-raw"
+        read -r -p "$(echo -e "${BLUE}流量整形模式 [1-3,默认1]: ${PLAIN}")" option
+        case "${option:-1}" in
+            1) mode="default" ;;
+            2) mode="unshaped" ;;
+            3) mode="unsafe-raw" ;;
+            *)
+                echo -e "${RED}无效选项${PLAIN}"
+                return 1
+                ;;
+        esac
+        SINGBOX_NEW_INBOUND=$(jq -n \
+            --argjson port "$port" --arg psk "$psk" --arg mode "$mode" \
+            '{type:"snell",tag:"snell-in",listen:"::",listen_port:$port,version:6,psk:$psk,mode:$mode}')
+        SINGBOX_NEW_SUMMARY="Snell v6 端口: ${port}\nPSK: ${psk}\n整形模式: ${mode}"
+    fi
+}
+
+singbox_prompt_tls_inbound() {
+    local type="$1" config_file="$2"
+    local tag label default_port port password uuid ws_path
+
+    tag=$(singbox_tag_for_type "$type") || return 1
+    label=$(singbox_label_for_type "$type")
+    default_port=$(singbox_default_port_for_type "$type") || return 1
+
+    clear
+    echo -e "${BLUE}===== ${label} 配置 =====${PLAIN}"
+    port=$(singbox_prompt_port "${label} " "$default_port" "$config_file") || return 1
+    if [[ "$type" == "trojan" ]]; then
+        ws_path=$(singbox_prompt_ws_path) || return 1
+    fi
+    password=$(singbox_prompt_password "密码") || return 1
+
+    uuid=""
+    if [[ "$type" == "tuic" ]]; then
+        while true; do
+            read -r -p "$(echo -e "${BLUE}UUID(回车随机生成): ${PLAIN}")" uuid
+            uuid=$(trim_input "$uuid")
+            [[ -n "$uuid" ]] || uuid=$(singbox_random_uuid)
+            singbox_validate_uuid "$uuid" && break
+            echo -e "${RED}UUID 格式无效${PLAIN}"
+        done
+    fi
+
+    singbox_select_cert || return 1
+    case "$type" in
+        anytls)
+            SINGBOX_NEW_INBOUND=$(jq -n \
+                --arg tag "$tag" --argjson port "$port" --arg password "$password" \
+                --arg cert "$SINGBOX_CERT_PATH" --arg key "$SINGBOX_KEY_PATH" \
+                '{type:"anytls",tag:$tag,listen:"::",listen_port:$port,users:[{name:"user1",password:$password}],tls:{enabled:true,certificate_path:$cert,key_path:$key}}')
+            SINGBOX_NEW_SUMMARY="AnyTLS 端口: ${port}\n密码: ${password}"
+            ;;
+        trojan)
+            SINGBOX_NEW_INBOUND=$(jq -n \
+                --arg tag "$tag" --argjson port "$port" --arg password "$password" --arg ws_path "$ws_path" \
+                --arg cert "$SINGBOX_CERT_PATH" --arg key "$SINGBOX_KEY_PATH" \
+                '{type:"trojan",tag:$tag,listen:"::",listen_port:$port,users:[{name:"user1",password:$password}],tls:{enabled:true,certificate_path:$cert,key_path:$key},transport:{type:"ws",path:$ws_path}}')
+            SINGBOX_NEW_SUMMARY="Trojan + WS + TLS 端口: ${port}\nWebSocket 路径: ${ws_path}\n密码: ${password}"
+            ;;
+        tuic)
+            SINGBOX_NEW_INBOUND=$(jq -n \
+                --arg tag "$tag" --argjson port "$port" --arg uuid "$uuid" --arg password "$password" \
+                --arg cert "$SINGBOX_CERT_PATH" --arg key "$SINGBOX_KEY_PATH" \
+                '{type:"tuic",tag:$tag,listen:"::",listen_port:$port,users:[{name:"user1",uuid:$uuid,password:$password}],congestion_control:"bbr",auth_timeout:"3s",zero_rtt_handshake:false,heartbeat:"10s",tls:{enabled:true,certificate_path:$cert,key_path:$key}}')
+            SINGBOX_NEW_SUMMARY="TUIC 端口: ${port}\nUUID: ${uuid}\n密码: ${password}"
+            ;;
+        hysteria2)
+            SINGBOX_NEW_INBOUND=$(jq -n \
+                --arg tag "$tag" --argjson port "$port" --arg password "$password" \
+                --arg cert "$SINGBOX_CERT_PATH" --arg key "$SINGBOX_KEY_PATH" \
+                '{type:"hysteria2",tag:$tag,listen:"::",listen_port:$port,users:[{name:"user1",password:$password}],tls:{enabled:true,certificate_path:$cert,key_path:$key}}')
+            SINGBOX_NEW_SUMMARY="Hysteria2 端口: ${port}\n密码: ${password}"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+singbox_prompt_inbound() {
+    local type="$1" config_file="$2"
+    SINGBOX_NEW_INBOUND=""
+    SINGBOX_NEW_SUMMARY=""
+    case "$type" in
+        shadowsocks) singbox_prompt_shadowsocks "$config_file" ;;
+        snell) singbox_prompt_snell "$config_file" ;;
+        anytls|trojan|tuic|hysteria2) singbox_prompt_tls_inbound "$type" "$config_file" ;;
+        *) return 1 ;;
+    esac
+}
+
+singbox_append_inbound() {
+    local config_file="$1" output_file
+    output_file=$(mktemp) || return 1
+    if ! jq --argjson inbound "$SINGBOX_NEW_INBOUND" \
+        '.inbounds += (if ($inbound | type) == "array" then $inbound else [$inbound] end)' \
+        "$config_file" > "$output_file"; then
+        rm -f "$output_file"
+        return 1
+    fi
+    mv "$output_file" "$config_file"
+    chmod 600 "$config_file"
+}
+
+singbox_check_config_with() {
+    local binary="$1" config_file="$2"
+    "$binary" check -c "$config_file"
+}
+
+singbox_create_systemd_service() {
+    cat > "$SINGBOX_SERVICE_FILE" <<EOF
+[Unit]
+Description=Sing-box service managed by Zero.sh
+After=network.target network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=${SINGBOX_EXEC_PATH} run -c ${SINGBOX_CONFIG_PATH}
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 644 "$SINGBOX_SERVICE_FILE"
+}
+
+singbox_apply_candidate() {
+    local candidate="$1" success_msg="$2" failure_msg="${3:-新配置应用失败}"
+    local backup
+
+    if ! singbox_check_config_with "$SINGBOX_EXEC_PATH" "$candidate"; then
+        echo -e "${RED}配置检查失败,未修改当前配置${PLAIN}"
+        return 1
+    fi
+
+    backup=$(mktemp) || return 1
+    chmod 600 "$backup"
+    cp "$SINGBOX_CONFIG_PATH" "$backup" || {
+        rm -f "$backup"
+        return 1
+    }
+
+    if ! install -m 600 "$candidate" "$SINGBOX_CONFIG_PATH"; then
+        rm -f "$backup"
+        echo -e "${RED}配置写入失败${PLAIN}"
+        return 1
+    fi
+
+    if systemctl restart "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+        rm -f "$backup"
+        echo -e "${GREEN}${success_msg}${PLAIN}"
+        return 0
+    fi
+
+    if install -m 600 "$backup" "$SINGBOX_CONFIG_PATH" && systemctl restart "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+        rm -f "$backup"
+        echo -e "${YELLOW}${failure_msg},已恢复上一份可用配置${PLAIN}"
+        return 1
+    fi
+
+    rm -f "$backup"
+    echo -e "${RED}${failure_msg},回滚后服务仍未启动${PLAIN}"
+    service_failure_hint "$SINGBOX_SERVICE_NAME"
+    return 1
+}
+
+singbox_install() {
+    local enable_anytls enable_trojan enable_ss enable_tuic enable_hy2 enable_snell="n"
+    local candidate summary="" type install_channel channel_choice snell_available=0
+
+    clear
+    if singbox_is_managed; then
+        echo -e "${YELLOW}Sing-box 已由 Zero.sh 管理,请使用管理或更新功能${PLAIN}"
+        singbox_pause_and_return
+        return
+    fi
+    if [[ -e "$SINGBOX_EXEC_PATH" || -e "$SINGBOX_CONFIG_PATH" || -e "$SINGBOX_SERVICE_FILE" ]]; then
+        echo -e "${RED}检测到现有 Sing-box 文件,为避免覆盖非本脚本安装的服务已停止${PLAIN}"
+        echo -e "${YELLOW}请先备份并移除现有安装,或继续使用原管理方式${PLAIN}"
+        singbox_pause_and_return
+        return 1
+    fi
+
+    singbox_install_dependencies || {
+        singbox_pause_and_return
+        return 1
+    }
+
+    clear
+    echo -e "${BLUE}选择 Sing-box 内核:${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}正式版"
+    echo -e "${GREEN}2.${PLAIN}测试版"
+    read -r -p "$(echo -e "${BLUE}请选择 [1-2,默认1]: ${PLAIN}")" channel_choice
+    case "${channel_choice:-1}" in
+        1) install_channel="release" ;;
+        2) install_channel="beta" ;;
+        *)
+            echo -e "${RED}无效选项,已取消安装${PLAIN}"
+            singbox_pause_and_return
+            return 1
+            ;;
+    esac
+
+    singbox_stage_release "$install_channel" || {
+        singbox_pause_and_return
+        return 1
+    }
+    singbox_version_supports_snell "$SINGBOX_STAGE_VERSION" && snell_available=1
+
+    clear
+    echo -e "${BLUE}选择要启用的 Sing-box 入站:${PLAIN}"
+    read -r -p "启用 AnyTLS?          [y/N]: " enable_anytls
+    read -r -p "启用 Trojan + WS + TLS?[y/N]: " enable_trojan
+    read -r -p "启用 Shadowsocks 2022?[y/N]: " enable_ss
+    read -r -p "启用 TUIC v5?         [y/N]: " enable_tuic
+    read -r -p "启用 Hysteria2?       [y/N]: " enable_hy2
+    if (( snell_available == 1 )); then
+        read -r -p "启用 Snell v5/v6?     [y/N]: " enable_snell
+    fi
+    [[ "$enable_anytls" =~ ^[Yy]$ ]] && enable_anytls="y" || enable_anytls="n"
+    [[ "$enable_trojan" =~ ^[Yy]$ ]] && enable_trojan="y" || enable_trojan="n"
+    [[ "$enable_ss" =~ ^[Yy]$ ]] && enable_ss="y" || enable_ss="n"
+    [[ "$enable_tuic" =~ ^[Yy]$ ]] && enable_tuic="y" || enable_tuic="n"
+    [[ "$enable_hy2" =~ ^[Yy]$ ]] && enable_hy2="y" || enable_hy2="n"
+    [[ "$enable_snell" =~ ^[Yy]$ ]] && enable_snell="y" || enable_snell="n"
+
+    if [[ "$enable_anytls" == "n" && "$enable_trojan" == "n" && "$enable_ss" == "n" && "$enable_tuic" == "n" && "$enable_hy2" == "n" && "$enable_snell" == "n" ]]; then
+        echo -e "${YELLOW}至少需要启用一个入站,已取消安装${PLAIN}"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return
+    fi
+
+    candidate=$(mktemp) || {
+        singbox_cleanup_stage
+        return 1
+    }
+    chmod 600 "$candidate"
+    jq -n '{
+        log:{level:"info",timestamp:true},
+        dns:{
+            servers:[{type:"local",tag:"local"}],
+            final:"local",
+            strategy:"prefer_ipv4",
+            cache_capacity:4096
+        },
+        inbounds:[],
+        outbounds:[{type:"direct",tag:"direct"}],
+        route:{final:"direct",auto_detect_interface:true,default_domain_resolver:"local"}
+    }' > "$candidate"
+
+    for type in anytls trojan shadowsocks tuic hysteria2 snell; do
+        case "$type" in
+            anytls) [[ "$enable_anytls" == "y" ]] || continue ;;
+            trojan) [[ "$enable_trojan" == "y" ]] || continue ;;
+            shadowsocks) [[ "$enable_ss" == "y" ]] || continue ;;
+            tuic) [[ "$enable_tuic" == "y" ]] || continue ;;
+            hysteria2) [[ "$enable_hy2" == "y" ]] || continue ;;
+            snell) [[ "$enable_snell" == "y" ]] || continue ;;
+        esac
+
+        if ! singbox_prompt_inbound "$type" "$candidate" || ! singbox_append_inbound "$candidate"; then
+            echo -e "${RED}生成 $(singbox_label_for_type "$type") 配置失败,安装已取消${PLAIN}"
+            rm -f "$candidate"
+            singbox_cleanup_stage
+            singbox_pause_and_return
+            return 1
+        fi
+        [[ -n "$summary" ]] && summary+=$'\n\n'
+        summary+="$SINGBOX_NEW_SUMMARY"
+    done
+
+    if ! singbox_check_config_with "$SINGBOX_STAGE_BIN" "$candidate"; then
+        echo -e "${RED}Sing-box 配置检查失败,安装已取消${PLAIN}"
+        rm -f "$candidate"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return 1
+    fi
+
+    install -d -m 700 "$SINGBOX_CONFIG_DIR" || {
+        rm -f "$candidate"
+        singbox_cleanup_stage
+        return 1
+    }
+    if ! install -m 755 "$SINGBOX_STAGE_BIN" "$SINGBOX_EXEC_PATH" || ! install -m 600 "$candidate" "$SINGBOX_CONFIG_PATH"; then
+        echo -e "${RED}Sing-box 文件安装失败${PLAIN}"
+        rm -f "$candidate" "$SINGBOX_EXEC_PATH"
+        rm -rf "$SINGBOX_CONFIG_DIR"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return 1
+    fi
+    rm -f "$candidate"
+    printf 'channel=%s\nversion=%s\n' "$install_channel" "$SINGBOX_STAGE_VERSION" > "$SINGBOX_MANAGED_MARKER"
+    chmod 600 "$SINGBOX_MANAGED_MARKER"
+    singbox_create_systemd_service
+
+    if ! systemctl daemon-reload >/dev/null 2>&1 || ! systemctl enable --now "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+        echo -e "${RED}Sing-box 服务启动失败,已撤销本次安装${PLAIN}"
+        systemctl --no-pager --full status "$SINGBOX_SERVICE_NAME" || true
+        systemctl disable --now "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
+        rm -f "$SINGBOX_SERVICE_FILE" "$SINGBOX_EXEC_PATH"
+        rm -rf "$SINGBOX_CONFIG_DIR"
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return 1
+    fi
+
+    echo -e "${GREEN}Sing-box ${SINGBOX_STAGE_VERSION} 安装完成${PLAIN}"
+    echo -e "${YELLOW}请确认防火墙已放行所选 TCP/UDP 端口${PLAIN}"
+    echo -e "${BLUE}---------------- 随机/当前凭据 ----------------${PLAIN}"
+    echo -e "${GREEN}${summary}${PLAIN}"
+    echo -e "${BLUE}------------------------------------------------${PLAIN}"
+    singbox_cleanup_stage
+    singbox_pause_and_return
+}
+
+singbox_protocol_status() {
+    local type="$1" tag port suffix=""
+    tag=$(singbox_tag_for_type "$type") || return 1
+    if singbox_config_has_tag "$SINGBOX_CONFIG_PATH" "$tag"; then
+        if [[ "$type" == "shadowsocks" ]] && singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH"; then
+            tag="$SINGBOX_SHADOWTLS_TAG"
+            suffix=" (ShadowTLS v3)"
+        fi
+        port=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .listen_port' "$SINGBOX_CONFIG_PATH")
+        echo "已启用:${port}${suffix}"
+    else
+        echo "未启用"
+    fi
+}
+
+singbox_add_inbound() {
+    local type="$1" label candidate
+    label=$(singbox_label_for_type "$type")
+    if [[ "$type" == "snell" ]] && ! singbox_supports_snell; then
+        echo -e "${RED}当前 Sing-box 内核不支持 Snell 入站${PLAIN}"
+        echo -e "${YELLOW}请先在“更新内核”中切换到测试版 1.14+${PLAIN}"
+        return 1
+    fi
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    cp "$SINGBOX_CONFIG_PATH" "$candidate" || {
+        rm -f "$candidate"
+        return 1
+    }
+
+    if ! singbox_prompt_inbound "$type" "$candidate" || ! singbox_append_inbound "$candidate"; then
+        rm -f "$candidate"
+        echo -e "${RED}${label} 配置生成失败${PLAIN}"
+        return 1
+    fi
+
+    if singbox_apply_candidate "$candidate" "${label} 已启用" "${label} 启动失败"; then
+        echo -e "${GREEN}${SINGBOX_NEW_SUMMARY}${PLAIN}"
+    fi
+    rm -f "$candidate"
+}
+
+singbox_modify_port() {
+    local type="$1" tag label current_port new_port candidate
+    tag=$(singbox_tag_for_type "$type") || return 1
+    label=$(singbox_label_for_type "$type")
+    if [[ "$type" == "shadowsocks" ]] && singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH"; then
+        tag="$SINGBOX_SHADOWTLS_TAG"
+    fi
+    current_port=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .listen_port' "$SINGBOX_CONFIG_PATH")
+    read -r -p "$(echo -e "${BLUE}新端口(当前:${current_port}): ${PLAIN}")" new_port
+    new_port=$(trim_input "$new_port")
+    [[ -n "$new_port" ]] || return 0
+    if ! singbox_validate_port "$new_port"; then
+        echo -e "${RED}端口无效${PLAIN}"
+        return 1
+    fi
+    [[ "$new_port" == "$current_port" ]] && return 0
+    singbox_port_available "$SINGBOX_CONFIG_PATH" "$new_port" "$tag" || return 1
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    jq --arg tag "$tag" --argjson port "$new_port" \
+        '(.inbounds[] | select(.tag == $tag) | .listen_port) = $port' \
+        "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+        rm -f "$candidate"
+        return 1
+    }
+    singbox_apply_candidate "$candidate" "${label} 端口已更新为 ${new_port}" "${label} 新端口启动失败"
+    rm -f "$candidate"
+}
+
+singbox_modify_auth() {
+    local type="$1" tag label password psk uuid current_method bytes candidate
+    tag=$(singbox_tag_for_type "$type") || return 1
+    label=$(singbox_label_for_type "$type")
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+
+    if [[ "$type" == "shadowsocks" ]]; then
+        current_method=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .method' "$SINGBOX_CONFIG_PATH")
+        case "$current_method" in
+            2022-blake3-aes-128-gcm) bytes=16 ;;
+            2022-blake3-aes-256-gcm|2022-blake3-chacha20-poly1305) bytes=32 ;;
+            *)
+                echo -e "${RED}当前 Shadowsocks 加密方式不在本脚本管理范围${PLAIN}"
+                rm -f "$candidate"
+                return 1
+                ;;
+        esac
+        while true; do
+            read -r -s -p "新密码(回车随机生成): " password
+            echo
+            [[ -n "$password" ]] || password=$(singbox_random_ss_password "$bytes")
+            singbox_validate_ss_password "$password" "$bytes" && break
+            echo -e "${RED}密码 Base64 解码后必须为 ${bytes} 字节${PLAIN}"
+        done
+        jq --arg tag "$tag" --arg password "$password" \
+            '(.inbounds[] | select(.tag == $tag) | .password) = $password' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+            rm -f "$candidate"
+            return 1
+        }
+    elif [[ "$type" == "snell" ]]; then
+        while true; do
+            psk=$(singbox_prompt_password "新 PSK")
+            singbox_validate_snell_psk "$psk" && break
+            echo -e "${RED}Snell PSK 必须为 12-255 字节${PLAIN}"
+        done
+        password="$psk"
+        jq --arg tag "$tag" --arg psk "$psk" \
+            '(.inbounds[] | select(.tag == $tag) | .psk) = $psk' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+            rm -f "$candidate"
+            return 1
+        }
+    elif [[ "$type" == "tuic" ]]; then
+        read -r -p "$(echo -e "${BLUE}新 UUID(回车保持,R随机): ${PLAIN}")" uuid
+        uuid=$(trim_input "$uuid")
+        if [[ "$uuid" =~ ^[Rr]$ ]]; then
+            uuid=$(singbox_random_uuid)
+        elif [[ -z "$uuid" ]]; then
+            uuid=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .users[0].uuid' "$SINGBOX_CONFIG_PATH")
+        fi
+        if ! singbox_validate_uuid "$uuid"; then
+            echo -e "${RED}UUID 无效${PLAIN}"
+            rm -f "$candidate"
+            return 1
+        fi
+        password=$(singbox_prompt_password "新密码")
+        jq --arg tag "$tag" --arg uuid "$uuid" --arg password "$password" \
+            '(.inbounds[] | select(.tag == $tag) | .users[0]) |= (.uuid = $uuid | .password = $password)' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+            rm -f "$candidate"
+            return 1
+        }
+    else
+        password=$(singbox_prompt_password "新密码")
+        jq --arg tag "$tag" --arg password "$password" \
+            '(.inbounds[] | select(.tag == $tag) | .users[0].password) = $password' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+            rm -f "$candidate"
+            return 1
+        }
+    fi
+
+    if singbox_apply_candidate "$candidate" "${label} 认证信息已更新" "${label} 新认证信息启动失败"; then
+        [[ "$type" == "tuic" ]] && echo -e "${GREEN}UUID: ${uuid}${PLAIN}"
+        if [[ "$type" == "snell" ]]; then
+            echo -e "${GREEN}PSK: ${password}${PLAIN}"
+        else
+            echo -e "${GREEN}密码: ${password}${PLAIN}"
+        fi
+    fi
+    rm -f "$candidate"
+}
+
+singbox_modify_cert() {
+    local type="$1" tag label candidate
+    singbox_type_uses_tls "$type" || return 1
+    tag=$(singbox_tag_for_type "$type") || return 1
+    label=$(singbox_label_for_type "$type")
+    singbox_select_cert || return 1
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    jq --arg tag "$tag" --arg cert "$SINGBOX_CERT_PATH" --arg key "$SINGBOX_KEY_PATH" \
+        '(.inbounds[] | select(.tag == $tag) | .tls) |= (.enabled = true | .certificate_path = $cert | .key_path = $key)' \
+        "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+        rm -f "$candidate"
+        return 1
+    }
+    singbox_apply_candidate "$candidate" "${label} 证书已更新" "${label} 新证书启动失败"
+    rm -f "$candidate"
+}
+
+singbox_modify_trojan_ws_path() {
+    local tag="trojan-in" current_path new_path candidate
+
+    current_path=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | (.transport.path // empty)' "$SINGBOX_CONFIG_PATH")
+    new_path=$(singbox_prompt_ws_path "${current_path:-/}") || return 1
+    [[ "$new_path" == "$current_path" ]] && return 0
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    jq --arg tag "$tag" --arg path "$new_path" \
+        '(.inbounds[] | select(.tag == $tag) | .transport) = {type:"ws",path:$path}' \
+        "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+        rm -f "$candidate"
+        return 1
+    }
+    singbox_apply_candidate "$candidate" "Trojan WebSocket 路径已更新为 ${new_path}" "Trojan WebSocket 路径更新后启动失败"
+    rm -f "$candidate"
+}
+
+singbox_modify_snell_mode() {
+    local tag="snell-in" current_version option version mode candidate description
+    current_version=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .version' "$SINGBOX_CONFIG_PATH")
+
+    clear
+    echo -e "${BLUE}当前 Snell 版本: v${current_version}${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}v5 / 无混淆"
+    echo -e "${GREEN}2.${PLAIN}v5 / HTTP 混淆"
+    echo -e "${GREEN}3.${PLAIN}v6 / default 整形"
+    echo -e "${GREEN}4.${PLAIN}v6 / unshaped"
+    echo -e "${RED}5.${PLAIN}v6 / unsafe-raw"
+    echo -e "${YELLOW}0.${PLAIN}取消"
+    read -r -p "$(echo -e "${BLUE}请选择 [0-5]: ${PLAIN}")" option
+    case "$option" in
+        1) version=5; mode="none"; description="v5 / 无混淆" ;;
+        2) version=5; mode="http"; description="v5 / HTTP 混淆" ;;
+        3) version=6; mode="default"; description="v6 / default" ;;
+        4) version=6; mode="unshaped"; description="v6 / unshaped" ;;
+        5) version=6; mode="unsafe-raw"; description="v6 / unsafe-raw" ;;
+        0) return ;;
+        *)
+            echo -e "${RED}无效选项${PLAIN}"
+            return 1
+            ;;
+    esac
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    if (( version == 5 )); then
+        jq --arg tag "$tag" --arg mode "$mode" \
+            '(.inbounds[] | select(.tag == $tag)) |= (.version = 5 | .obfs_mode = $mode | del(.mode))' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+            rm -f "$candidate"
+            return 1
+        }
+    else
+        jq --arg tag "$tag" --arg mode "$mode" \
+            '(.inbounds[] | select(.tag == $tag)) |= (.version = 6 | .mode = $mode | del(.obfs_mode))' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+            rm -f "$candidate"
+            return 1
+        }
+    fi
+
+    singbox_apply_candidate "$candidate" "Snell 已切换为 ${description}" "Snell 模式切换后启动失败"
+    rm -f "$candidate"
+}
+
+singbox_modify_shadowtls() {
+    local tag="$SINGBOX_SHADOWTLS_TAG" password handshake_server handshake_port candidate
+    local current_password current_server current_port
+
+    singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH" || return 1
+    current_password=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .users[0].password' "$SINGBOX_CONFIG_PATH")
+    current_server=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .handshake.server' "$SINGBOX_CONFIG_PATH")
+    current_port=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .handshake.server_port' "$SINGBOX_CONFIG_PATH")
+
+    clear
+    echo -e "${BLUE}===== ShadowTLS v3 配置 =====${PLAIN}"
+    echo -e "${YELLOW}当前伪装握手: ${current_server}:${current_port}${PLAIN}"
+    read -r -s -p "新 ShadowTLS 密码(回车保持): " password
+    echo
+    password="${password:-$current_password}"
+    read -r -p "$(echo -e "${BLUE}伪装握手域名(回车保持): ${PLAIN}")" handshake_server
+    handshake_server=$(trim_input "$handshake_server")
+    handshake_server="${handshake_server:-$current_server}"
+    read -r -p "$(echo -e "${BLUE}伪装握手端口(当前:${current_port}): ${PLAIN}")" handshake_port
+    handshake_port=$(trim_input "$handshake_port")
+    handshake_port="${handshake_port:-$current_port}"
+    if ! singbox_validate_port "$handshake_port"; then
+        echo -e "${RED}端口必须在 1-65535 之间${PLAIN}"
+        return 1
+    fi
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    jq --arg tag "$tag" --arg password "$password" \
+        --arg server "$handshake_server" --argjson port "$handshake_port" \
+        '(.inbounds[] | select(.tag == $tag)) |= (.users[0].password = $password | .handshake.server = $server | .handshake.server_port = $port)' \
+        "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+        rm -f "$candidate"
+        return 1
+    }
+    if singbox_apply_candidate "$candidate" "ShadowTLS v3 配置已更新" "ShadowTLS v3 新配置启动失败"; then
+        echo -e "${GREEN}ShadowTLS 密码: ${password}${PLAIN}"
+        echo -e "${GREEN}客户端 SNI: ${handshake_server}${PLAIN}"
+    fi
+    rm -f "$candidate"
+}
+
+singbox_remove_inbound() {
+    local type="$1" tag label count remove_count=1 confirm candidate use_shadowtls=0
+    tag=$(singbox_tag_for_type "$type") || return 1
+    label=$(singbox_label_for_type "$type")
+    if [[ "$type" == "shadowsocks" ]] && singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH"; then
+        use_shadowtls=1
+        remove_count=2
+    fi
+    count=$(jq '.inbounds | length' "$SINGBOX_CONFIG_PATH")
+    if (( count <= remove_count )); then
+        echo -e "${RED}至少需要保留一个入站,不能删除 ${label}${PLAIN}"
+        return 1
+    fi
+    read -r -p "$(echo -e "${RED}确定禁用 ${label}? [y/N]: ${PLAIN}")" confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || return 0
+
+    candidate=$(mktemp) || return 1
+    chmod 600 "$candidate"
+    if (( use_shadowtls == 1 )); then
+        if ! jq --arg ss_tag "$tag" --arg stls_tag "$SINGBOX_SHADOWTLS_TAG" \
+            '.inbounds |= map(select(.tag != $ss_tag and .tag != $stls_tag))' \
+            "$SINGBOX_CONFIG_PATH" > "$candidate"; then
+            rm -f "$candidate"
+            return 1
+        fi
+    else
+        if ! jq --arg tag "$tag" '.inbounds |= map(select(.tag != $tag))' "$SINGBOX_CONFIG_PATH" > "$candidate"; then
+            rm -f "$candidate"
+            return 1
+        fi
+    fi
+    singbox_apply_candidate "$candidate" "${label} 已禁用" "删除 ${label} 后服务启动失败"
+    rm -f "$candidate"
+}
+
+singbox_manage_protocol() {
+    local type="$1" tag label confirm option
+    tag=$(singbox_tag_for_type "$type") || return 1
+    label=$(singbox_label_for_type "$type")
+
+    if ! singbox_config_has_tag "$SINGBOX_CONFIG_PATH" "$tag"; then
+        if [[ "$type" == "snell" ]] && ! singbox_supports_snell; then
+            echo -e "${RED}当前内核不支持 Snell 入站${PLAIN}"
+            echo -e "${YELLOW}请先更新到测试版 Sing-box 1.14+${PLAIN}"
+            sleep 2
+            return 1
+        fi
+        read -r -p "$(echo -e "${BLUE}${label} 当前未启用,是否添加? [y/N]: ${PLAIN}")" confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] && singbox_add_inbound "$type"
+        return
+    fi
+
+    while true; do
+        clear
+        echo -e "${BLUE}===== ${label} 管理 =====${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}修改端口"
+        echo -e "${GREEN}2.${PLAIN}修改认证"
+        if singbox_type_uses_tls "$type"; then
+            echo -e "${GREEN}3.${PLAIN}修改证书"
+        elif [[ "$type" == "snell" ]]; then
+            echo -e "${GREEN}3.${PLAIN}修改版本/模式"
+        elif [[ "$type" == "shadowsocks" ]] && singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH"; then
+            echo -e "${GREEN}3.${PLAIN}修改 ShadowTLS v3"
+        fi
+        if [[ "$type" == "trojan" ]]; then
+            echo -e "${GREEN}4.${PLAIN}修改 WebSocket 路径"
+            echo -e "${RED}5.${PLAIN}禁用入站"
+        else
+            echo -e "${RED}4.${PLAIN}禁用入站"
+        fi
+        echo -e "${YELLOW}0.${PLAIN}返回上级"
+        read -r -p "$(echo -e "${BLUE}请输入选项: ${PLAIN}")" option
+        case "$option" in
+            1) singbox_modify_port "$type"; sleep 1 ;;
+            2) singbox_modify_auth "$type"; sleep 1 ;;
+            3)
+                if singbox_type_uses_tls "$type"; then
+                    singbox_modify_cert "$type"
+                elif [[ "$type" == "snell" ]]; then
+                    singbox_modify_snell_mode
+                elif [[ "$type" == "shadowsocks" ]] && singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH"; then
+                    singbox_modify_shadowtls
+                else
+                    echo -e "${RED}${label} 没有可修改的证书或模式${PLAIN}"
+                fi
+                sleep 1
+                ;;
+            4)
+                if [[ "$type" == "trojan" ]]; then
+                    singbox_modify_trojan_ws_path
+                    sleep 1
+                else
+                    singbox_remove_inbound "$type"
+                    sleep 1
+                    return
+                fi
+                ;;
+            5)
+                if [[ "$type" == "trojan" ]]; then
+                    singbox_remove_inbound "$type"
+                    sleep 1
+                    return
+                fi
+                echo -e "${RED}无效选项${PLAIN}"
+                sleep 0.5
+                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
+singbox_modify_config() {
+    local option snell_status
+    while true; do
+        snell_status=$(singbox_protocol_status snell)
+        if [[ "$snell_status" == "未启用" ]] && ! singbox_supports_snell; then
+            snell_status="需测试版1.14+"
+        fi
+        clear
+        echo -e "${BLUE}===== Sing-box 入站管理 =====${PLAIN}"
+        echo -e "${GREEN}1.${PLAIN}AnyTLS          [${YELLOW}$(singbox_protocol_status anytls)${PLAIN}]"
+        echo -e "${GREEN}2.${PLAIN}Trojan + WS + TLS [${YELLOW}$(singbox_protocol_status trojan)${PLAIN}]"
+        echo -e "${GREEN}3.${PLAIN}Shadowsocks 2022[${YELLOW}$(singbox_protocol_status shadowsocks)${PLAIN}]"
+        echo -e "${GREEN}4.${PLAIN}TUIC v5         [${YELLOW}$(singbox_protocol_status tuic)${PLAIN}]"
+        echo -e "${GREEN}5.${PLAIN}Hysteria2       [${YELLOW}$(singbox_protocol_status hysteria2)${PLAIN}]"
+        echo -e "${GREEN}6.${PLAIN}Snell v5/v6     [${YELLOW}${snell_status}${PLAIN}]"
+        echo -e "${YELLOW}0.${PLAIN}返回上级"
+        read -r -p "$(echo -e "${BLUE}请输入选项 [0-6]: ${PLAIN}")" option
+        case "$option" in
+            1) singbox_manage_protocol anytls ;;
+            2) singbox_manage_protocol trojan ;;
+            3) singbox_manage_protocol shadowsocks ;;
+            4) singbox_manage_protocol tuic ;;
+            5) singbox_manage_protocol hysteria2 ;;
+            6) singbox_manage_protocol snell ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
+singbox_manage_service() {
+    local option
+    while true; do
+        clear
+        echo -e "${BLUE}✦ SingBox_Menu ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}查看配置"
+        echo -e "${GREEN}  2.${PLAIN}修改配置"
+        echo -e "${GREEN}  3.${PLAIN}停止服务"
+        echo -e "${GREEN}  4.${PLAIN}重启服务"
+        echo -e "${GREEN}  0.${PLAIN}返回主页"
+        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
+        case "$option" in
+            1)
+                clear
+                echo -e "${BLUE}===== Sing-box 当前状态 =====${PLAIN}"
+                systemctl --no-pager --full status "$SINGBOX_SERVICE_NAME" || true
+                pause_enter "按回车查看配置..."
+                clear
+                echo -e "${BLUE}===== Sing-box 当前配置 =====${PLAIN}"
+                jq . "$SINGBOX_CONFIG_PATH"
+                singbox_pause_and_return
+                ;;
+            2) singbox_modify_config ;;
+            3)
+                systemctl stop "$SINGBOX_SERVICE_NAME" && echo -e "${GREEN}Sing-box 已停止${PLAIN}" || echo -e "${RED}Sing-box 停止失败${PLAIN}"
+                singbox_pause_and_return
+                ;;
+            4)
+                if singbox_check_config_with "$SINGBOX_EXEC_PATH" "$SINGBOX_CONFIG_PATH" && systemctl restart "$SINGBOX_SERVICE_NAME"; then
+                    echo -e "${GREEN}Sing-box 已重启${PLAIN}"
+                else
+                    echo -e "${RED}Sing-box 重启失败${PLAIN}"
+                    service_failure_hint "$SINGBOX_SERVICE_NAME"
+                fi
+                singbox_pause_and_return
+                ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
+singbox_update_channel() {
+    local channel="$1" channel_label current_version confirm backup was_active=0
+
+    clear
+    if ! singbox_is_managed || ! singbox_is_installed; then
+        echo -e "${RED}未检测到由 Zero.sh 管理的 Sing-box${PLAIN}"
+        singbox_pause_and_return
+        return 1
+    fi
+    singbox_install_dependencies || {
+        singbox_pause_and_return
+        return 1
+    }
+
+    [[ "$channel" == "release" ]] && channel_label="正式版" || channel_label="测试版"
+    current_version=$(singbox_get_current_version)
+    if [[ -z "$current_version" || "$current_version" == "未知" ]]; then
+        echo -e "${RED}无法读取当前 Sing-box 版本,已取消更新${PLAIN}"
+        singbox_pause_and_return
+        return 1
+    fi
+
+    echo -e "${BLUE}正在检查 Sing-box ${channel_label}版本...${PLAIN}"
+    singbox_prepare_release "$channel" || {
+        singbox_pause_and_return
+        return 1
+    }
+
+    echo -e "${BLUE}当前版本: ${YELLOW}${current_version}${PLAIN}"
+    echo -e "${BLUE}最新版本: ${YELLOW}${SINGBOX_STAGE_VERSION}${PLAIN}"
+    if ! singbox_version_is_newer "$SINGBOX_STAGE_VERSION" "$current_version"; then
+        echo -e "${GREEN}当前已是最新版本,无需更新${PLAIN}"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return
+    fi
+
+    read -r -p "$(echo -e "${BLUE}发现新版本,是否更新到 Sing-box ${SINGBOX_STAGE_VERSION}? [y/N]: ${PLAIN}")" confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        singbox_cleanup_stage
+        return
+    fi
+
+    if ! singbox_download_prepared_release; then
+        singbox_pause_and_return
+        return 1
+    fi
+
+    if ! singbox_check_config_with "$SINGBOX_STAGE_BIN" "$SINGBOX_CONFIG_PATH"; then
+        echo -e "${RED}当前配置与新版本不兼容,已取消更新${PLAIN}"
+        singbox_cleanup_stage
+        singbox_pause_and_return
+        return 1
+    fi
+
+    backup=$(mktemp) || {
+        singbox_cleanup_stage
+        return 1
+    }
+    cp "$SINGBOX_EXEC_PATH" "$backup" || {
+        rm -f "$backup"
+        singbox_cleanup_stage
+        return 1
+    }
+    systemctl is-active --quiet "$SINGBOX_SERVICE_NAME" && was_active=1
+    (( was_active == 1 )) && systemctl stop "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
+
+    if ! install -m 755 "$SINGBOX_STAGE_BIN" "$SINGBOX_EXEC_PATH"; then
+        install -m 755 "$backup" "$SINGBOX_EXEC_PATH" >/dev/null 2>&1 || true
+        (( was_active == 1 )) && systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
+        rm -f "$backup"
+        singbox_cleanup_stage
+        echo -e "${RED}Sing-box 更新失败,已恢复旧二进制${PLAIN}"
+        singbox_pause_and_return
+        return 1
+    fi
+
+    if (( was_active == 0 )) || systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+        printf 'channel=%s\nversion=%s\n' "$channel" "$SINGBOX_STAGE_VERSION" > "$SINGBOX_MANAGED_MARKER"
+        chmod 600 "$SINGBOX_MANAGED_MARKER"
+        rm -f "$backup"
+        echo -e "${GREEN}Sing-box 已更新到 ${SINGBOX_STAGE_VERSION}${PLAIN}"
+    else
+        if install -m 755 "$backup" "$SINGBOX_EXEC_PATH" && systemctl start "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1; then
+            echo -e "${YELLOW}新版本启动失败,已恢复旧版本${PLAIN}"
+        else
+            echo -e "${RED}新版本启动失败,回滚后服务仍未启动${PLAIN}"
+            service_failure_hint "$SINGBOX_SERVICE_NAME"
+        fi
+        rm -f "$backup"
+    fi
+    singbox_cleanup_stage
+    singbox_pause_and_return
+}
+
+singbox_update() {
+    local option
+    while true; do
+        clear
+        echo -e "${BLUE}✦ SingBox_Update ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}更新测试版"
+        echo -e "${GREEN}  2.${PLAIN}更新正式版"
+        echo -e "${GREEN}  0.${PLAIN}返回上级"
+        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
+        case "$option" in
+            1) singbox_update_channel beta ;;
+            2) singbox_update_channel release ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
+singbox_delete() {
+    local confirm
+    clear
+    if ! singbox_is_managed; then
+        echo -e "${YELLOW}没有检测到由 Zero.sh 管理的 Sing-box${PLAIN}"
+        singbox_pause_and_return
+        return
+    fi
+    read -r -p "$(echo -e "${RED}确定删除 Sing-box、配置和服务? [y/N]: ${PLAIN}")" confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        systemctl disable --now "$SINGBOX_SERVICE_NAME" >/dev/null 2>&1 || true
+        rm -f "$SINGBOX_SERVICE_FILE" "$SINGBOX_EXEC_PATH"
+        rm -rf "$SINGBOX_CONFIG_DIR"
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        echo -e "${GREEN}Sing-box 已删除${PLAIN}"
+    fi
+    singbox_pause_and_return
+}
+
+singbox_menu() {
+    local option
+
+    while true; do
+        clear
+        echo -e "${BLUE}✦ SingBox_Ver.1.2 ✦${PLAIN}"
+        echo -e "${GREEN}  1.${PLAIN}安装服务"
+        echo -e "${GREEN}  2.${PLAIN}管理服务"
+        echo -e "${GREEN}  3.${PLAIN}更新内核"
+        echo -e "${GREEN}  4.${PLAIN}删除服务"
+        echo -e "${GREEN}  0.${PLAIN}返回主页"
+        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
+        case "$option" in
+            1) singbox_install ;;
+            2)
+                if ! singbox_is_managed || ! singbox_is_installed; then
+                    echo -e "${RED}未安装由 Zero.sh 管理的 Sing-box${PLAIN}"
+                    singbox_pause_and_return
+                else
+                    singbox_manage_service
+                fi
+                ;;
+            3) singbox_update ;;
+            4) singbox_delete ;;
+            0) return ;;
+            *) echo -e "${RED}无效选项${PLAIN}"; sleep 0.5 ;;
+        esac
+    done
+}
+
 CYAN="\033[0;36m"
 BOLD="\033[1m"
 NC="\033[0m"
@@ -9788,6 +11298,7 @@ reinstall_system_menu() { reinstall_menu; }
 reboot_system()         { echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps; }
 configure_shoes()       { shoes_check_supported_os || { press_any_key_to_continue; return; }; shoes_menu; }
 configure_mihomo()      { mihomo_menu; }
+configure_singbox()     { singbox_menu; }
 configure_wireproxy() {
     local rc
     ( wireproxy_menu )
@@ -11028,7 +12539,7 @@ configure_firewall() {
 
 show_main_menu() {
     clear
-    echo -e "${BLUE}✦ Steins Gate_Ver.2.3 ✦${PLAIN}"
+    echo -e "${BLUE}✦ Steins Gate_Ver.2.4 ✦${PLAIN}"
     echo -e "${GREEN}  01.${PLAIN}系统更新"
     echo -e "${GREEN}  02.${PLAIN}系统清理"
     echo -e "${GREEN}  03.${PLAIN}重装系统"
@@ -11043,9 +12554,10 @@ show_main_menu() {
     echo -e "${GREEN}  12.${PLAIN}配置Snell"
     echo -e "${GREEN}  13.${PLAIN}配置Shoes"
     echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
-    echo -e "${GREEN}  15.${PLAIN}配置FireWall"
-    echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
-    echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
+    echo -e "${GREEN}  15.${PLAIN}配置SingBox"
+    echo -e "${GREEN}  16.${PLAIN}配置FireWall"
+    echo -e "${GREEN}  17.${PLAIN}配置WireProxy"
+    echo -e "${GREEN}  18.${PLAIN}配置WarpStack"
     echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
 }
 
@@ -11065,9 +12577,10 @@ handle_main_menu_choice() {
         12) snell_menu ;;
         13) configure_shoes ;;
         14) configure_mihomo ;;
-        15) configure_firewall ;;
-        16) configure_wireproxy ;;
-        17) configure_warpstack ;;
+        15) configure_singbox ;;
+        16) configure_firewall ;;
+        17) configure_wireproxy ;;
+        18) configure_warpstack ;;
         0)
             clear
             echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"
@@ -11088,7 +12601,7 @@ main_menu() {
 
     while true; do
         show_main_menu
-        choice=$(read_menu_choice "✦ Choice [0-17] ✦ : ")
+        choice=$(read_menu_choice "✦ Choice [0-18] ✦ : ")
         handle_main_menu_choice "$choice" || break
     done
 }
