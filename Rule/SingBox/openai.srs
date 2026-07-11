@@ -1,36 +1,53 @@
-"route": {
-  "rule_set": [
-    {
-      "type": "remote",
-      "tag": "openai",
-      "format": "source",
-      "url": "https://raw.githubusercontent.com/你的用户名/你的仓库/main/openai.json",
-      "update_interval": "1d"
-    }
-  ],
+{
+  "version": 4,
   "rules": [
     {
-      "action": "sniff"
-    },
-    {
-      "rule_set": [
-        "openai"
+      "domain": [
+        "openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+        "openaicomproductionae4b.blob.core.windows.net",
+        "production-openaicom-storage.azureedge.net",
+        "chat.openai.com.cdn.cloudflare.net",
+        "browser-intake-datadoghq.com",
+        "client-api.arkoselabs.com",
+        "openai-api.arkoselabs.com",
+        "api.segment.io",
+        "gateway.ai.cloudflare.com",
+        "a.nel.cloudflare.com",
+        "openrouter.ai",
+        "api.jetbrains.ai"
       ],
-      "action": "resolve",
-      "strategy": "ipv6_only"
-    },
-    {
-      "rule_set": [
-        "openai"
+      "domain_suffix": [
+        "ai.com",
+        "imgix.net",
+        "openai.com",
+        "chatgpt.com",
+        "oaistatic.com",
+        "azureedge.net",
+        "livekit.cloud",
+        "oaiusercontent.com",
+        "ingest.us.sentry.io",
+        "webpubsub.azure.com",
+        "anthropic.com",
+        "deepmind.com",
+        "claude.com",
+        "sora.com",
+        "groq.com",
+        "grok.com",
+        "chat.com",
+        "poe.com",
+        "clipdrop.co",
+        "perplexity.ai",
+        "openart.ai",
+        "jasper.ai",
+        "claude.ai",
+        "meta.ai",
+        "dify.ai",
+        "x.ai",
+        "g.ai"
       ],
-      "action": "route",
-      "outbound": "direct"
+      "domain_keyword": [
+        "openai"
+      ]
     }
-  ],
-  "final": "direct",
-  "auto_detect_interface": true,
-  "default_domain_resolver": {
-    "server": "local",
-    "strategy": "prefer_ipv6"
-  }
+  ]
 }
