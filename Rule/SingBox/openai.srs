@@ -1,0 +1,36 @@
+"route": {
+  "rule_set": [
+    {
+      "type": "remote",
+      "tag": "openai",
+      "format": "source",
+      "url": "https://raw.githubusercontent.com/你的用户名/你的仓库/main/openai.json",
+      "update_interval": "1d"
+    }
+  ],
+  "rules": [
+    {
+      "action": "sniff"
+    },
+    {
+      "rule_set": [
+        "openai"
+      ],
+      "action": "resolve",
+      "strategy": "ipv6_only"
+    },
+    {
+      "rule_set": [
+        "openai"
+      ],
+      "action": "route",
+      "outbound": "direct"
+    }
+  ],
+  "final": "direct",
+  "auto_detect_interface": true,
+  "default_domain_resolver": {
+    "server": "local",
+    "strategy": "prefer_ipv6"
+  }
+}
