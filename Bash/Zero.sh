@@ -8969,7 +8969,7 @@ singbox_install() {
         },
         inbounds:[],
         outbounds:[{type:"direct",tag:"direct"}],
-        route:{final:"direct",auto_detect_interface:true,default_domain_resolver:"local"}
+        route:{final:"direct",default_domain_resolver:"local"}
     }' > "$candidate"
 
     for type in anytls trojan shadowsocks tuic hysteria2 snell; do
@@ -9482,7 +9482,8 @@ singbox_enable_warp() {
         def is_warp_resolve:
             .action == "resolve" and
             (((.domain // []) == ["challenges.cloudflare.com"]) or
-             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]));
+             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]) or
+             ((.domain_suffix // []) == ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"]));
         def is_warp_rule:
             (.outbound // "") == $tag or is_warp_resolve;
 
@@ -9507,22 +9508,12 @@ singbox_enable_warp() {
             map(select(((is_warp_rule or is_plain_sniff) | not)))) |
         .route.rules = [{action: "sniff"}] + [
             {
-                domain: ["challenges.cloudflare.com"],
+                domain_suffix: ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"],
                 action: "resolve",
                 strategy: "ipv6_only"
             },
             {
-                domain_suffix: ["googlevideo.com", "youtube.com"],
-                action: "resolve",
-                strategy: "ipv6_only"
-            },
-            {
-                domain: ["challenges.cloudflare.com"],
-                action: "route",
-                outbound: $tag
-            },
-            {
-                domain_suffix: ["googlevideo.com", "youtube.com"],
+                domain_suffix: ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"],
                 action: "route",
                 outbound: $tag
             }
@@ -9547,7 +9538,8 @@ singbox_disable_warp() {
         def is_warp_resolve:
             .action == "resolve" and
             (((.domain // []) == ["challenges.cloudflare.com"]) or
-             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]));
+             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]) or
+             ((.domain_suffix // []) == ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"]));
         def is_warp_rule:
             (.outbound // "") == $tag or is_warp_resolve;
 
