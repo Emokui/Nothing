@@ -3,55 +3,21 @@
 # FreeBSD/Serv00 user-space installer for sing-box.
 # No root, pkg, systemd or rc.d service is required.
 
-CURRENT_USER="${USER:-$(id -un 2>/dev/null || whoami 2>/dev/null)}"
 RELEASE_API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 SOURCE_BASE_URL="https://github.com/SagerNet/sing-box/archive/refs/tags"
 WS_PATH="/"
 
-detect_home_dir() {
-    local dir=""
-
-    if [ -n "${HOME:-}" ] && [ -d "$HOME" ]; then
-        printf '%s\n' "$HOME"
-        return 0
-    fi
-
-    if command -v getent >/dev/null 2>&1; then
-        dir="$(getent passwd "$CURRENT_USER" 2>/dev/null | awk -F: 'NR == 1 { print $6 }')"
-        if [ -n "$dir" ] && [ -d "$dir" ]; then
-            printf '%s\n' "$dir"
-            return 0
-        fi
-    fi
-
-    if command -v pw >/dev/null 2>&1; then
-        dir="$(pw usershow "$CURRENT_USER" 2>/dev/null | awk -F: 'NR == 1 { print $9 }')"
-        if [ -n "$dir" ] && [ -d "$dir" ]; then
-            printf '%s\n' "$dir"
-            return 0
-        fi
-    fi
-
-    dir="$(eval printf '%s' "~$CURRENT_USER" 2>/dev/null)"
-    if [ -n "$dir" ] && [ -d "$dir" ]; then
-        printf '%s\n' "$dir"
-        return 0
-    fi
-
-    return 1
-}
-
-HOME_DIR="$(detect_home_dir)" || {
-    echo "[错误] 无法识别当前用户主目录: ${CURRENT_USER:-unknown}"
+[ -n "${HOME:-}" ] && [ -d "$HOME" ] || {
+    echo "[错误] HOME 目录不可用"
     exit 1
 }
+HOME_DIR="$HOME"
 
 WORK_DIR="${WORK_DIR:-$HOME_DIR/sing-box}"
 BIN_PATH="${BIN_PATH:-$WORK_DIR/sing-box}"
 CONFIG_PATH="${CONFIG_PATH:-$WORK_DIR/config.json}"
 RESTART_LOG="${RESTART_LOG:-$WORK_DIR/blog.log}"
 BUILD_DIR=""
-BUILD_BIN=""
 
 is_interactive() {
     [ -t 1 ]
@@ -95,19 +61,14 @@ check_platform() {
     }
 }
 
-require_network_command() {
-    if ! command -v curl >/dev/null 2>&1 && ! command -v fetch >/dev/null 2>&1; then
-        echo "[错误] 需要 curl 或 FreeBSD fetch 命令"
-        return 1
-    fi
-}
-
 require_build_commands() {
     local missing=""
     local cmd
 
-    require_commands || return 1
-    require_network_command || return 1
+    if ! command -v curl >/dev/null 2>&1 && ! command -v fetch >/dev/null 2>&1; then
+        echo "[错误] 需要 curl 或 FreeBSD fetch 命令"
+        return 1
+    fi
 
     for cmd in go tar; do
         command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
@@ -142,26 +103,21 @@ download_file() {
 }
 
 get_latest_version() {
-    fetch_text "$RELEASE_API_URL" | awk -F '"' '
+    local response version
+
+    response="$(fetch_text "$RELEASE_API_URL")" || return 1
+    version="$(printf '%s\n' "$response" | awk -F '"' '
         /"tag_name"[[:space:]]*:/ {
             for (i = 1; i <= NF; i++) {
-                if ($i ~ /^v[0-9]+\.[0-9]+\.[0-9]+/) {
+                if ($i ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) {
                     print $i
                     exit
                 }
             }
         }
-    '
-}
-
-validate_version() {
-    case "$1" in
-        v[0-9]*.[0-9]*.[0-9]*) return 0 ;;
-        *)
-            echo "[错误] Sing-box 版本号异常: ${1:-empty}"
-            return 1
-            ;;
-    esac
+    ')"
+    [ -n "$version" ] || return 1
+    printf '%s\n' "$version"
 }
 
 get_installed_version() {
@@ -183,7 +139,6 @@ cleanup_build() {
         rm -rf "$BUILD_DIR"
     fi
     BUILD_DIR=""
-    BUILD_BIN=""
 }
 
 build_release() {
@@ -191,10 +146,9 @@ build_release() {
     local archive source_dir build_tags ldflags version_number built_version
 
     require_build_commands || return 1
-    validate_version "$version" || return 1
     cleanup_build
 
-    BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sing-box-build.XXXXXX")" || return 1
+    BUILD_DIR="$(mktemp -d "$WORK_DIR/.build.XXXXXX")" || return 1
     archive="$BUILD_DIR/source.tar.gz"
     source_dir="$BUILD_DIR/source"
     mkdir -p "$source_dir" || { cleanup_build; return 1; }
@@ -222,7 +176,7 @@ build_release() {
     # Tailscale/WireGuard/ACME/API 等组件不属于本脚本功能，且会增加体积与编译负担。
     build_tags="with_quic,badlinkname,tfogo_checklinkname0"
     ldflags="$(tr -d '\r\n' < "$source_dir/release/LDFLAGS")"
-    [ -n "$build_tags" ] && [ -n "$ldflags" ] || {
+    [ -n "$ldflags" ] || {
         echo "[错误] 无法读取官方构建参数"
         cleanup_build
         return 1
@@ -233,6 +187,8 @@ build_release() {
     echo "[信息] 正在编译 Sing-box ${version}，首次编译需要下载 Go 依赖..."
     if ! (
         cd "$source_dir" || exit 1
+        GOCACHE="$WORK_DIR/.cache/go-build" \
+        GOMODCACHE="$WORK_DIR/.cache/go-mod" \
         CGO_ENABLED=0 go build -trimpath \
             -tags "$build_tags" \
             -ldflags "$ldflags" \
@@ -244,9 +200,8 @@ build_release() {
         return 1
     fi
 
-    BUILD_BIN="$BUILD_DIR/sing-box"
-    chmod 700 "$BUILD_BIN" || { cleanup_build; return 1; }
-    built_version="$("$BUILD_BIN" version --name 2>/dev/null)"
+    chmod 700 "$BUILD_DIR/sing-box" || { cleanup_build; return 1; }
+    built_version="$("$BUILD_DIR/sing-box" version --name 2>/dev/null)"
     if [ "$built_version" != "$version_number" ]; then
         echo "[错误] 编译版本校验失败: ${built_version:-unknown} != $version_number"
         cleanup_build
@@ -257,25 +212,15 @@ build_release() {
 install_built_binary() {
     local new_path="${BIN_PATH}.new"
 
-    [ -x "$BUILD_BIN" ] || return 1
-    mv "$BUILD_BIN" "$new_path" || return 1
+    [ -x "$BUILD_DIR/sing-box" ] || return 1
+    mv "$BUILD_DIR/sing-box" "$new_path" || return 1
     chmod 700 "$new_path" || { rm -f "$new_path"; return 1; }
-    "$new_path" version >/dev/null 2>&1 || { rm -f "$new_path"; return 1; }
     mv "$new_path" "$BIN_PATH" || { rm -f "$new_path"; return 1; }
-    BUILD_BIN=""
     cleanup_build
 }
 
 random_pass() {
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 16
-        return 0
-    fi
-    if [ -r /dev/urandom ]; then
-        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
-        return 0
-    fi
-    printf '%s' "ChangeMe12345678"
+    LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
 }
 
 prompt_input() {
@@ -458,11 +403,17 @@ generate_config() {
   "dns": {
     "servers": [
       {
-        "type": "local",
-        "tag": "local"
+        "type": "udp",
+        "tag": "cloudflare",
+        "server": "1.1.1.1"
+      },
+      {
+        "type": "udp",
+        "tag": "google",
+        "server": "8.8.8.8"
       }
     ],
-    "final": "local",
+    "final": "cloudflare",
     "strategy": "ipv4_only",
     "cache_capacity": 4096
   },
@@ -517,7 +468,7 @@ generate_config() {
   ],
   "route": {
     "final": "direct",
-    "default_domain_resolver": "local"
+    "default_domain_resolver": "cloudflare"
   }
 }
 EOF
@@ -531,8 +482,7 @@ get_pid() {
         {
             pid = $1
             sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", $0)
-            if (index($0, config) > 0 &&
-                ($0 == bin || index($0, bin " ") == 1)) {
+            if (index($0, config) > 0 && index($0, bin " ") == 1) {
                 print pid
             }
         }
@@ -622,6 +572,23 @@ show_status() {
     fi
 }
 
+delete_service() {
+    case "${WORK_DIR%/}" in
+        ''|'/'|"$HOME_DIR")
+            echo "[错误] 拒绝删除不安全的目录: $WORK_DIR"
+            return 1
+            ;;
+    esac
+
+    stop_process || return 1
+    rm -rf "$WORK_DIR" || {
+        echo "[错误] 删除 Sing-box 服务失败: $WORK_DIR"
+        return 1
+    }
+
+    echo "[成功] Sing-box 服务、证书及编译文件已删除"
+}
+
 update_if_needed() {
     local latest current was_running=0
 
@@ -629,7 +596,6 @@ update_if_needed() {
         echo "[警告] 获取 Sing-box 最新版本失败，跳过更新"
         return 0
     }
-    validate_version "$latest" || return 1
     current="$(get_installed_version 2>/dev/null)"
 
     if [ "$current" = "$latest" ]; then
@@ -655,7 +621,7 @@ update_if_needed() {
 }
 
 show_usage() {
-    echo "用法: $0 [restart|stop]"
+    echo "用法: $0 [restart|stop|delete]"
     echo "      $0 trojan PT 端口"
     echo "      $0 trojan PW 密码"
     echo "      $0 hysteria PT 端口"
@@ -742,14 +708,12 @@ setup_install() {
         return 1
     }
     check_platform || return 1
-    require_build_commands || return 1
     mkdir -p "$WORK_DIR" || return 1
 
     latest="$(get_latest_version)" || {
         echo "[错误] 获取 Sing-box 最新稳定版失败"
         return 1
     }
-    validate_version "$latest" || return 1
     build_release "$latest" || return 1
     install_built_binary || return 1
 
@@ -761,7 +725,6 @@ setup_install() {
     HY2_PASSWORD="$(prompt_input "请输入 Hysteria2 密码" "$(random_pass)" 1)"
 
     generate_config || return 1
-    validate_process || return 1
     start_process || return 1
 
     echo "[成功] 安装完成"
@@ -774,6 +737,9 @@ main() {
     require_commands || exit 1
 
     case "${1:-}" in
+        delete)
+            delete_service
+            ;;
         stop)
             stop_process
             ;;
