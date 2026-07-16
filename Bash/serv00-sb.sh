@@ -581,6 +581,12 @@ delete_service() {
     esac
 
     stop_process || return 1
+    if [ -d "$WORK_DIR/.cache" ]; then
+        chmod -R u+w "$WORK_DIR/.cache" || {
+            echo "[错误] 无法恢复 Go 缓存目录的删除权限"
+            return 1
+        }
+    fi
     rm -rf "$WORK_DIR" || {
         echo "[错误] 删除 Sing-box 服务失败: $WORK_DIR"
         return 1
