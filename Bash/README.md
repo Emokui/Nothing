@@ -30,7 +30,7 @@ curl -sL -o serv00.sh https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/
 curl -sL -o serv00-sb.sh https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/serv00-sb.sh && chmod +x serv00-sb.sh && ./serv00-sb.sh
 ```
 ```
-./serv00-sb.sh [restart|stop]
+./serv00-sb.sh [restart|stop|delete]
 ```
 ```
 ./serv00-sb.sh trojan PT 端口
