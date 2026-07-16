@@ -371,7 +371,7 @@ prepare_certificate() {
             ;;
     esac
 
-    CERT_PATH="$WORK_DIR/${cert_name}.crt"
+    CERT_PATH="$WORK_DIR/${cert_name}.pem"
     KEY_PATH="$WORK_DIR/${cert_name}.key"
     CERT_NAME="$cert_name"
 
