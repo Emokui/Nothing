@@ -20,3 +20,5 @@ DOMAIN-SUFFIX,epdg.epc.mnc003.mcc262.pub.3gppnetwork.org
 IP-CIDR,139.7.117.168/30,no-resolve
 IP-CIDR,213.20.0.0/16,no-resolve
 IP-CIDR,62.52.0.0/16,no-resolve
+# Apple
+DOMAIN,gspe1-ssl.ls.apple.com
