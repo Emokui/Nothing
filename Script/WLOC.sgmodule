@@ -1,7 +1,7 @@
 #!name=  WLOC
 #!desc= Positioning modification
 #!category= Tools
-#!arguments = 经度:-361.340048, 纬度:52.074373, 精度:25, 扰动半径:30
+#!arguments = 经度:-2.649293, 纬度:51.549083, 精度:25, 扰动半径:30
 
 [Script]
 Apple WLOC = type=http-response, pattern="^https?:\/\/gs-loc(-cn)?\.apple\.com\/clls\/wloc", requires-body=1, binary-body-mode=1, max-size=0, timeout=30, script-path=https://raw.githubusercontent.com/Emokui/wloc/main/dist/wloc.js, argument=longitude={{{经度}}}&latitude={{{纬度}}}&accuracy={{{精度}}}&randomRadius={{{扰动半径}}}&logLevel=off
