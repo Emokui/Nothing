@@ -4,7 +4,8 @@
 #!arguments = 经度:-2.649293, 纬度:51.549083, 精度:25, 扰动半径:30
 
 [Script]
+
 Apple WLOC = type=http-response, pattern="^https?:\/\/gs-loc(-cn)?\.apple\.com\/clls\/wloc", requires-body=1, binary-body-mode=1, max-size=0, timeout=30, script-path=https://raw.githubusercontent.com/Emokui/wloc/main/dist/wloc.js, argument=longitude={{{经度}}}&latitude={{{纬度}}}&accuracy={{{精度}}}&randomRadius={{{扰动半径}}}&logLevel=off
-WLOC Settings = type=http-request, pattern="^https?:\/\/gs-loc(-cn)?\.apple\.com\/wloc-settings\/save", requires-body=0, max-size=0, timeout=10, script-path=https://raw.githubusercontent.com/Emokui/wloc/main/dist/wloc-settings.js
+WLOC Settings = type=http-request, pattern="^https?:\/\/gs-loc(-cn)?\.apple\.com\/wloc-settings\/save", requires-body=0, max-size=0, timeout=10, script-path=https://raw.githubusercontent.com/Emokui/wloc/main/dist/wloc-settings.js, argument=longitude={{{经度}}}&latitude={{{纬度}}}&accuracy={{{精度}}}
 [MITM]
 hostname = %APPEND% gs-loc.apple.com, gs-loc-cn.apple.com
