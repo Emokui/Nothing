@@ -28,7 +28,7 @@ check_supported_system() {
 
     arch=$(uname -m)
     case "$arch" in
-        x86_64|amd64) return 0 ;;
+        x86_64|amd64|aarch64|arm64) return 0 ;;
         *)
             echo -e "${RED}不支持${PLAIN}"
             return 1
@@ -1396,6 +1396,22 @@ BBR_PERSIST_SCRIPT="/usr/local/bin/bbr-optimize-apply.sh"
 BBR_SPEEDTEST_BIN="/usr/local/bin/speedtest"
 BBR_SPEEDTEST_MARKER="/usr/local/bin/.zero-bbr-speedtest.sha256"
 
+bbr_get_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        *) return 1 ;;
+    esac
+}
+
+bbr_get_speedtest_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64) echo "x86_64" ;;
+        aarch64|arm64) echo "aarch64" ;;
+        *) return 1 ;;
+    esac
+}
+
 bbr_confirm() {
     local prompt="$1"
     local default="${2:-N}"
@@ -1635,9 +1651,9 @@ bbr_download_url_to_file() {
 }
 
 bbr_get_speedtest_download_url() {
-    local page_content download_url
+    local speedtest_arch="$1" page_content download_url
     page_content=$(bbr_fetch_text_url "https://speedtest-static-dev.speedtest.dev/apps/cli") || return 1
-    download_url=$(printf '%s\n' "$page_content" | grep -Eo 'https://install\.speedtest\.net/app/cli/ookla-speedtest-[0-9.]+-linux-x86_64\.tgz' | head -n 1)
+    download_url=$(printf '%s\n' "$page_content" | grep -Eo "https://install\\.speedtest\\.net/app/cli/ookla-speedtest-[0-9.]+-linux-${speedtest_arch}\\.tgz" | head -n 1)
     [[ -n "$download_url" ]] || return 1
     echo "$download_url"
 }
@@ -1696,25 +1712,21 @@ bbr_cleanup_managed_speedtest() {
 }
 
 bbr_ensure_speedtest() {
-    local cpu_arch download_url
+    local cpu_arch speedtest_arch download_url
     cpu_arch=$(uname -m)
-
-    case "$cpu_arch" in
-        x86_64) ;;
-        *)
-            echo -e "${RED}错误: 不支持的架构 ${cpu_arch}${PLAIN}" >&2
-            return 1
-            ;;
-    esac
+    speedtest_arch=$(bbr_get_speedtest_arch) || {
+        echo -e "${RED}错误: 不支持的架构 ${cpu_arch}${PLAIN}" >&2
+        return 1
+    }
 
     if command -v speedtest >/dev/null 2>&1; then
         return 0
     fi
 
     echo -e "${YELLOW}speedtest 未安装，正在临时安装...${PLAIN}" >&2
-    download_url=$(bbr_get_speedtest_download_url 2>/dev/null || true)
+    download_url=$(bbr_get_speedtest_download_url "$speedtest_arch" 2>/dev/null || true)
     if [[ -z "$download_url" ]]; then
-        download_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz"
+        download_url="https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${speedtest_arch}.tgz"
     fi
 
     bbr_install_speedtest_from_url "$download_url" || return 1
@@ -2157,10 +2169,11 @@ bbr_cleanup_persist() {
 }
 
 bbr_configure_direct() {
-    if [[ "$(uname -m)" != "x86_64" ]]; then
-        bbr_fail_and_pause "错误: 当前仅支持 x86_64 系统"
+    local bbr_arch
+    bbr_arch=$(bbr_get_arch) || {
+        bbr_fail_and_pause "错误: 当前架构 $(uname -m) 不支持 BBR 调优"
         return 1
-    fi
+    }
 
     echo -e "${YELLOW}[步骤 1/5] 带宽检测与缓冲区...${PLAIN}"
     local detected_bandwidth
@@ -2298,7 +2311,10 @@ EOF
     available_cc="${bbr_status[3]}"
 
     if [[ "$actual_qdisc" == "fq" && "$actual_cc" == "bbr" ]] && echo "$available_cc" | grep -qw bbr; then
-        if echo "$current_kernel" | grep -qi 'xanmod'; then
+        if [[ "$bbr_arch" == "arm64" ]]; then
+            echo -e "${GREEN}✓ fq + bbr 已启用，当前使用 ARM64 原生内核${PLAIN}"
+            echo -e "配置说明: ${GREEN}${profile_label}${PLAIN} / ${GREEN}${buffer_mb}MB${PLAIN} 缓冲区（${GREEN}${detected_bandwidth} Mbps${PLAIN} 带宽）"
+        elif echo "$current_kernel" | grep -qi 'xanmod'; then
             echo -e "${GREEN}✓ fq + bbr 已启用，当前运行内核为 XanMod${PLAIN}"
             echo -e "配置说明: ${GREEN}${profile_label}${PLAIN} / ${GREEN}${buffer_mb}MB${PLAIN} 缓冲区（${GREEN}${detected_bandwidth} Mbps${PLAIN} 带宽）"
         else
@@ -2316,17 +2332,17 @@ bbr_install_xanmod_kernel() {
     local action_label="安装"
     bbr_xanmod_installed && action_label="更新"
 
+    if [[ "$(bbr_get_arch 2>/dev/null || true)" != "amd64" ]]; then
+        bbr_fail_and_pause "错误: XanMod 官方仓库仅提供 amd64/x86_64 内核，ARM64 请使用菜单 3 的原生内核 BBR 调优"
+        return 1
+    fi
+
     echo -e "${BLUE}=== ${action_label} XanMod 内核与 BBR v3 ===${PLAIN}"
     echo "支持系统: Debian/Ubuntu (x86_64)"
     echo -e "${YELLOW}警告: 将升级 Linux 内核，请提前备份重要数据${PLAIN}"
     if ! bbr_confirm "确定继续${action_label}吗？(Y/N): "; then
         echo "已取消${action_label}"
         press_any_key_to_continue
-        return 1
-    fi
-
-    if [[ "$(uname -m)" != "x86_64" ]]; then
-        bbr_fail_and_pause "错误: 当前仅支持 x86_64 系统"
         return 1
     fi
 
@@ -2449,13 +2465,20 @@ bbr_install_xanmod_kernel() {
 }
 
 bbr_uninstall_xanmod_kernel() {
+    if [[ "$(bbr_get_arch 2>/dev/null || true)" == "arm64" ]]; then
+        bbr_fail_and_pause "提示: ARM64 不使用 XanMod，无需执行卸载"
+        return 1
+    fi
+
     echo -e "${YELLOW}警告: 即将卸载 XanMod 内核${PLAIN}"
     local non_xanmod_kernels
     non_xanmod_kernels=$(dpkg -l 2>/dev/null | grep '^ii' | grep 'linux-image-' | grep -v 'xanmod' | grep -v 'dbg' | wc -l)
     if [[ "$non_xanmod_kernels" -eq 0 ]]; then
+        local default_kernel_package="linux-image-amd64"
+        [[ "$(bbr_get_arch 2>/dev/null || true)" == "arm64" ]] && default_kernel_package="linux-image-arm64"
         echo -e "${RED}安全检查未通过：未检测到非 XanMod 的回退内核${PLAIN}"
         echo "建议先安装默认内核:"
-        echo "  apt install -y linux-image-amd64   # Debian"
+        echo "  apt install -y ${default_kernel_package}   # Debian"
         echo "  apt install -y linux-image-generic # Ubuntu"
         press_any_key_to_continue
         return 1
@@ -2491,7 +2514,9 @@ bbr_menu_status_line() {
     qdisc="${bbr_status[2]}"
     xanmod_installed="${bbr_status[4]}"
 
-    if [[ "$xanmod_installed" == "yes" ]]; then
+    if [[ "$(bbr_get_arch 2>/dev/null || true)" == "arm64" ]]; then
+        xanmod_state="${YELLOW}ARM64不适用${PLAIN}"
+    elif [[ "$xanmod_installed" == "yes" ]]; then
         xanmod_state="${GREEN}已安装${PLAIN}"
     else
         xanmod_state="${YELLOW}未安装${PLAIN}"
@@ -2506,7 +2531,11 @@ bbr_show_manage_menu() {
     echo -e "${BLUE}============ BBR管理 ============${PLAIN}"
     bbr_menu_status_line
     echo -e "${BLUE}==================================${PLAIN}"
-    echo -e "${GREEN}1.安装/更新XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
+    if [[ "$(bbr_get_arch 2>/dev/null || true)" == "arm64" ]]; then
+        echo -e "${YELLOW}1.XanMod安装(不支持)${PLAIN}   ${YELLOW}2.XanMod卸载(不适用)${PLAIN}"
+    else
+        echo -e "${GREEN}1.安装/更新XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
+    fi
     echo -e "${BLUE}3.BBR调优${PLAIN}      ${YELLOW}0.返回菜单${PLAIN}"
     echo -e "${BLUE}==================================${PLAIN}"
 }
