@@ -1077,6 +1077,10 @@ reinstall_menu() {
 }
 
 change_timezone() {
+    local choice input_code zone_tab tz_idx sel_tz manual_tz detected_tz
+    local sys_tz pause_after
+    local -a lines=()
+
     if ! command -v timedatectl >/dev/null; then
         echo -e "${RED}未安装 timedatectl,无法自动设置时区${PLAIN}"
         press_any_key_to_continue
@@ -1085,9 +1089,8 @@ change_timezone() {
 
     _timezone_is_valid() {
         local tz="$1"
-        [[ "$tz" =~ ^[A-Za-z0-9._+-]+(/[A-Za-z0-9._+-]+)+$ ]] || return 1
-        [[ -f "/usr/share/zoneinfo/$tz" ]] || return 1
-        return 0
+        [[ -n "$tz" ]] || return 1
+        timedatectl list-timezones 2>/dev/null | grep -Fxq -- "$tz"
     }
 
     _timezone_get_system_tz() {
@@ -1106,8 +1109,8 @@ change_timezone() {
     _timezone_detect_recommended() {
         local tz=""
         if ! command -v curl >/dev/null; then
-            echo -e "${YELLOW}未检测到 curl,正在尝试安装...${PLAIN}" >&2
-            pkg_install curl >/dev/null 2>&1 || return 1
+            echo -e "${YELLOW}未安装 curl，无法自动检测时区${PLAIN}" >&2
+            return 1
         fi
 
         tz=$(trim_input "$(curl -fsSL --connect-timeout 5 --max-time 8 https://ipapi.co/timezone 2>/dev/null | tr -d '\r')")
@@ -1132,19 +1135,14 @@ change_timezone() {
         return 1
     }
 
-    echo -e "${YELLOW}正在检测推荐时区...${PLAIN}"
-    local current_tz_web
-    current_tz_web=$(_timezone_detect_recommended || true)
-
     while true; do
-        local sys_tz pause_after=0
+        pause_after=0
         sys_tz=$(_timezone_get_system_tz)
         clear
         echo -e "${BLUE}======= 时区管理 =====${PLAIN}"
         echo -e "${YELLOW}当前 ${sys_tz}${PLAIN}"
-        echo -e "${YELLOW}推荐 ${current_tz_web:-不可用}${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN}推荐时区  ${GREEN}2.${PLAIN}国家代码"
+        echo -e "${GREEN}1.${PLAIN}自动检测  ${GREEN}2.${PLAIN}国家代码"
         echo -e "${GREEN}3.${PLAIN}手动输入  ${YELLOW}0.${PLAIN}返回菜单"
         echo -e "${BLUE}======================${PLAIN}"
         
@@ -1152,10 +1150,13 @@ change_timezone() {
         
         case "$choice" in
             1)
-                if [ -n "$current_tz_web" ]; then
-                    _timezone_apply "$current_tz_web"
+                echo -e "${YELLOW}正在检测时区...${PLAIN}"
+                detected_tz=$(_timezone_detect_recommended || true)
+                if [[ -n "$detected_tz" ]]; then
+                    echo -e "${GREEN}检测结果: ${detected_tz}${PLAIN}"
+                    _timezone_apply "$detected_tz"
                 else
-                    echo -e "${YELLOW}当前无法获取推荐时区,请使用国家代码或手动输入${PLAIN}"
+                    echo -e "${YELLOW}自动检测失败，请使用国家代码或手动输入${PLAIN}"
                 fi
                 pause_after=1
                 ;;
@@ -1165,12 +1166,18 @@ change_timezone() {
                 input_code=$(trim_input "$input_code")
                 input_code=$(printf '%s' "$input_code" | tr '[:lower:]' '[:upper:]')
                 [ -z "$input_code" ] && continue
+                if [[ ! "$input_code" =~ ^[A-Z]{2}$ ]]; then
+                    echo -e "${RED}国家代码必须是两个英文字母${PLAIN}"
+                    press_any_key_to_continue
+                    continue
+                fi
 
                 zone_tab=$(_timezone_get_zone_tab || true)
                 if [ -z "$zone_tab" ]; then
                     echo -e "${RED}系统缺失时区索引文件 (zone1970.tab/zone.tab)，无法自动列表。${PLAIN}"
                     pause_after=1
                 else
+                    lines=()
                     mapfile -t lines < <(awk -v code="$input_code" '$1 ~ ("(^|,)" code "(,|$)") {print $3}' "$zone_tab" | sort -u)
 
                     if [ "${#lines[@]}" -eq 0 ]; then
@@ -1218,79 +1225,130 @@ change_timezone() {
 REINSTALL_DNS_LIST='8.8.8.8 1.1.1.1 2001:4860:4860::8888 2606:4700:4700::1111'
 
 set_ip_priority() {
-    local GAI_CONF="/etc/gai.conf"
-    local MANAGED_BEGIN="# Zero.sh IP Priority BEGIN"
-    local MANAGED_END="# Zero.sh IP Priority END"
+    local gai_conf="/etc/gai.conf"
+    local backup_conf="/etc/gai.conf.zero.bak"
+    local managed_begin="# Zero.sh IP Priority BEGIN"
+    local managed_end="# Zero.sh IP Priority END"
+    local choice current_priority
 
     _priority_rule_exists() {
         local precedence_value="$1"
-        [[ -f "$GAI_CONF" ]] || return 1
+        [[ -f "$gai_conf" ]] || return 1
+        sed -n "/^${managed_begin}$/,/^${managed_end}$/p" "$gai_conf" |
+            grep -qE "^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+${precedence_value}[[:space:]]*$"
+    }
 
-        {
-            sed -n "/^${MANAGED_BEGIN}$/,/^${MANAGED_END}$/p" "$GAI_CONF" | grep -qE "^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+${precedence_value}$" ||
-            grep -qE "^precedence[[:space:]]+::ffff:0:0/96[[:space:]]+${precedence_value}[[:space:]]*$" "$GAI_CONF"
-        }
+    _managed_priority_exists() {
+        [[ -f "$gai_conf" ]] && grep -Fxq -- "$managed_begin" "$gai_conf"
+    }
+
+    _unmanaged_priority_exists() {
+        [[ -f "$gai_conf" ]] || return 1
+        awk -v begin="$managed_begin" -v end="$managed_end" '
+            $0 == begin { managed = 1; next }
+            $0 == end   { managed = 0; next }
+            !managed && $0 ~ /^[[:space:]]*precedence[[:space:]]+/ { found = 1 }
+            END { exit(found ? 0 : 1) }
+        ' "$gai_conf"
     }
 
     _get_current_priority() {
         if _priority_rule_exists 100; then
             echo "IPv4 优先"
-        elif _priority_rule_exists 10; then
-            echo "IPv6 优先"
+        elif _managed_priority_exists; then
+            echo "IPv6 优先（Zero.sh）"
+        elif _unmanaged_priority_exists; then
+            echo "用户自定义"
         else
-            echo "系统默认"
+            echo "IPv6 优先（系统默认）"
         fi
     }
 
-    _remove_managed_priority() {
-        if [[ -f "$GAI_CONF" ]]; then
-            sed -i "/^${MANAGED_BEGIN}$/,/^${MANAGED_END}$/d" "$GAI_CONF"
-        fi
-    }
-
-    _write_priority_block() {
+    _write_priority_config() {
         local mode="$1"
-        local ipv4_mapped_precedence="10"
+        local temp_file
 
-        [[ "$mode" == "ipv4" ]] && ipv4_mapped_precedence="100"
+        temp_file=$(mktemp /etc/gai.conf.zero.XXXXXX) || return 1
+        if [[ -f "$gai_conf" ]]; then
+            cp -p "$gai_conf" "$backup_conf" || {
+                rm -f "$temp_file"
+                return 1
+            }
+            if ! awk -v begin="$managed_begin" -v end="$managed_end" '
+                $0 == begin { managed = 1; next }
+                $0 == end   { managed = 0; next }
+                !managed    { print }
+                END         { if (managed) exit 1 }
+            ' "$gai_conf" > "$temp_file"; then
+                rm -f "$temp_file"
+                echo -e "${RED}检测到不完整的 Zero.sh 配置块，未修改 ${gai_conf}${PLAIN}"
+                return 1
+            fi
+        else
+            : > "$temp_file"
+        fi
 
-        _remove_managed_priority
-        touch "$GAI_CONF"
-        {
-            echo
-            echo "$MANAGED_BEGIN"
-            echo "precedence ::1/128 50"
-            echo "precedence ::/0 40"
-            echo "precedence 2002::/16 30"
-            echo "precedence ::/96 20"
-            echo "precedence ::ffff:0:0/96 $ipv4_mapped_precedence"
-            echo "$MANAGED_END"
-        } >> "$GAI_CONF"
-    }
+        if [[ "$mode" == "ipv4" ]]; then
+            if ! {
+                echo
+                echo "$managed_begin"
+                echo "precedence ::1/128 50"
+                echo "precedence ::/0 40"
+                echo "precedence 2002::/16 30"
+                echo "precedence ::/96 20"
+                echo "precedence ::ffff:0:0/96 100"
+                echo "$managed_end"
+            } >> "$temp_file"; then
+                rm -f "$temp_file"
+                return 1
+            fi
+        fi
 
-    _cleanup_legacy_priority_rule() {
-        if [[ -f "$GAI_CONF" ]]; then
-            sed -i '/^precedence[[:space:]]\+::ffff:0:0\/96[[:space:]]\+[0-9]\+[[:space:]]*$/d' "$GAI_CONF"
+        chmod 644 "$temp_file" || {
+            rm -f "$temp_file"
+            return 1
+        }
+        if ! mv -f "$temp_file" "$gai_conf"; then
+            rm -f "$temp_file"
+            return 1
         fi
     }
 
     _apply_priority_mode() {
         local mode="$1"
         local label="$2"
-        _cleanup_legacy_priority_rule
-        _write_priority_block "$mode"
-        echo -e "${GREEN}✔ 已设置为 ${label}${PLAIN}"
+
+        if [[ "$mode" == "default" ]] && ! _managed_priority_exists; then
+            if _unmanaged_priority_exists; then
+                echo -e "${YELLOW}当前由用户自定义规则管理，Zero.sh 没有可移除的配置${PLAIN}"
+            else
+                echo -e "${GREEN}当前已是 IPv6 优先（系统默认）${PLAIN}"
+            fi
+            press_any_key_to_continue
+            return 0
+        fi
+
+        if _write_priority_config "$mode"; then
+            if [[ "$mode" == "default" ]] && _unmanaged_priority_exists; then
+                echo -e "${GREEN}✔ 已移除 Zero.sh 设置，保留用户自定义规则${PLAIN}"
+            else
+                echo -e "${GREEN}✔ 已设置为 ${label}${PLAIN}"
+            fi
+            [[ -f "$backup_conf" ]] && echo -e "${YELLOW}备份: ${backup_conf}${PLAIN}"
+        else
+            echo -e "${RED}✘ IP 连接优先级设置失败${PLAIN}"
+        fi
         press_any_key_to_continue
     }
 
     while true; do
         clear
-        local current_priority
         current_priority=$(_get_current_priority)
-        echo -e "${BLUE}====== IP优先级 ======${PLAIN}"
+        echo -e "${BLUE}=== IP连接优先级 ===${PLAIN}"
         echo -e "${YELLOW}当前优先级: ${GREEN}${current_priority}${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN}IPv4优先  ${GREEN}2.${PLAIN}IPv6优先"
+        echo -e "${GREEN}1.${PLAIN}IPv4 优先"
+        echo -e "${GREEN}2.${PLAIN}取消 IPv4 优先"
         echo -e "${YELLOW}0.${PLAIN}返回菜单"
         echo -e "${BLUE}======================${PLAIN}"
         read -rp "$(echo -e "${BLUE}请输入选项 [0-2]: ${PLAIN}")" choice
@@ -1300,7 +1358,7 @@ set_ip_priority() {
                 _apply_priority_mode "ipv4" "IPv4 优先"
                 ;;
             2)
-                _apply_priority_mode "ipv6" "IPv6 优先"
+                _apply_priority_mode "default" "IPv6 优先（系统默认）"
                 ;;
             0)
                 return
@@ -1496,14 +1554,6 @@ bbr_select_xanmod_package() {
     done
 
     return 1
-}
-
-bbr_resolve_xanmod_payload_packages() {
-    local package_name="$1"
-    apt-cache depends --important "$package_name" 2>/dev/null \
-        | awk '/Depends:/ {print $2}' \
-        | grep -E '^linux-(image|headers)-.*xanmod' \
-        | awk '!seen[$0]++'
 }
 
 bbr_fetch_xanmod_key() {
@@ -1953,63 +2003,23 @@ bbr_calculate_buffer_size() {
     fi
 }
 
-bbr_clean_sysctl_conf_conflicts() {
-    [[ -f /etc/sysctl.conf ]] || return 0
-
-    cp /etc/sysctl.conf /etc/sysctl.conf.bak.conflict 2>/dev/null || true
-
-    local key
-    for key in \
-        'net\.ipv4\.tcp_wmem' \
-        'net\.ipv4\.tcp_rmem' \
-        'net\.ipv4\.tcp_tw_reuse' \
-        'net\.ipv4\.ip_local_port_range' \
-        'net\.ipv4\.tcp_max_syn_backlog' \
-        'net\.ipv4\.tcp_slow_start_after_idle' \
-        'net\.ipv4\.tcp_mtu_probing' \
-        'net\.ipv4\.tcp_notsent_lowat' \
-        'net\.ipv4\.tcp_fin_timeout' \
-        'net\.ipv4\.tcp_max_tw_buckets' \
-        'net\.ipv4\.tcp_fastopen' \
-        'net\.ipv4\.tcp_keepalive_time' \
-        'net\.ipv4\.tcp_keepalive_intvl' \
-        'net\.ipv4\.tcp_keepalive_probes' \
-        'net\.ipv4\.udp_rmem_min' \
-        'net\.ipv4\.udp_wmem_min' \
-        'net\.ipv4\.tcp_syncookies' \
-        'net\.core\.rmem_max' \
-        'net\.core\.wmem_max' \
-        'net\.core\.default_qdisc' \
-        'net\.core\.somaxconn' \
-        'net\.core\.netdev_max_backlog' \
-        'net\.ipv4\.tcp_congestion_control'
-    do
-        sed -i -E "/^[[:space:]]*#?[[:space:]]*${key}[[:space:]]*=/d" /etc/sysctl.conf 2>/dev/null
-    done
-}
-
-bbr_check_and_clean_conflicts() {
+bbr_check_conflicts() {
     echo -e "${BLUE}=== 检查 sysctl 配置冲突 ===${PLAIN}"
     local conflicts=()
-    local conf base num
+    local conf
     local tune_key_regex='net\.(core\.(rmem_max|wmem_max|default_qdisc|somaxconn|netdev_max_backlog)|ipv4\.(ip_local_port_range|udp_(rmem_min|wmem_min)|tcp_(rmem|wmem|congestion_control|tw_reuse|max_syn_backlog|slow_start_after_idle|mtu_probing|notsent_lowat|fin_timeout|max_tw_buckets|fastopen|keepalive_time|keepalive_intvl|keepalive_probes|syncookies)))'
     local active_tune_regex="^[[:space:]]*${tune_key_regex}[[:space:]]*="
-    local sysctl_conf_tune_regex="^[[:space:]]*#?[[:space:]]*${tune_key_regex}[[:space:]]*="
 
     for conf in /etc/sysctl.d/*.conf; do
         [[ -f "$conf" ]] || continue
         [[ "$conf" == "$BBR_SYSCTL_CONF" ]] && continue
         if grep -qE "$active_tune_regex" "$conf" 2>/dev/null; then
-            base=$(basename "$conf")
-            num=$(echo "$base" | sed -n 's/^\([0-9]\+\).*/\1/p')
-            if [[ -z "$num" || "$num" -ge 99 ]]; then
-                conflicts+=("$conf")
-            fi
+            conflicts+=("$conf")
         fi
     done
 
     local has_sysctl_conflict=0
-    if [[ -f /etc/sysctl.conf ]] && grep -qE "$sysctl_conf_tune_regex" /etc/sysctl.conf 2>/dev/null; then
+    if [[ -f /etc/sysctl.conf ]] && grep -qE "$active_tune_regex" /etc/sysctl.conf 2>/dev/null; then
         has_sysctl_conflict=1
     fi
 
@@ -2018,26 +2028,12 @@ bbr_check_and_clean_conflicts() {
         return 0
     fi
 
-    echo -e "${YELLOW}发现可能的覆盖配置${PLAIN}"
+    echo -e "${YELLOW}发现可能重复的网络参数，Zero.sh 不会修改这些文件:${PLAIN}"
     if [[ "${#conflicts[@]}" -gt 0 ]]; then
         printf '  - %s\n' "${conflicts[@]}"
     fi
     [[ "$has_sysctl_conflict" -eq 1 ]] && echo "  - /etc/sysctl.conf"
-
-    read -rp "是否自动禁用/清理这些覆盖配置？(Y/N): " answer
-    case "$answer" in
-        [Yy])
-            if [[ "$has_sysctl_conflict" -eq 1 ]]; then
-                bbr_clean_sysctl_conf_conflicts
-            fi
-            for conf in "${conflicts[@]}"; do
-                mv "$conf" "${conf}.disabled.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
-            done
-            ;;
-        *)
-            echo -e "${YELLOW}已跳过自动清理，可能导致新配置未完全生效${PLAIN}"
-            ;;
-    esac
+    echo -e "${YELLOW}若有同名参数，实际生效值以 sysctl 加载顺序为准${PLAIN}"
 }
 
 bbr_eligible_ifaces() {
@@ -2134,9 +2130,8 @@ bbr_configure_direct() {
     buffer_mb=$(bbr_calculate_buffer_size "$detected_bandwidth" "$region" "$profile" "$mem_total")
     buffer_bytes=$((buffer_mb * 1024 * 1024))
 
-    echo -e "${YELLOW}[步骤 2/5] 清理配置冲突...${PLAIN}"
-    [[ -L /etc/sysctl.d/99-sysctl.conf ]] && rm -f /etc/sysctl.d/99-sysctl.conf
-    bbr_check_and_clean_conflicts
+    echo -e "${YELLOW}[步骤 2/5] 检查配置冲突...${PLAIN}"
+    bbr_check_conflicts
 
     echo -e "${YELLOW}[步骤 3/5] 创建配置文件...${PLAIN}"
     local somaxconn=8192 tcp_max_syn_backlog=8192 netdev_max_backlog=5000 tcp_notsent_lowat=32768 tcp_max_tw_buckets=200000
@@ -2345,8 +2340,7 @@ bbr_install_xanmod_kernel() {
         return 1
     }
 
-    local package_info package_status install_ok=0 verify_package
-    local install_packages=()
+    local package_info package_status
 
     package_info=$(bbr_select_xanmod_package "$version") || {
         bbr_fail_and_pause "错误: 当前仓库中未找到适配 x64v${version} 的 XanMod 内核包"
@@ -2355,32 +2349,18 @@ bbr_install_xanmod_kernel() {
 
     package_name="${package_info%%|*}"
     package_hint="${package_info#*|}"
-    mapfile -t install_packages < <(bbr_resolve_xanmod_payload_packages "$package_name" 2>/dev/null || true)
-
-    if [[ "${#install_packages[@]}" -eq 0 ]]; then
-        bbr_fail_and_pause "错误: 无法解析 ${package_name} 对应的内核安装包"
-        return 1
-    fi
 
     echo -e "${GREEN}目标通道: ${package_name}${PLAIN}"
     echo -e "${YELLOW}说明: ${package_hint}${PLAIN}"
-    echo -e "${YELLOW}实际安装: ${install_packages[*]}${PLAIN}"
+    echo -e "${YELLOW}安装元包: ${package_name}${PLAIN}"
 
-    if ! apt-get install -y "${install_packages[@]}"; then
+    if ! apt-get install -y "$package_name"; then
         bbr_fail_and_pause "XanMod 内核安装失败"
         return 1
     fi
 
-    install_ok=1
-    for verify_package in "${install_packages[@]}"; do
-        package_status=$(dpkg-query -W -f='${Status}' "$verify_package" 2>/dev/null || true)
-        if [[ "$package_status" != "install ok installed" ]]; then
-            install_ok=0
-            break
-        fi
-    done
-
-    if (( install_ok == 0 )); then
+    package_status=$(dpkg-query -W -f='${Status}' "$package_name" 2>/dev/null || true)
+    if [[ "$package_status" != "install ok installed" ]] || ! bbr_xanmod_installed; then
         bbr_fail_and_pause "未检测到 XanMod 内核安装成功"
         return 1
     fi
@@ -2418,7 +2398,7 @@ bbr_uninstall_xanmod_kernel() {
         fi
         update-grub 2>/dev/null || true
         rm -f "$BBR_REPO_FILE" "$BBR_KEYRING" /usr/share/keyrings/xanmod-archive-keyring.gpg
-        rm -f "$BBR_SYSCTL_CONF" /etc/sysctl.d/99-zero-bbr.conf /etc/modules-load.d/bbr.conf
+        rm -f "$BBR_SYSCTL_CONF" /etc/sysctl.d/99-zero-bbr.conf
         bbr_apply_mss_clamp disable
         bbr_cleanup_persist
         bbr_cleanup_managed_speedtest
@@ -2427,6 +2407,31 @@ bbr_uninstall_xanmod_kernel() {
     else
         echo "已取消"
     fi
+    press_any_key_to_continue
+}
+
+bbr_restore_original_network_config() {
+    echo -e "${YELLOW}将删除 Zero.sh 创建的 BBR 配置，保留用户和系统的其他网络配置${PLAIN}"
+    if ! bbr_confirm "确定恢复原始网络配置吗？(Y/N): "; then
+        echo -e "${YELLOW}已取消${PLAIN}"
+        press_any_key_to_continue
+        return 0
+    fi
+
+    if ! rm -f "$BBR_SYSCTL_CONF" /etc/sysctl.d/99-zero-bbr.conf; then
+        bbr_fail_and_pause "删除 Zero.sh BBR 配置失败"
+        return 1
+    fi
+    bbr_apply_mss_clamp disable
+    bbr_cleanup_persist
+    bbr_cleanup_managed_speedtest
+
+    if sysctl --system >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ 已恢复原始网络配置${PLAIN}"
+    else
+        echo -e "${YELLOW}Zero.sh 配置已删除，但系统 sysctl 重新加载时有报错${PLAIN}"
+    fi
+    echo -e "${YELLOW}建议重启一次，使已在运行的 qdisc 和内核网络参数完全恢复${PLAIN}"
     press_any_key_to_continue
 }
 
@@ -2457,20 +2462,20 @@ bbr_show_manage_menu() {
     echo -e "${BLUE}============ BBR管理 ============${PLAIN}"
     bbr_menu_status_line
     echo -e "${BLUE}==================================${PLAIN}"
-    if [[ "$(bbr_get_arch 2>/dev/null || true)" == "arm64" ]]; then
-        echo -e "${YELLOW}1.XanMod安装(不支持)${PLAIN}   ${YELLOW}2.XanMod卸载(不适用)${PLAIN}"
-    else
-        echo -e "${GREEN}1.安装/更新XanMod${PLAIN}   ${RED}2.卸载XanMod${PLAIN}"
+    echo -e "${GREEN}1.启用/调优BBR${PLAIN}"
+    if [[ "$(bbr_get_arch 2>/dev/null || true)" != "arm64" ]]; then
+        echo -e "${GREEN}2.安装/更新XanMod BBRv3${PLAIN}   ${RED}3.卸载XanMod${PLAIN}"
     fi
-    echo -e "${BLUE}3.BBR调优${PLAIN}      ${YELLOW}0.返回菜单${PLAIN}"
+    echo -e "${GREEN}4.恢复原始网络配置${PLAIN}   ${YELLOW}0.返回菜单${PLAIN}"
     echo -e "${BLUE}==================================${PLAIN}"
 }
 
 handle_bbr_manage_choice() {
     case "$1" in
-        1) clear; bbr_install_xanmod_kernel ;;
-        2) clear; bbr_uninstall_xanmod_kernel ;;
-        3) clear; bbr_configure_direct ;;
+        1) clear; bbr_configure_direct ;;
+        2) clear; bbr_install_xanmod_kernel ;;
+        3) clear; bbr_uninstall_xanmod_kernel ;;
+        4) clear; bbr_restore_original_network_config ;;
         0) return 1 ;;
         *) show_invalid_option ;;
     esac
@@ -2482,14 +2487,20 @@ bbr_manage_menu() {
     local opt
     while true; do
         bbr_show_manage_menu
-        opt=$(read_menu_choice "请输入选项 [0-3]: ")
+        if [[ "$(bbr_get_arch 2>/dev/null || true)" == "arm64" ]]; then
+            opt=$(read_menu_choice "请输入选项 [0/1/4]: ")
+        else
+            opt=$(read_menu_choice "请输入选项 [0-4]: ")
+        fi
         handle_bbr_manage_choice "$opt" || return
     done
 }
 
 DNS_RESOLV_CONF="/etc/resolv.conf"
+DNS_RESOLV_BACKUP="/etc/resolv.conf.zero.bak"
 DNS_RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
-DNS_RESOLVED_DROPIN_FILE="$DNS_RESOLVED_DROPIN_DIR/99-custom-dns.conf"
+DNS_RESOLVED_DROPIN_FILE="$DNS_RESOLVED_DROPIN_DIR/90-zero-dns.conf"
+DNS_RESOLVED_LEGACY_FILE="$DNS_RESOLVED_DROPIN_DIR/99-custom-dns.conf"
 
 dns_read_runtime_status() {
     local active="0" iface="" dns_list=""
@@ -2497,8 +2508,14 @@ dns_read_runtime_status() {
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1; then
         active="1"
         iface="$(get_default_interface)"
-        if [[ -n "$iface" ]] && command -v resolvectl >/dev/null 2>&1; then
-            dns_list="$(resolvectl status "$iface" 2>/dev/null | awk '/DNS Servers:/ {for (i=3; i<=NF; i++) print $i}')"
+        if command -v resolvectl >/dev/null 2>&1; then
+            dns_list="$(resolvectl dns 2>/dev/null | awk -F':[[:space:]]+' '
+                NF > 1 {
+                    count = split($2, server, /[[:space:]]+/)
+                    for (i = 1; i <= count; i++)
+                        if (server[i] != "" && server[i] != "(none)" && !seen[server[i]]++) print server[i]
+                }
+            ')"
         fi
     fi
 
@@ -2515,7 +2532,7 @@ dns_show_current() {
     echo -e "${BLUE}resolv.conf:${PLAIN}"
     if [[ -f "$DNS_RESOLV_CONF" ]]; then
         while read -r dns; do
-            [[ "$dns" =~ ^nameserver ]] || continue
+            [[ "$dns" =~ ^[[:space:]]*nameserver[[:space:]]+ ]] || continue
             echo -e "  ${GREEN}${dns}${PLAIN}"
         done < "$DNS_RESOLV_CONF"
     else
@@ -2532,16 +2549,16 @@ dns_show_current() {
     if [[ "$resolved_active" == "1" ]]; then
         if [[ -n "$iface" ]]; then
             echo -e "  默认网卡: ${GREEN}${iface}${PLAIN}"
-            if [[ -n "$dns_list" ]]; then
-                echo -e "  DNS Servers:"
-                while read -r dns; do
-                    echo -e "    ${GREEN}- ${dns}${PLAIN}"
-                done <<< "$dns_list"
-            else
-                echo -e "  (systemd-resolved 未接管 DNS)"
-            fi
         else
             echo -e "  (未检测到默认网卡)"
+        fi
+        if [[ -n "$dns_list" ]]; then
+            echo -e "  可见 DNS Servers:"
+            while read -r dns; do
+                echo -e "    ${GREEN}- ${dns}${PLAIN}"
+            done <<< "$dns_list"
+        else
+            echo -e "  (未检测到 systemd-resolved DNS)"
         fi
     else
         echo -e "  (systemd-resolved 未运行)"
@@ -2556,17 +2573,27 @@ dns_is_valid_ipv4() {
     [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
     read -r o1 o2 o3 o4 <<< "$ip"
     for o in "$o1" "$o2" "$o3" "$o4"; do
-        [[ "$o" -ge 0 && "$o" -le 255 ]] 2>/dev/null || return 1
+        [[ "$o" == "0" || "$o" =~ ^[1-9][0-9]{0,2}$ ]] || return 1
+        (( 10#$o <= 255 )) || return 1
     done
     return 0
 }
 
 dns_is_valid_ipv6() {
-    local ip="$1"
-    [[ "$ip" =~ ^[0-9A-Fa-f:%.]+$ ]] || return 1
+    local ip="$1" address zone=""
+
     [[ "$ip" == *:* ]] || return 1
-    [[ ${#ip} -le 80 ]] || return 1
-    return 0
+    if [[ "$ip" == *%* ]]; then
+        [[ "$ip" != *%*%* ]] || return 1
+        address="${ip%%%*}"
+        zone="${ip#*%}"
+        [[ "$zone" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+    else
+        address="$ip"
+    fi
+
+    command -v perl >/dev/null 2>&1 || return 1
+    perl -MSocket=AF_INET6,inet_pton -e 'exit(inet_pton(AF_INET6, $ARGV[0]) ? 0 : 1)' "$address" >/dev/null 2>&1
 }
 
 dns_is_valid_ip() {
@@ -2582,38 +2609,119 @@ dns_systemd_resolved_active() {
     command -v systemctl >/dev/null 2>&1 && systemctl is-active systemd-resolved >/dev/null 2>&1
 }
 
-dns_unlock_resolv() {
-    if command -v chattr >/dev/null 2>&1 && [[ -f "$DNS_RESOLV_CONF" ]]; then
-        chattr -i "$DNS_RESOLV_CONF" 2>/dev/null || true
-    fi
-}
+dns_apply_resolved() {
+    local temp_file backup_file="" had_previous=0
 
-dns_write_resolv_conf() {
-    local dns
+    if [[ -e "$DNS_RESOLVED_LEGACY_FILE" ]]; then
+        echo -e "${RED}检测到旧 DNS 配置: ${DNS_RESOLVED_LEGACY_FILE}${PLAIN}"
+        echo -e "${YELLOW}为避免覆盖来源不明的配置，请先手动确认或移除该文件${PLAIN}"
+        return 1
+    fi
+
+    mkdir -p "$DNS_RESOLVED_DROPIN_DIR" || return 1
+    temp_file=$(mktemp "$DNS_RESOLVED_DROPIN_DIR/.90-zero-dns.XXXXXX") || return 1
+
+    if [[ -f "$DNS_RESOLVED_DROPIN_FILE" ]]; then
+        backup_file=$(mktemp "$DNS_RESOLVED_DROPIN_DIR/.90-zero-dns.backup.XXXXXX") || {
+            rm -f "$temp_file"
+            return 1
+        }
+        cp -p "$DNS_RESOLVED_DROPIN_FILE" "$backup_file" || {
+            rm -f "$temp_file" "$backup_file"
+            return 1
+        }
+        had_previous=1
+    fi
+
     {
-        for dns in "$@"; do
-            echo "nameserver $dns"
-        done
-    } > "$DNS_RESOLV_CONF" 2>/dev/null
+        echo "# Managed by Zero.sh"
+        echo "[Resolve]"
+        printf 'DNS=%s\n' "$*"
+        echo "Domains=~."
+    } > "$temp_file" || {
+        rm -f "$temp_file" "$backup_file"
+        return 1
+    }
+    chmod 644 "$temp_file" || {
+        rm -f "$temp_file" "$backup_file"
+        return 1
+    }
+    mv -f "$temp_file" "$DNS_RESOLVED_DROPIN_FILE" || {
+        rm -f "$temp_file" "$backup_file"
+        return 1
+    }
+
+    if ! systemctl restart systemd-resolved 2>/dev/null || ! dns_systemd_resolved_active; then
+        if (( had_previous == 1 )); then
+            mv -f "$backup_file" "$DNS_RESOLVED_DROPIN_FILE" 2>/dev/null || true
+        else
+            rm -f "$DNS_RESOLVED_DROPIN_FILE"
+        fi
+        systemctl restart systemd-resolved >/dev/null 2>&1 || true
+        echo -e "${RED}systemd-resolved 重启失败，已回滚 DNS 配置${PLAIN}"
+        return 1
+    fi
+
+    [[ -n "$backup_file" ]] && rm -f "$backup_file"
+    command -v resolvectl >/dev/null 2>&1 && resolvectl flush-caches >/dev/null 2>&1 || true
+    return 0
 }
 
-dns_restart_local_resolvers() {
-    local svc
-    if command -v systemctl >/dev/null 2>&1; then
-        for svc in nscd dnsmasq named; do
-            systemctl is-active "$svc" >/dev/null 2>&1 && systemctl restart "$svc" >/dev/null 2>&1
-        done
+dns_apply_static() {
+    local temp_file dns conf_dir
+
+    if [[ -L "$DNS_RESOLV_CONF" ]]; then
+        echo -e "${RED}${DNS_RESOLV_CONF} 由其他网络管理器通过符号链接接管，已停止修改${PLAIN}"
+        echo -e "${YELLOW}当前指向: $(readlink "$DNS_RESOLV_CONF" 2>/dev/null || echo unknown)${PLAIN}"
+        return 1
     fi
+    if [[ ! -f "$DNS_RESOLV_CONF" ]]; then
+        echo -e "${RED}找不到可修改的 ${DNS_RESOLV_CONF}${PLAIN}"
+        return 1
+    fi
+
+    if [[ ! -f "$DNS_RESOLV_BACKUP" ]]; then
+        cp -p "$DNS_RESOLV_CONF" "$DNS_RESOLV_BACKUP" || return 1
+    fi
+
+    conf_dir=$(dirname "$DNS_RESOLV_CONF")
+    temp_file=$(mktemp "$conf_dir/.resolv.conf.zero.XXXXXX") || return 1
+    if ! awk '!/^[[:space:]]*nameserver[[:space:]]+/' "$DNS_RESOLV_CONF" > "$temp_file"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+    for dns in "$@"; do
+        printf 'nameserver %s\n' "$dns" >> "$temp_file" || {
+            rm -f "$temp_file"
+            return 1
+        }
+    done
+    chmod --reference="$DNS_RESOLV_CONF" "$temp_file" || {
+        rm -f "$temp_file"
+        return 1
+    }
+    chown --reference="$DNS_RESOLV_CONF" "$temp_file" || {
+        rm -f "$temp_file"
+        return 1
+    }
+    mv -f "$temp_file" "$DNS_RESOLV_CONF" || {
+        rm -f "$temp_file"
+        return 1
+    }
 }
 
 dns_apply() {
     local dns_list=("$@")
     local ok=() bad=()
-    local dns iface
+    local dns
+    local -A seen=()
 
     for dns in "${dns_list[@]}"; do
         if dns_is_valid_ip "$dns"; then
-            ok+=("$dns")
+            if [[ -z "${seen[$dns]+x}" ]]; then
+                ok+=("$dns")
+                seen["$dns"]=1
+            fi
         else
             bad+=("$dns")
         fi
@@ -2629,50 +2737,82 @@ dns_apply() {
     fi
 
     if dns_systemd_resolved_active; then
-        mkdir -p "$DNS_RESOLVED_DROPIN_DIR" || return 1
-        {
-            echo "[Resolve]"
-            echo "DNS=${dns_list[*]}"
-            echo "Domains=~."
-        } > "$DNS_RESOLVED_DROPIN_FILE" || return 1
+        dns_apply_resolved "${dns_list[@]}"
+    else
+        dns_apply_static "${dns_list[@]}"
+    fi
+}
 
-        if ! systemctl restart systemd-resolved 2>/dev/null; then
-            echo -e "${RED}systemd-resolved 重启失败${PLAIN}"
+dns_restore() {
+    local changed=0 temp_file backup_file conf_dir
+
+    if [[ -f "$DNS_RESOLVED_DROPIN_FILE" ]]; then
+        backup_file=$(mktemp "$DNS_RESOLVED_DROPIN_DIR/.90-zero-dns.restore.XXXXXX") || return 1
+        cp -p "$DNS_RESOLVED_DROPIN_FILE" "$backup_file" || {
+            rm -f "$backup_file"
+            return 1
+        }
+        rm -f "$DNS_RESOLVED_DROPIN_FILE" || {
+            rm -f "$backup_file"
+            return 1
+        }
+        if dns_systemd_resolved_active && ! systemctl restart systemd-resolved 2>/dev/null; then
+            mv -f "$backup_file" "$DNS_RESOLVED_DROPIN_FILE" 2>/dev/null || true
+            systemctl restart systemd-resolved >/dev/null 2>&1 || true
+            echo -e "${RED}systemd-resolved 重载失败，已恢复 Zero.sh DNS 配置${PLAIN}"
             return 1
         fi
-
-        if command -v resolvectl >/dev/null 2>&1; then
-            resolvectl flush-caches 2>/dev/null || true
-            iface="$(get_default_interface)"
-            if [[ -n "$iface" ]]; then
-                resolvectl dns "$iface" "${dns_list[@]}" 2>/dev/null || true
-                resolvectl domain "$iface" "~." 2>/dev/null || true
-                resolvectl flush-caches 2>/dev/null || true
-            fi
-        fi
-
-        if [[ ! -L "$DNS_RESOLV_CONF" ]]; then
-            dns_unlock_resolv
-            dns_write_resolv_conf "${dns_list[@]}" || return 1
-        fi
-    else
-        if [[ -L "$DNS_RESOLV_CONF" ]]; then
-            rm -f "$DNS_RESOLV_CONF" 2>/dev/null || return 1
-        fi
-        dns_unlock_resolv
-        dns_write_resolv_conf "${dns_list[@]}" || return 1
+        rm -f "$backup_file"
+        changed=1
     fi
 
-    dns_restart_local_resolvers
+    if [[ -f "$DNS_RESOLV_BACKUP" ]]; then
+        if [[ -L "$DNS_RESOLV_CONF" ]]; then
+            echo -e "${YELLOW}${DNS_RESOLV_CONF} 已变为符号链接，为避免破坏当前网络管理方式，未恢复静态备份${PLAIN}"
+            return 1
+        else
+            conf_dir=$(dirname "$DNS_RESOLV_CONF")
+            temp_file=$(mktemp "$conf_dir/.resolv.conf.restore.XXXXXX") || return 1
+            cp -p "$DNS_RESOLV_BACKUP" "$temp_file" || {
+                rm -f "$temp_file"
+                return 1
+            }
+            mv -f "$temp_file" "$DNS_RESOLV_CONF" || {
+                rm -f "$temp_file"
+                return 1
+            }
+            rm -f "$DNS_RESOLV_BACKUP"
+            changed=1
+        fi
+    fi
+
+    if (( changed == 0 )); then
+        echo -e "${YELLOW}未找到 Zero.sh 创建的 DNS 配置或备份${PLAIN}"
+        return 2
+    fi
+    command -v resolvectl >/dev/null 2>&1 && resolvectl flush-caches >/dev/null 2>&1 || true
     return 0
 }
 
 dns_apply_with_feedback() {
     if dns_apply "$@"; then
-        echo -e "${GREEN}DNS已修改并立即生效${PLAIN}"
+        echo -e "${GREEN}DNS 配置已更新${PLAIN}"
     else
         echo -e "${RED}DNS修改失败${PLAIN}"
     fi
+    press_any_key_to_continue
+}
+
+dns_restore_with_feedback() {
+    local result
+
+    dns_restore
+    result=$?
+    case "$result" in
+        0) echo -e "${GREEN}DNS 已恢复${PLAIN}" ;;
+        2) ;;
+        *) echo -e "${RED}DNS 恢复失败${PLAIN}" ;;
+    esac
     press_any_key_to_continue
 }
 
@@ -2680,8 +2820,9 @@ dns_show_menu() {
     clear
     echo -e "${BLUE}======== DNS 配置工具 ========${PLAIN}\n"
     dns_show_current
-    echo -e "${GREEN}1.${PLAIN}修改DNS为 ${GREEN}8.8.8.8${PLAIN} 和 ${GREEN}1.1.1.1${PLAIN}"
-    echo -e "${GREEN}2.${PLAIN}自定义修改DNS"
+    echo -e "${GREEN}1.${PLAIN}使用公共DNS ${GREEN}8.8.8.8${PLAIN} / ${GREEN}1.1.1.1${PLAIN}"
+    echo -e "${GREEN}2.${PLAIN}自定义DNS"
+    echo -e "${GREEN}3.${PLAIN}恢复原始DNS配置"
     echo -e "${YELLOW}0.${PLAIN}返回主菜单"
     echo -e "${BLUE}==============================${PLAIN}"
 }
@@ -2689,7 +2830,7 @@ dns_show_menu() {
 dns_read_custom_servers() {
     local dns=""
 
-    echo -e "\n${YELLOW}请输入DNS(每行一个,空行结束):${PLAIN}"
+    echo -e "\n${YELLOW}请输入DNS(每行一个,空行结束):${PLAIN}" >&2
     while true; do
         read -r -p "> " dns
         dns=$(trim_input "$dns")
@@ -2716,6 +2857,9 @@ handle_dns_choice() {
                 dns_apply_with_feedback "${custom_dns[@]}"
             fi
             ;;
+        3)
+            dns_restore_with_feedback
+            ;;
         0)
             return 1
             ;;
@@ -2732,7 +2876,7 @@ dns_fix() {
 
     while true; do
         dns_show_menu
-        choice=$(read_menu_choice "请输入选项 [0-2]: ")
+        choice=$(read_menu_choice "请输入选项 [0-3]: ")
         handle_dns_choice "$choice" || return
     done
 }
@@ -5497,1678 +5641,6 @@ snell_menu() {
   done
 }
 
-
-SHOES_EXEC_PATH="/usr/local/bin/shoes"
-SHOES_CONFIG_DIR="/etc/shoes"
-SHOES_CONFIG_PATH="${SHOES_CONFIG_DIR}/config.yaml"
-SHOES_SERVICE_NAME="shoes"
-SHOES_SERVICE_FILE="/etc/systemd/system/shoes.service"
-SHOES_RELEASE_REPO="sukurain/shoes"
-SHOES_LATEST_API_URL="https://api.github.com/repos/${SHOES_RELEASE_REPO}/releases/latest"
-SHOES_RELEASE_ASSET_NAME="shoes-musl.tar.gz"
-SHOES_SS_DEFAULT_CIPHER="2022-blake3-aes-128-gcm"
-
-shoes_check_supported_os() {
-    local os_id
-
-    if [[ ! -r /etc/os-release ]]; then
-        shoes_print_err "不支持"
-        return 1
-    fi
-
-    source /etc/os-release
-    os_id="${ID:-}"
-
-    case "$os_id" in
-        debian|ubuntu)
-            return 0
-            ;;
-        *)
-            shoes_print_err "不支持"
-            return 1
-            ;;
-    esac
-}
-
-shoes_pause_and_return() {
-    pause_enter_and_clear "按回车返回..."
-}
-
-shoes_pause_here() {
-    pause_enter "按回车继续..."
-}
-
-shoes_random_pass() {
-    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
-}
-
-shoes_shadowsocks_cipher_key_len() {
-    case "$1" in
-        2022-blake3-aes-128-gcm) printf '16' ;;
-        2022-blake3-aes-256-gcm) printf '32' ;;
-        *) return 1 ;;
-    esac
-}
-
-shoes_shadowsocks_cipher_label() {
-    case "$1" in
-        2022-blake3-aes-128-gcm) printf '2022-128' ;;
-        2022-blake3-aes-256-gcm) printf '2022-256' ;;
-        *) printf '%s' "$1" ;;
-    esac
-}
-
-shoes_normalize_shadowsocks_cipher() {
-    case "$1" in
-        2022-128)
-            printf '2022-blake3-aes-128-gcm'
-            ;;
-        2022-256)
-            printf '2022-blake3-aes-256-gcm'
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-shoes_generate_shadowsocks_2022_password() {
-    local cipher="$1"
-    local key_len output password
-
-    if [[ -x "$SHOES_EXEC_PATH" ]]; then
-        output="$("$SHOES_EXEC_PATH" generate-shadowsocks-2022-password "$cipher" 2>/dev/null || true)"
-        password="$(printf '%s\n' "$output" | awk -F': ' '/^Password:/ {print $2; exit}')"
-        if [[ -n "$password" ]]; then
-            printf '%s' "$password"
-            return 0
-        fi
-    fi
-
-    key_len="$(shoes_shadowsocks_cipher_key_len "$cipher")" || return 1
-    head -c "$key_len" /dev/urandom | base64 | tr -d '\n'
-}
-
-shoes_validate_shadowsocks_2022_password() {
-    local cipher="$1"
-    local password="$2"
-    local key_len decoded_len
-
-    key_len="$(shoes_shadowsocks_cipher_key_len "$cipher")" || return 0
-    decoded_len="$(printf '%s' "$password" | base64 -d 2>/dev/null | wc -c | tr -d '[:space:]')"
-    [[ "$decoded_len" == "$key_len" ]]
-}
-
-shoes_random_uuid() {
-    cat /proc/sys/kernel/random/uuid
-}
-
-shoes_yaml_quote() {
-    local value="${1//\\/\\\\}"
-    value="${value//\"/\\\"}"
-    printf '"%s"' "$value"
-}
-
-shoes_print_info() {
-    log_info "$*"
-}
-
-shoes_print_ok() {
-    log_ok "$*"
-}
-
-shoes_print_warn() {
-    log_warn "$*"
-}
-
-shoes_print_err() {
-    log_err "$*"
-}
-
-shoes_require_commands() {
-    local missing=()
-    local cmd
-    for cmd in curl tar systemctl base64; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            missing+=("$cmd")
-        fi
-    done
-
-    if (( ${#missing[@]} > 0 )); then
-        shoes_print_err "缺少命令: ${missing[*]}"
-        return 1
-    fi
-}
-
-shoes_load_defaults() {
-    local protocol_key reset_fn
-    while IFS= read -r protocol_key; do
-        reset_fn="$(shoes_protocol_meta_value "$protocol_key" "reset_fn")"
-        "$reset_fn"
-    done < <(shoes_protocol_keys)
-}
-
-shoes_protocol_marker() {
-    printf '# shoes-managed: protocol=%s' "$1"
-}
-
-shoes_extract_protocol_block() {
-    local protocol_type="$1"
-    local marker block
-    [[ -f "$SHOES_CONFIG_PATH" ]] || return 0
-
-    marker="$(shoes_protocol_marker "$protocol_type")"
-    block="$(awk -v RS='' -v marker="$marker" '
-        index($0, marker) > 0 { print; exit }
-    ' "$SHOES_CONFIG_PATH")"
-
-    if [[ -n "$block" ]]; then
-        printf '%s\n' "$block"
-        return 0
-    fi
-
-    awk -v RS='' -v protocol_type="$protocol_type" '
-        $0 ~ ("type:[[:space:]]*" protocol_type "([[:space:]]|$)") { print; exit }
-    ' "$SHOES_CONFIG_PATH"
-}
-
-shoes_extract_scalar_from_block() {
-    local block="$1"
-    local field="$2"
-    printf '%s\n' "$block" | sed -nE "s/^[[:space:]-]*${field}:[[:space:]]*\"?([^\"]*)\"?$/\1/p" | head -n1
-}
-
-shoes_extract_last_scalar_from_block() {
-    local block="$1"
-    local field="$2"
-    printf '%s\n' "$block" | sed -nE "s/^[[:space:]-]*${field}:[[:space:]]*\"?([^\"]*)\"?$/\1/p" | tail -n1
-}
-
-shoes_load_current_config() {
-    shoes_load_defaults
-    local protocol_key load_fn
-    while IFS= read -r protocol_key; do
-        load_fn="$(shoes_protocol_meta_value "$protocol_key" "load_fn")"
-        "$load_fn"
-    done < <(shoes_protocol_keys)
-}
-
-shoes_read_value() {
-    local __var="$1"
-    local prompt="$2"
-    local default_value="$3"
-    local input=""
-    read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
-    input="${input:-$default_value}"
-    printf -v "$__var" '%s' "$input"
-}
-
-shoes_trim_whitespace() {
-    trim_input "$1"
-}
-
-shoes_normalize_bind_address() {
-    local raw
-    raw="$(shoes_trim_whitespace "$1")"
-
-    if [[ -z "$raw" ]]; then
-        printf '%s' "$raw"
-        return 0
-    fi
-
-    if [[ "$raw" == *:* ]]; then
-        printf '%s' "$raw"
-        return 0
-    fi
-
-    if [[ "$raw" =~ ^[0-9,-]+$ ]]; then
-        printf '[::]:%s' "$raw"
-        return 0
-    fi
-
-    printf '%s' "$raw"
-}
-
-shoes_read_address_value() {
-    local __var="$1"
-    local prompt="$2"
-    local default_value="$3"
-    local input=""
-    read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
-    input="${input:-$default_value}"
-    input="$(shoes_normalize_bind_address "$input")"
-    printf -v "$__var" '%s' "$input"
-}
-
-shoes_bind_port_display() {
-    local value="$1"
-
-    if [[ "$value" =~ ^\[.*\]:([0-9]+)$ ]]; then
-        printf '%s' "${BASH_REMATCH[1]}"
-        return
-    fi
-
-    if [[ "$value" =~ :([0-9]+)$ ]]; then
-        printf '%s' "${BASH_REMATCH[1]}"
-        return
-    fi
-
-    printf '%s' "$value"
-}
-
-shoes_read_port_value() {
-    local var_name="$1"
-    local current_value="${!var_name}"
-    shoes_read_address_value "$var_name" "端口(默认:$(shoes_bind_port_display "$current_value")): " "$current_value"
-}
-
-shoes_read_password_or_random() {
-    local __var="$1"
-    local prompt="$2"
-    local input=""
-    read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
-    if [[ -z "$input" ]]; then
-        input="$(shoes_random_pass)"
-        shoes_print_ok "密码: ${input}"
-    fi
-    printf -v "$__var" '%s' "$input"
-}
-
-shoes_read_shadowsocks_password_or_random() {
-    local __var="$1"
-    local prompt="$2"
-    local cipher="$3"
-    local input=""
-
-    while true; do
-        read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
-        if [[ -z "$input" ]]; then
-            input="$(shoes_generate_shadowsocks_2022_password "$cipher")" || input="$(shoes_random_pass)"
-            shoes_print_ok "密码: ${input}"
-            break
-        fi
-
-        if shoes_validate_shadowsocks_2022_password "$cipher" "$input"; then
-            break
-        fi
-
-        shoes_print_warn "2022 密码格式不正确，请重新输入，或直接回车随机生成"
-    done
-
-    printf -v "$__var" '%s' "$input"
-}
-
-shoes_read_shadowsocks_cipher_value() {
-    local __var="$1"
-    local current_value="${!__var}"
-    local input=""
-
-    while true; do
-        read -r -p "$(echo -e "${BLUE}加密(默认:$(shoes_shadowsocks_cipher_label "$current_value")): ${PLAIN}")" input
-        if [[ -z "$input" ]]; then
-            input="$current_value"
-        elif ! input="$(shoes_normalize_shadowsocks_cipher "$input")"; then
-            shoes_print_warn "只支持 2022-128 或 2022-256"
-            continue
-        fi
-        if shoes_shadowsocks_cipher_key_len "$input" >/dev/null; then
-            printf -v "$__var" '%s' "$input"
-            return 0
-        fi
-        shoes_print_warn "只支持 2022-128 或 2022-256"
-    done
-}
-
-shoes_read_uuid_or_random() {
-    local __var="$1"
-    local prompt="$2"
-    local input=""
-    read -r -p "$(echo -e "${BLUE}${prompt}${PLAIN}")" input
-    if [[ -z "$input" ]]; then
-        input="$(shoes_random_uuid)"
-        shoes_print_ok "UUID: ${input}"
-    fi
-    printf -v "$__var" '%s' "$input"
-}
-
-shoes_ask_yes_no() {
-    local prompt="$1"
-    local default_choice="$2"
-    local suffix=""
-    local answer=""
-
-    if [[ "$default_choice" == "y" || "$default_choice" == "Y" ]]; then
-        suffix="[Y/n]"
-        default_choice="y"
-    else
-        suffix="[y/N]"
-        default_choice="n"
-    fi
-
-    while true; do
-        read -r -p "$(echo -e "${BLUE}${prompt} ${suffix}: ${PLAIN}")" answer
-        answer="${answer:-$default_choice}"
-        case "$answer" in
-            y|Y) return 0 ;;
-            n|N) return 1 ;;
-            *) shoes_print_warn "请输入 y 或 n" ;;
-        esac
-    done
-}
-
-shoes_bool_label() {
-    if [[ "$1" == "true" ]]; then
-        echo "${GREEN}开启${PLAIN}"
-    else
-        echo "${RED}关闭${PLAIN}"
-    fi
-}
-
-shoes_select_cert() {
-    local current_cert="${1:-}"
-    local current_key="${2:-}"
-    local cert_files=()
-    local opt=""
-    local index=1
-
-    while true; do
-        echo -e "${BLUE}证书配置${PLAIN}"
-        if [[ -n "$current_cert" && -n "$current_key" && -f "$current_cert" && -f "$current_key" ]]; then
-            echo -e "${GREEN}回车.${PLAIN}保留当前证书: ${current_cert}"
-        fi
-
-        cert_files=()
-        if compgen -G "/etc/cert/*.crt" > /dev/null 2>&1; then
-            mapfile -t cert_files < <(ls /etc/cert/*.crt 2>/dev/null | sort)
-        fi
-
-        index=1
-        while (( index <= ${#cert_files[@]} )); do
-            echo -e "${GREEN}${index}.${PLAIN}$(basename "${cert_files[$((index-1))]}")"
-            ((index++))
-        done
-        echo -e "${GREEN}0.${PLAIN}自定义路径"
-
-        read -r -p "$(echo -e "${BLUE}输入选项: ${PLAIN}")" opt
-
-        if [[ -z "$opt" && -n "$current_cert" && -n "$current_key" && -f "$current_cert" && -f "$current_key" ]]; then
-            cert_path="$current_cert"
-            key_path="$current_key"
-            return 0
-        fi
-
-        if [[ "$opt" == "0" ]]; then
-            read -r -p "$(echo -e "${BLUE}证书路径: ${PLAIN}")" cert_path
-            read -r -p "$(echo -e "${BLUE}私钥路径: ${PLAIN}")" key_path
-            if [[ -f "$cert_path" && -f "$key_path" ]]; then
-                return 0
-            fi
-            shoes_print_err "路径无效"
-            sleep 1
-            continue
-        fi
-
-        if [[ "$opt" =~ ^[0-9]+$ ]] && (( opt >= 1 && opt <= ${#cert_files[@]} )); then
-            cert_path="${cert_files[$((opt-1))]}"
-            key_path="${cert_path%.crt}.key"
-            if [[ -f "$key_path" ]]; then
-                return 0
-            fi
-            shoes_print_err "未找到对应私钥: $key_path"
-            sleep 1
-            continue
-        fi
-
-        shoes_print_warn "无效选项"
-        sleep 1
-    done
-}
-
-shoes_derive_name_from_cert_path() {
-    local cert_file base_name
-    cert_file="$1"
-    base_name="$(basename "$cert_file")"
-    base_name="${base_name%.crt}"
-    base_name="${base_name%.pem}"
-    printf '%s' "$base_name"
-}
-
-shoes_protocol_metadata() {
-    cat <<'EOF'
-anytls|ENABLE_ANYTLS|shoes_reset_anytls_state|shoes_load_anytls_config|shoes_configure_anytls|shoes_append_anytls|shoes_modify_anytls|AnyTLS|Anytls
-trojan|ENABLE_TROJAN|shoes_reset_trojan_state|shoes_load_trojan_config|shoes_configure_trojan|shoes_append_trojan|shoes_modify_trojan|Trojan|Trojan
-tuic|ENABLE_TUIC|shoes_reset_tuic_state|shoes_load_tuic_config|shoes_configure_tuic|shoes_append_tuic|shoes_modify_tuic|Tuicv5|Tuicv5
-hy2|ENABLE_HY2|shoes_reset_hysteria2_state|shoes_load_hysteria2_config|shoes_configure_hysteria2|shoes_append_hysteria2|shoes_modify_hysteria|Hysteria|Hysteria
-shadowsocks|ENABLE_SS|shoes_reset_shadowsocks_state|shoes_load_shadowsocks_config|shoes_configure_shadowsocks|shoes_append_shadowsocks|shoes_modify_shadowsocks|Shadowsocks|Shadowsocks
-EOF
-}
-
-shoes_protocol_keys() {
-    shoes_protocol_metadata | awk -F'|' '{print $1}'
-}
-
-shoes_protocol_meta_value() {
-    local protocol_key="$1"
-    local field="$2"
-    local field_index
-
-    case "$field" in
-        enable_var) field_index=2 ;;
-        reset_fn) field_index=3 ;;
-        load_fn) field_index=4 ;;
-        configure_fn) field_index=5 ;;
-        append_fn) field_index=6 ;;
-        modify_fn) field_index=7 ;;
-        prompt_label) field_index=8 ;;
-        menu_label) field_index=9 ;;
-        *) return 1 ;;
-    esac
-
-    shoes_protocol_metadata | awk -F'|' -v key="$protocol_key" -v field_index="$field_index" '
-        $1 == key { print $field_index; exit }
-    '
-}
-
-shoes_protocol_enabled() {
-    local var_name
-    var_name="$(shoes_protocol_meta_value "$1" "enable_var")"
-    [[ -n "$var_name" && "${!var_name}" == "y" ]]
-}
-
-shoes_set_protocol_enabled() {
-    local protocol_key="$1"
-    local value="$2"
-    local var_name
-    var_name="$(shoes_protocol_meta_value "$protocol_key" "enable_var")"
-    if [[ -n "$var_name" ]]; then
-        printf -v "$var_name" '%s' "$value"
-    fi
-}
-
-shoes_reset_shadowsocks_state() {
-    ENABLE_SS="n"
-    SS_ADDRESS="[::]:8388"
-    SS_CIPHER="$SHOES_SS_DEFAULT_CIPHER"
-    SS_PASSWORD=""
-    SS_SHADOWTLS_ENABLED="false"
-    SS_CERT=""
-    SS_KEY=""
-}
-
-shoes_load_shadowsocks_config() {
-    local block
-    block="$(shoes_extract_protocol_block "shadowsocks")"
-    if [[ -n "$block" ]]; then
-        ENABLE_SS="y"
-        SS_ADDRESS="$(shoes_extract_scalar_from_block "$block" "address")"
-        SS_CIPHER="$(shoes_extract_scalar_from_block "$block" "cipher")"
-        SS_PASSWORD="$(shoes_extract_last_scalar_from_block "$block" "password")"
-        if printf '%s\n' "$block" | grep -q 'shadowtls_targets:'; then
-            SS_SHADOWTLS_ENABLED="true"
-            SS_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
-            SS_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-        else
-            SS_SHADOWTLS_ENABLED="false"
-        fi
-    fi
-}
-
-shoes_configure_shadowsocks() {
-    clear
-    echo -e "${BLUE}===== Shadowsocks =====${PLAIN}"
-    shoes_read_port_value "SS_ADDRESS"
-    shoes_read_shadowsocks_cipher_value "SS_CIPHER"
-    shoes_read_shadowsocks_password_or_random "SS_PASSWORD" "密码(回车随机): " "$SS_CIPHER"
-    if shoes_ask_yes_no "STLS:" "$([[ "$SS_SHADOWTLS_ENABLED" == "true" ]] && echo y || echo n)"; then
-        SS_SHADOWTLS_ENABLED="true"
-        shoes_select_cert "$SS_CERT" "$SS_KEY"
-        SS_CERT="$cert_path"
-        SS_KEY="$key_path"
-    else
-        SS_SHADOWTLS_ENABLED="false"
-    fi
-}
-
-shoes_append_shadowsocks() {
-    local out="$1"
-    local ss_sni
-    if [[ "$SS_SHADOWTLS_ENABLED" == "true" ]]; then
-        ss_sni="$(shoes_derive_name_from_cert_path "$SS_CERT")"
-        cat >> "$out" <<EOF
-# shoes-managed: protocol=shadowsocks
-- address: $(shoes_yaml_quote "$SS_ADDRESS")
-  protocol:
-    type: tls
-    shadowtls_targets:
-      $(shoes_yaml_quote "$ss_sni"):
-        password: $(shoes_yaml_quote "$SS_PASSWORD")
-        handshake:
-          cert: $(shoes_yaml_quote "$SS_CERT")
-          key: $(shoes_yaml_quote "$SS_KEY")
-        protocol:
-          type: shadowsocks
-          cipher: $(shoes_yaml_quote "$SS_CIPHER")
-          password: $(shoes_yaml_quote "$SS_PASSWORD")
-          udp_enabled: true
-
-EOF
-        return
-    fi
-
-    cat >> "$out" <<EOF
-# shoes-managed: protocol=shadowsocks
-- address: $(shoes_yaml_quote "$SS_ADDRESS")
-  protocol:
-    type: shadowsocks
-    cipher: $(shoes_yaml_quote "$SS_CIPHER")
-    password: $(shoes_yaml_quote "$SS_PASSWORD")
-    udp_enabled: true
-
-EOF
-}
-
-shoes_modify_shadowsocks() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Shadowsocks_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_SS" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改加密"
-            echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}切换STLS (当前: $(shoes_bool_label "$SS_SHADOWTLS_ENABLED"))"
-            echo -e "${GREEN}  5.${PLAIN}修改STLS证书"
-            echo -e "${GREEN}  6.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1) shoes_apply_address_update "SS_ADDRESS" ;;
-                2) shoes_apply_shadowsocks_cipher_update ;;
-                3) shoes_apply_shadowsocks_password_update ;;
-                4) shoes_apply_shadowsocks_shadowtls_toggle ;;
-                5) shoes_apply_shadowsocks_cert_update ;;
-                6)
-                    if shoes_disable_protocol_with_confirmation "ENABLE_SS" "Shadowsocks"; then
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) shoes_print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ! shoes_prompt_enable_protocol "ENABLE_SS" "shoes_configure_shadowsocks"; then
-                break
-            fi
-        fi
-    done
-}
-
-shoes_reset_trojan_state() {
-    ENABLE_TROJAN="n"
-    TROJAN_ADDRESS="[::]:4443"
-    TROJAN_WS_PATH="/"
-    TROJAN_PASSWORD=""
-    TROJAN_CERT=""
-    TROJAN_KEY=""
-}
-
-shoes_load_trojan_config() {
-    local block
-    block="$(shoes_extract_protocol_block "trojan")"
-    if [[ -n "$block" ]]; then
-        ENABLE_TROJAN="y"
-        TROJAN_ADDRESS="$(shoes_extract_scalar_from_block "$block" "address")"
-        TROJAN_WS_PATH="$(shoes_extract_scalar_from_block "$block" "matching_path")"
-        TROJAN_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
-        TROJAN_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
-        TROJAN_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-    fi
-}
-
-shoes_configure_trojan() {
-    clear
-    echo -e "${BLUE}===== Trojan =====${PLAIN}"
-    shoes_read_port_value "TROJAN_ADDRESS"
-    shoes_read_value "TROJAN_WS_PATH" "路径(默认:${TROJAN_WS_PATH}): " "$TROJAN_WS_PATH"
-    shoes_read_value "TROJAN_PASSWORD" "密码(回车随机): " "$TROJAN_PASSWORD"
-    if [[ -z "$TROJAN_PASSWORD" ]]; then
-        TROJAN_PASSWORD="$(shoes_random_pass)"
-        shoes_print_ok "密码: ${TROJAN_PASSWORD}"
-    fi
-    shoes_select_cert "$TROJAN_CERT" "$TROJAN_KEY"
-    TROJAN_CERT="$cert_path"
-    TROJAN_KEY="$key_path"
-}
-
-shoes_append_trojan() {
-    local out="$1"
-    local trojan_sni
-    trojan_sni="$(shoes_derive_name_from_cert_path "$TROJAN_CERT")"
-    cat >> "$out" <<EOF
-# shoes-managed: protocol=trojan
-- address: $(shoes_yaml_quote "$TROJAN_ADDRESS")
-  protocol:
-    type: tls
-    tls_targets:
-      $(shoes_yaml_quote "$trojan_sni"):
-        cert: $(shoes_yaml_quote "$TROJAN_CERT")
-        key: $(shoes_yaml_quote "$TROJAN_KEY")
-        protocol:
-          type: websocket
-          targets:
-            - matching_path: $(shoes_yaml_quote "$TROJAN_WS_PATH")
-              protocol:
-                type: trojan
-                password: $(shoes_yaml_quote "$TROJAN_PASSWORD")
-
-EOF
-}
-
-shoes_modify_trojan() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Trojan_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_TROJAN" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改路径"
-            echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1) shoes_apply_address_update "TROJAN_ADDRESS" ;;
-                2) shoes_apply_value_update "TROJAN_WS_PATH" "新路径" ;;
-                3) shoes_apply_password_update "TROJAN_PASSWORD" ;;
-                4) shoes_apply_cert_update "TROJAN_CERT" "TROJAN_KEY" ;;
-                5)
-                    if shoes_disable_protocol_with_confirmation "ENABLE_TROJAN" "Trojan"; then
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) shoes_print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ! shoes_prompt_enable_protocol "ENABLE_TROJAN" "shoes_configure_trojan"; then
-                break
-            fi
-        fi
-    done
-}
-
-shoes_reset_hysteria2_state() {
-    ENABLE_HY2="n"
-    HY2_ADDRESS="[::]:8443"
-    HY2_PASSWORD=""
-    HY2_CERT=""
-    HY2_KEY=""
-    HY2_BBR_ENABLED="false"
-}
-
-shoes_load_hysteria2_config() {
-    local block congestion
-    block="$(shoes_extract_protocol_block "hysteria2")"
-    if [[ -n "$block" ]]; then
-        ENABLE_HY2="y"
-        HY2_ADDRESS="$(shoes_extract_scalar_from_block "$block" "address")"
-        HY2_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
-        HY2_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
-        HY2_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-        congestion="$(shoes_extract_scalar_from_block "$block" "congestion")"
-        [[ "$congestion" == "bbr" ]] && HY2_BBR_ENABLED="true" || HY2_BBR_ENABLED="false"
-    fi
-}
-
-shoes_configure_hysteria2() {
-    clear
-    echo -e "${BLUE}===== Hysteria2 =====${PLAIN}"
-    shoes_read_port_value "HY2_ADDRESS"
-    shoes_read_value "HY2_PASSWORD" "密码(回车随机): " "$HY2_PASSWORD"
-    if [[ -z "$HY2_PASSWORD" ]]; then
-        HY2_PASSWORD="$(shoes_random_pass)"
-        shoes_print_ok "密码: ${HY2_PASSWORD}"
-    fi
-    if shoes_ask_yes_no "BBR:" "$([[ "$HY2_BBR_ENABLED" == "true" ]] && echo y || echo n)"; then
-        HY2_BBR_ENABLED="true"
-    else
-        HY2_BBR_ENABLED="false"
-    fi
-    shoes_select_cert "$HY2_CERT" "$HY2_KEY"
-    HY2_CERT="$cert_path"
-    HY2_KEY="$key_path"
-}
-
-shoes_append_hysteria2() {
-    local out="$1"
-    cat >> "$out" <<EOF
-# shoes-managed: protocol=hysteria2
-- address: $(shoes_yaml_quote "$HY2_ADDRESS")
-  transport: quic
-  quic_settings:
-    cert: $(shoes_yaml_quote "$HY2_CERT")
-    key: $(shoes_yaml_quote "$HY2_KEY")
-    alpn_protocols:
-      - "h3"
-EOF
-    if [[ "$HY2_BBR_ENABLED" == "true" ]]; then
-        cat >> "$out" <<EOF
-    congestion: bbr
-EOF
-    fi
-    cat >> "$out" <<EOF
-  protocol:
-    type: hysteria2
-    password: $(shoes_yaml_quote "$HY2_PASSWORD")
-    udp_enabled: true
-
-EOF
-}
-
-shoes_modify_hysteria() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Hysteria2_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_HY2" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改密码"
-            echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}切换BBR (当前: $(shoes_bool_label "$HY2_BBR_ENABLED"))"
-            echo -e "${GREEN}  5.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1) shoes_apply_address_update "HY2_ADDRESS" ;;
-                2) shoes_apply_password_update "HY2_PASSWORD" ;;
-                3) shoes_apply_cert_update "HY2_CERT" "HY2_KEY" ;;
-                4) shoes_apply_boolean_toggle "HY2_BBR_ENABLED" ;;
-                5)
-                    if shoes_disable_protocol_with_confirmation "ENABLE_HY2" "Hysteria2"; then
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) shoes_print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ! shoes_prompt_enable_protocol "ENABLE_HY2" "shoes_configure_hysteria2"; then
-                break
-            fi
-        fi
-    done
-}
-
-shoes_reset_tuic_state() {
-    ENABLE_TUIC="n"
-    TUIC_ADDRESS="[::]:9443"
-    TUIC_UUID=""
-    TUIC_PASSWORD=""
-    TUIC_CERT=""
-    TUIC_KEY=""
-    TUIC_BBR_ENABLED="false"
-}
-
-shoes_load_tuic_config() {
-    local block congestion
-    block="$(shoes_extract_protocol_block "tuic")"
-    if [[ -n "$block" ]]; then
-        ENABLE_TUIC="y"
-        TUIC_ADDRESS="$(shoes_extract_scalar_from_block "$block" "address")"
-        TUIC_UUID="$(shoes_extract_scalar_from_block "$block" "uuid")"
-        TUIC_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
-        TUIC_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
-        TUIC_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-        congestion="$(shoes_extract_scalar_from_block "$block" "congestion")"
-        [[ "$congestion" == "bbr" ]] && TUIC_BBR_ENABLED="true" || TUIC_BBR_ENABLED="false"
-    fi
-}
-
-shoes_configure_tuic() {
-    clear
-    echo -e "${BLUE}===== TUIC v5 =====${PLAIN}"
-    shoes_read_port_value "TUIC_ADDRESS"
-    shoes_read_value "TUIC_UUID" "UUID(回车随机): " "$TUIC_UUID"
-    if [[ -z "$TUIC_UUID" ]]; then
-        TUIC_UUID="$(shoes_random_uuid)"
-        shoes_print_ok "UUID: ${TUIC_UUID}"
-    fi
-    shoes_read_value "TUIC_PASSWORD" "密码(回车随机): " "$TUIC_PASSWORD"
-    if [[ -z "$TUIC_PASSWORD" ]]; then
-        TUIC_PASSWORD="$(shoes_random_pass)"
-        shoes_print_ok "密码: ${TUIC_PASSWORD}"
-    fi
-    if shoes_ask_yes_no "BBR:" "$([[ "$TUIC_BBR_ENABLED" == "true" ]] && echo y || echo n)"; then
-        TUIC_BBR_ENABLED="true"
-    else
-        TUIC_BBR_ENABLED="false"
-    fi
-    shoes_select_cert "$TUIC_CERT" "$TUIC_KEY"
-    TUIC_CERT="$cert_path"
-    TUIC_KEY="$key_path"
-}
-
-shoes_append_tuic() {
-    local out="$1"
-    cat >> "$out" <<EOF
-# shoes-managed: protocol=tuic
-- address: $(shoes_yaml_quote "$TUIC_ADDRESS")
-  transport: quic
-  quic_settings:
-    cert: $(shoes_yaml_quote "$TUIC_CERT")
-    key: $(shoes_yaml_quote "$TUIC_KEY")
-    alpn_protocols:
-      - "h3"
-EOF
-    if [[ "$TUIC_BBR_ENABLED" == "true" ]]; then
-        cat >> "$out" <<EOF
-    congestion: bbr
-EOF
-    fi
-    cat >> "$out" <<EOF
-  protocol:
-    type: tuic
-    uuid: $(shoes_yaml_quote "$TUIC_UUID")
-    password: $(shoes_yaml_quote "$TUIC_PASSWORD")
-
-EOF
-}
-
-shoes_modify_tuic() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ TUIC_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_TUIC" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改UUID"
-            echo -e "${GREEN}  3.${PLAIN}修改密码"
-            echo -e "${GREEN}  4.${PLAIN}修改证书"
-            echo -e "${GREEN}  5.${PLAIN}切换BBR (当前: $(shoes_bool_label "$TUIC_BBR_ENABLED"))"
-            echo -e "${GREEN}  6.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1) shoes_apply_address_update "TUIC_ADDRESS" ;;
-                2) shoes_apply_uuid_update "TUIC_UUID" ;;
-                3) shoes_apply_password_update "TUIC_PASSWORD" ;;
-                4) shoes_apply_cert_update "TUIC_CERT" "TUIC_KEY" ;;
-                5) shoes_apply_boolean_toggle "TUIC_BBR_ENABLED" ;;
-                6)
-                    if shoes_disable_protocol_with_confirmation "ENABLE_TUIC" "TUIC v5"; then
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) shoes_print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ! shoes_prompt_enable_protocol "ENABLE_TUIC" "shoes_configure_tuic"; then
-                break
-            fi
-        fi
-    done
-}
-
-shoes_reset_anytls_state() {
-    ENABLE_ANYTLS="n"
-    ANYTLS_ADDRESS="[::]:443"
-    ANYTLS_PASSWORD=""
-    ANYTLS_CERT=""
-    ANYTLS_KEY=""
-}
-
-shoes_load_anytls_config() {
-    local block
-    block="$(shoes_extract_protocol_block "anytls")"
-    if [[ -n "$block" ]]; then
-        ENABLE_ANYTLS="y"
-        ANYTLS_ADDRESS="$(shoes_extract_scalar_from_block "$block" "address")"
-        ANYTLS_PASSWORD="$(shoes_extract_scalar_from_block "$block" "password")"
-        ANYTLS_CERT="$(shoes_extract_scalar_from_block "$block" "cert")"
-        ANYTLS_KEY="$(shoes_extract_scalar_from_block "$block" "key")"
-    fi
-}
-
-shoes_configure_anytls() {
-    clear
-    echo -e "${BLUE}===== AnyTLS =====${PLAIN}"
-    shoes_read_port_value "ANYTLS_ADDRESS"
-    shoes_read_value "ANYTLS_PASSWORD" "密码(回车随机): " "$ANYTLS_PASSWORD"
-    if [[ -z "$ANYTLS_PASSWORD" ]]; then
-        ANYTLS_PASSWORD="$(shoes_random_pass)"
-        shoes_print_ok "密码: ${ANYTLS_PASSWORD}"
-    fi
-    shoes_select_cert "$ANYTLS_CERT" "$ANYTLS_KEY"
-    ANYTLS_CERT="$cert_path"
-    ANYTLS_KEY="$key_path"
-}
-
-shoes_append_anytls() {
-    local out="$1"
-    local anytls_sni
-    anytls_sni="$(shoes_derive_name_from_cert_path "$ANYTLS_CERT")"
-    cat >> "$out" <<EOF
-# shoes-managed: protocol=anytls
-- address: $(shoes_yaml_quote "$ANYTLS_ADDRESS")
-  protocol:
-    type: tls
-    tls_targets:
-      $(shoes_yaml_quote "$anytls_sni"):
-        cert: $(shoes_yaml_quote "$ANYTLS_CERT")
-        key: $(shoes_yaml_quote "$ANYTLS_KEY")
-        protocol:
-          type: anytls
-          users:
-            - name: "user1"
-              password: $(shoes_yaml_quote "$ANYTLS_PASSWORD")
-          udp_enabled: true
-          padding_scheme:
-            - "stop=8"
-            - "0=30-30"
-            - "1=100-400"
-            - "2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000"
-            - "3=9-9,500-1000"
-            - "4=500-1000"
-            - "5=500-1000"
-            - "6=500-1000"
-            - "7=500-1000"
-
-EOF
-}
-
-shoes_modify_anytls() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ AnyTLS_Conf ✦${PLAIN}"
-
-        if [[ "$ENABLE_ANYTLS" == "y" ]]; then
-            echo -e "${GREEN}  1.${PLAIN}修改端口"
-            echo -e "${GREEN}  2.${PLAIN}修改密码"
-            echo -e "${GREEN}  3.${PLAIN}修改证书"
-            echo -e "${GREEN}  4.${PLAIN}禁用服务"
-            echo -e "${GREEN}  0.${PLAIN}返回上级"
-            read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-            case "$opt" in
-                1) shoes_apply_address_update "ANYTLS_ADDRESS" ;;
-                2) shoes_apply_password_update "ANYTLS_PASSWORD" ;;
-                3) shoes_apply_cert_update "ANYTLS_CERT" "ANYTLS_KEY" ;;
-                4)
-                    if shoes_disable_protocol_with_confirmation "ENABLE_ANYTLS" "AnyTLS"; then
-                        break
-                    fi
-                    ;;
-                0) break ;;
-                *) shoes_print_warn "无效选项"; sleep 1 ;;
-            esac
-        else
-            echo -e "${YELLOW}  当前未启用${PLAIN}"
-            if ! shoes_prompt_enable_protocol "ENABLE_ANYTLS" "shoes_configure_anytls"; then
-                break
-            fi
-        fi
-    done
-}
-
-shoes_protocol_count() {
-    local count=0
-    local protocol_key
-    while IFS= read -r protocol_key; do
-        if shoes_protocol_enabled "$protocol_key"; then
-            ((count++))
-        fi
-    done < <(shoes_protocol_keys)
-    echo "$count"
-}
-
-shoes_run_configuration_wizard() {
-    local protocol_key enable_var configure_fn
-    local protocol_keys_list=()
-    mapfile -t protocol_keys_list < <(shoes_protocol_keys)
-
-    while true; do
-        clear
-        echo -e "${BLUE}选择要启用的协议${PLAIN}"
-
-        for protocol_key in "${protocol_keys_list[@]}"; do
-            enable_var="$(shoes_protocol_meta_value "$protocol_key" "enable_var")"
-            if shoes_ask_yes_no "启用 $(shoes_protocol_meta_value "$protocol_key" "prompt_label")" "${!enable_var}"; then
-                shoes_set_protocol_enabled "$protocol_key" "y"
-            else
-                shoes_set_protocol_enabled "$protocol_key" "n"
-            fi
-        done
-
-        if [[ "$(shoes_protocol_count)" -gt 0 ]]; then
-            for protocol_key in "${protocol_keys_list[@]}"; do
-                if shoes_protocol_enabled "$protocol_key"; then
-                    configure_fn="$(shoes_protocol_meta_value "$protocol_key" "configure_fn")"
-                    "$configure_fn"
-                fi
-            done
-
-            break
-        fi
-
-        shoes_print_err "至少需要启用一个协议"
-        sleep 1
-    done
-}
-
-shoes_render_config_file() {
-    local out="$1"
-    local protocol_key append_fn
-    : > "$out"
-
-    while IFS= read -r protocol_key; do
-        if shoes_protocol_enabled "$protocol_key"; then
-            append_fn="$(shoes_protocol_meta_value "$protocol_key" "append_fn")"
-            "$append_fn" "$out"
-        fi
-    done < <(shoes_protocol_keys)
-
-    if [[ "$(shoes_protocol_count)" -eq 0 ]]; then
-        return 1
-    fi
-
-    return 0
-}
-
-shoes_create_systemd_service() {
-    cat > "$SHOES_SERVICE_FILE" <<EOF
-[Unit]
-Description=shoes proxy service
-After=network.target network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=${SHOES_EXEC_PATH} ${SHOES_CONFIG_PATH}
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    chmod 644 "$SHOES_SERVICE_FILE"
-}
-
-shoes_validate_config_file() {
-    local config_file="$1"
-    local dry_run_log="$2"
-    "$SHOES_EXEC_PATH" --dry-run "$config_file" > "$dry_run_log" 2>&1
-}
-
-shoes_install_config_file() {
-    local staged_config="$1"
-    mkdir -p "$SHOES_CONFIG_DIR" || return 1
-    mv "$staged_config" "$SHOES_CONFIG_PATH" || return 1
-}
-
-shoes_reload_service_unit() {
-    shoes_create_systemd_service
-    if ! systemctl daemon-reload >/dev/null 2>&1; then
-        shoes_print_err "systemd daemon-reload 失败"
-        return 1
-    fi
-    if ! systemctl enable "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
-        shoes_print_err "启用 shoes 服务失败"
-        return 1
-    fi
-    return 0
-}
-
-shoes_run_service_action_checked() {
-    local action="$1"
-    local fail_message="$2"
-
-    if ! systemctl "$action" "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
-        [[ -n "$fail_message" ]] && shoes_print_err "$fail_message"
-        service_failure_hint "$SHOES_SERVICE_NAME"
-        return 1
-    fi
-    return 0
-}
-
-shoes_apply_configuration() {
-    local tmp_config dry_run_log
-    tmp_config="$(mktemp)"
-    dry_run_log="$(mktemp)"
-
-    if ! shoes_render_config_file "$tmp_config"; then
-        rm -f "$tmp_config" "$dry_run_log"
-        shoes_print_err "未生成任何协议配置"
-        return 1
-    fi
-
-    if ! shoes_validate_config_file "$tmp_config" "$dry_run_log"; then
-        shoes_print_err "配置校验失败"
-        echo -e "${YELLOW}---------------- 生成的配置 ----------------${PLAIN}"
-        cat "$tmp_config"
-        echo -e "${YELLOW}--------------------------------------------${PLAIN}"
-        cat "$dry_run_log"
-        rm -f "$tmp_config" "$dry_run_log"
-        return 1
-    fi
-
-    if ! shoes_install_config_file "$tmp_config"; then
-        shoes_print_err "写入配置文件失败"
-        rm -f "$tmp_config" "$dry_run_log"
-        return 1
-    fi
-    rm -f "$dry_run_log"
-
-    if ! shoes_reload_service_unit; then
-        return 1
-    fi
-
-    shoes_run_service_action_checked "restart" "重启 shoes 服务失败"
-}
-
-shoes_get_release_json() {
-    curl -fsSL "$SHOES_LATEST_API_URL"
-}
-
-shoes_extract_tag_name() {
-    awk -F '"' '/"tag_name":/ {print $4; exit}'
-}
-
-shoes_extract_download_url() {
-    local asset_name="$1"
-    awk -F '"' '/browser_download_url/ {print $4}' | grep -F "/${asset_name}" | head -n1
-}
-
-shoes_normalize_version() {
-    echo "${1#v}"
-}
-
-shoes_extract_version_from_text() {
-    local text="$1"
-    local version=""
-    version="$(printf '%s\n' "$text" | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)?' | head -n1)"
-    if [[ -n "$version" ]]; then
-        shoes_normalize_version "$version"
-        return 0
-    fi
-    return 1
-}
-
-shoes_get_current_installed_version() {
-    local output version
-
-    output="$("$SHOES_EXEC_PATH" --version 2>&1 || true)"
-    if version="$(shoes_extract_version_from_text "$output")"; then
-        printf '%s\n' "$version"
-        return 0
-    fi
-
-    output="$("$SHOES_EXEC_PATH" -V 2>&1 || true)"
-    if version="$(shoes_extract_version_from_text "$output")"; then
-        printf '%s\n' "$version"
-        return 0
-    fi
-
-    return 1
-}
-
-shoes_install_binary_from_release() {
-    local asset_name release_json download_url temp_dir bin_path
-
-    if [[ "$(uname -m)" != "x86_64" && "$(uname -m)" != "amd64" ]]; then
-        shoes_print_err "当前架构 $(uname -m) 不支持此预编译 shoes 二进制"
-        return 1
-    fi
-    asset_name="$SHOES_RELEASE_ASSET_NAME"
-
-    shoes_print_info "[*] 获取 shoes 最新版本..."
-    release_json="$(shoes_get_release_json)" || {
-        shoes_print_err "获取 release 信息失败"
-        return 1
-    }
-
-    download_url="$(printf '%s\n' "$release_json" | shoes_extract_download_url "$asset_name")"
-    if [[ -z "$download_url" ]]; then
-        shoes_print_err "未找到匹配的下载资产: ${asset_name}"
-        return 1
-    fi
-
-    temp_dir="$(mktemp -d)"
-    shoes_print_info "[*] 下载 ${asset_name}..."
-    if ! curl -fL "$download_url" -o "${temp_dir}/shoes.tar.gz"; then
-        rm -rf "$temp_dir"
-        shoes_print_err "下载失败"
-        return 1
-    fi
-
-    if ! tar -xzf "${temp_dir}/shoes.tar.gz" -C "$temp_dir"; then
-        rm -rf "$temp_dir"
-        shoes_print_err "解压失败"
-        return 1
-    fi
-
-    bin_path="$(find "$temp_dir" -type f -name shoes | head -n1)"
-    if [[ -z "$bin_path" ]]; then
-        rm -rf "$temp_dir"
-        shoes_print_err "压缩包中未找到 shoes 可执行文件"
-        return 1
-    fi
-
-    if ! install -m 755 "$bin_path" "$SHOES_EXEC_PATH"; then
-        rm -rf "$temp_dir"
-        shoes_print_err "安装 shoes 可执行文件失败"
-        return 1
-    fi
-    rm -rf "$temp_dir"
-    return 0
-}
-
-shoes_install_shoes() {
-    clear
-    shoes_require_commands || {
-        shoes_pause_and_return
-        return
-    }
-
-    if [[ -x "$SHOES_EXEC_PATH" ]]; then
-        shoes_print_warn "已安装，请使用管理服务功能"
-        shoes_pause_and_return
-        return
-    fi
-
-    shoes_load_current_config
-    mkdir -p "$SHOES_CONFIG_DIR"
-    if ! shoes_install_binary_from_release; then
-        shoes_pause_and_return
-        return
-    fi
-    shoes_run_configuration_wizard
-
-    if ! shoes_apply_configuration; then
-        shoes_pause_and_return
-        return
-    fi
-
-    shoes_print_ok "安装完成,服务已启动"
-    shoes_pause_and_return
-}
-
-shoes_protocol_status() {
-    if [[ "$1" == "y" ]]; then
-        echo "已启用"
-    else
-        echo "未启用"
-    fi
-}
-
-shoes_print_modify_protocol_entry() {
-    local index="$1"
-    local protocol_key="$2"
-    local enable_var
-    enable_var="$(shoes_protocol_meta_value "$protocol_key" "enable_var")"
-    echo -e "${GREEN}  ${index}.${PLAIN}$(printf '%-12s' "$(shoes_protocol_meta_value "$protocol_key" "menu_label")") [${YELLOW}$(shoes_protocol_status "${!enable_var}")${PLAIN}]"
-}
-
-shoes_commit_changes() {
-    if shoes_apply_configuration; then
-        shoes_print_ok "配置已更新"
-        sleep 1
-        return 0
-    fi
-
-    shoes_load_current_config
-    shoes_print_warn "未完成配置应用，已重新从当前配置文件加载状态"
-    shoes_pause_here
-    return 1
-}
-
-shoes_disable_protocol() {
-    local __var="$1"
-
-    if [[ "$(shoes_protocol_count)" -le 1 ]]; then
-        shoes_print_err "至少保留一个已启用协议"
-        sleep 1
-        return 1
-    fi
-
-    printf -v "$__var" '%s' "n"
-    return 0
-}
-
-shoes_apply_address_update() {
-    local var_name="$1"
-    local current_value="${!var_name}"
-    shoes_read_address_value "$var_name" "新端口(当前:$(shoes_bind_port_display "$current_value")): " "$current_value"
-    shoes_commit_changes
-}
-
-shoes_apply_value_update() {
-    local var_name="$1"
-    local label="$2"
-    local current_value="${!var_name}"
-    shoes_read_value "$var_name" "${label}(当前:${current_value}): " "$current_value"
-    shoes_commit_changes
-}
-
-shoes_apply_password_update() {
-    local var_name="$1"
-    shoes_read_password_or_random "$var_name" "新密码(回车随机): "
-    shoes_commit_changes
-}
-
-shoes_apply_shadowsocks_password_update() {
-    shoes_read_shadowsocks_password_or_random "SS_PASSWORD" "新密码(回车随机): " "$SS_CIPHER"
-    shoes_commit_changes
-}
-
-shoes_apply_shadowsocks_cipher_update() {
-    shoes_read_shadowsocks_cipher_value "SS_CIPHER"
-    if ! shoes_validate_shadowsocks_2022_password "$SS_CIPHER" "$SS_PASSWORD"; then
-        SS_PASSWORD="$(shoes_generate_shadowsocks_2022_password "$SS_CIPHER")" || SS_PASSWORD="$(shoes_random_pass)"
-        shoes_print_ok "已按新加密重新生成密码: ${SS_PASSWORD}"
-    fi
-    shoes_commit_changes
-}
-
-shoes_apply_shadowsocks_shadowtls_toggle() {
-    if [[ "$SS_SHADOWTLS_ENABLED" == "true" ]]; then
-        SS_SHADOWTLS_ENABLED="false"
-        shoes_commit_changes
-        return
-    fi
-
-    SS_SHADOWTLS_ENABLED="true"
-    shoes_select_cert "$SS_CERT" "$SS_KEY"
-    SS_CERT="$cert_path"
-    SS_KEY="$key_path"
-    shoes_commit_changes
-}
-
-shoes_apply_shadowsocks_cert_update() {
-    if [[ "$SS_SHADOWTLS_ENABLED" != "true" ]]; then
-        shoes_print_warn "请先开启 STLS"
-        sleep 1
-        return 1
-    fi
-
-    shoes_apply_cert_update "SS_CERT" "SS_KEY"
-}
-
-shoes_apply_uuid_update() {
-    local var_name="$1"
-    shoes_read_uuid_or_random "$var_name" "新 UUID(回车随机): "
-    shoes_commit_changes
-}
-
-shoes_apply_cert_update() {
-    local cert_var="$1"
-    local key_var="$2"
-
-    shoes_select_cert "${!cert_var}" "${!key_var}"
-    printf -v "$cert_var" '%s' "$cert_path"
-    printf -v "$key_var" '%s' "$key_path"
-
-    shoes_commit_changes
-}
-
-shoes_apply_boolean_toggle() {
-    local var_name="$1"
-
-    if [[ "${!var_name}" == "true" ]]; then
-        printf -v "$var_name" '%s' "false"
-    else
-        printf -v "$var_name" '%s' "true"
-    fi
-
-    shoes_commit_changes
-}
-
-shoes_disable_protocol_with_confirmation() {
-    local enable_var="$1"
-    local label="$2"
-
-    if shoes_ask_yes_no "确定禁用 ${label}" "n" && shoes_disable_protocol "$enable_var"; then
-        shoes_commit_changes
-        return 0
-    fi
-
-    return 1
-}
-
-shoes_prompt_enable_protocol() {
-    local enable_var="$1"
-    local configure_fn="$2"
-
-    if shoes_ask_yes_no "是否启用" "n"; then
-        printf -v "$enable_var" '%s' "y"
-        "$configure_fn"
-        shoes_commit_changes
-        return 0
-    fi
-
-    return 1
-}
-
-shoes_show_service_and_config() {
-    clear
-    echo -e "${BLUE}Shoes 服务状态:${PLAIN}"
-    systemctl --no-pager --full status "$SHOES_SERVICE_NAME" || true
-    pause_enter "按回车查看配置..."
-    clear
-    echo -e "${BLUE}---------------------- 配置内容 ----------------------${PLAIN}"
-    if [[ -f "$SHOES_CONFIG_PATH" ]]; then
-        cat "$SHOES_CONFIG_PATH"
-    else
-        shoes_print_err "配置文件不存在"
-    fi
-    echo -e "${BLUE}------------------------------------------------------${PLAIN}"
-    shoes_pause_and_return
-}
-
-shoes_modify_config() {
-    local opt protocol_key index modify_fn
-    shoes_load_current_config
-
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Modify_Conf ✦${PLAIN}"
-        index=1
-        while IFS= read -r protocol_key; do
-            shoes_print_modify_protocol_entry "$index" "$protocol_key"
-            ((index++))
-        done < <(shoes_protocol_keys)
-        echo -e "${GREEN}  0.${PLAIN}Return"
-        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-        case "$opt" in
-            0) break ;;
-            *)
-                if [[ "$opt" =~ ^[1-9][0-9]*$ ]]; then
-                    protocol_key="$(shoes_protocol_keys | sed -n "${opt}p")"
-                    if [[ -n "$protocol_key" ]]; then
-                        modify_fn="$(shoes_protocol_meta_value "$protocol_key" "modify_fn")"
-                        "$modify_fn"
-                    else
-                        shoes_print_warn "无效选项"
-                        sleep 1
-                    fi
-                else
-                    shoes_print_warn "无效选项"
-                    sleep 1
-                fi
-                ;;
-        esac
-    done
-}
-
-shoes_manage_service() {
-    while true; do
-        shoes_load_current_config
-        clear
-        echo -e "${BLUE}✦ Shoes_Menu ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}查看服务"
-        echo -e "${GREEN}  2.${PLAIN}修改配置"
-        echo -e "${GREEN}  3.${PLAIN}停止服务"
-        echo -e "${GREEN}  4.${PLAIN}重启服务"
-        echo -e "${GREEN}  0.${PLAIN}返回上级"
-        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" opt
-
-        case "$opt" in
-            1) shoes_show_service_and_config ;;
-            2) shoes_modify_config ;;
-            3)
-                if shoes_run_service_action_checked "stop" "停止 shoes 服务失败"; then
-                    shoes_print_ok "已停止"
-                fi
-                shoes_pause_and_return
-                ;;
-            4)
-                if shoes_run_service_action_checked "restart" "重启 shoes 服务失败"; then
-                    shoes_print_ok "已重启"
-                fi
-                shoes_pause_and_return
-                ;;
-            0) break ;;
-            *) shoes_print_warn "无效选项"; sleep 1 ;;
-        esac
-    done
-}
-
-shoes_update_shoes() {
-    local current_version latest_tag latest_version release_json backup_path
-
-    clear
-    shoes_require_commands || {
-        shoes_pause_and_return
-        return
-    }
-    shoes_load_current_config
-
-    if [[ ! -x "$SHOES_EXEC_PATH" ]]; then
-        shoes_print_err "未安装 shoes"
-        shoes_pause_and_return
-        return
-    fi
-
-    current_version="$(shoes_get_current_installed_version || true)"
-    current_version="${current_version:-未知}"
-
-    release_json="$(shoes_get_release_json)" || {
-        shoes_print_err "获取 release 信息失败"
-        shoes_pause_and_return
-        return
-    }
-    latest_tag="$(printf '%s\n' "$release_json" | shoes_extract_tag_name)"
-    latest_version="$(shoes_normalize_version "$latest_tag")"
-
-    echo -e "${BLUE}当前版本: ${YELLOW}${current_version}${PLAIN}"
-    echo -e "${BLUE}最新版本: ${YELLOW}${latest_version}${PLAIN}"
-
-    if [[ "$(shoes_normalize_version "$current_version")" == "$latest_version" ]]; then
-        shoes_print_ok "已是最新版本"
-        shoes_pause_and_return
-        return
-    fi
-
-    if ! shoes_ask_yes_no "是否更新" "n"; then
-        return
-    fi
-
-    backup_path="$(mktemp "${TMPDIR:-/tmp}/shoes-backup.XXXXXX")" || {
-        shoes_print_err "创建旧版本备份失败"
-        shoes_pause_and_return
-        return
-    }
-    if ! cp -f "$SHOES_EXEC_PATH" "$backup_path"; then
-        rm -f "$backup_path"
-        shoes_print_err "备份当前 shoes 内核失败"
-        shoes_pause_and_return
-        return
-    fi
-
-    systemctl stop "$SHOES_SERVICE_NAME" 2>/dev/null || true
-    if shoes_install_binary_from_release; then
-        if systemctl start "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
-            rm -f "$backup_path"
-            shoes_print_ok "更新完成"
-        else
-            if install -m 755 "$backup_path" "$SHOES_EXEC_PATH" && systemctl start "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
-                shoes_print_warn "新版本启动失败，已回滚到旧版本"
-            else
-                shoes_print_err "新版本启动失败，回滚失败"
-                service_failure_hint "$SHOES_SERVICE_NAME"
-            fi
-            rm -f "$backup_path"
-        fi
-    else
-        install -m 755 "$backup_path" "$SHOES_EXEC_PATH" >/dev/null 2>&1 || true
-        rm -f "$backup_path"
-        if ! systemctl start "$SHOES_SERVICE_NAME" >/dev/null 2>&1; then
-            shoes_print_err "更新失败，旧版本未能重新启动"
-            service_failure_hint "$SHOES_SERVICE_NAME"
-            shoes_pause_and_return
-            return
-        fi
-        shoes_print_err "更新失败，已恢复旧版本"
-    fi
-    shoes_pause_and_return
-}
-
-shoes_delete_shoes() {
-    clear
-    if ! shoes_ask_yes_no "确定删除 shoes 服务和配置" "n"; then
-        return
-    fi
-
-    systemctl stop "$SHOES_SERVICE_NAME" 2>/dev/null || true
-    systemctl disable "$SHOES_SERVICE_NAME" 2>/dev/null || true
-    rm -f "$SHOES_SERVICE_FILE"
-    rm -f "$SHOES_EXEC_PATH"
-    rm -rf "$SHOES_CONFIG_DIR"
-    systemctl daemon-reload
-    shoes_print_ok "已删除"
-    shoes_pause_and_return
-}
-
-shoes_menu() {
-    while true; do
-        clear
-        echo -e "${BLUE}✦ Shoes_Ver.1.0 ✦${PLAIN}"
-        echo -e "${GREEN}  1.${PLAIN}安装服务"
-        echo -e "${GREEN}  2.${PLAIN}管理服务"
-        echo -e "${GREEN}  3.${PLAIN}更新内核"
-        echo -e "${GREEN}  4.${PLAIN}删除服务"
-        echo -e "${GREEN}  0.${PLAIN}返回主页"
-        read -r -p "$(echo -e "${BLUE}✦ Steins Gate ✦ : ${PLAIN}")" option
-
-        case "$option" in
-            1) shoes_install_shoes ;;
-            2)
-                if [[ ! -x "$SHOES_EXEC_PATH" ]]; then
-                    shoes_print_err "未安装"
-                    shoes_pause_and_return
-                    continue
-                fi
-                shoes_manage_service
-                ;;
-            3) shoes_update_shoes ;;
-            4) shoes_delete_shoes ;;
-            0) return ;;
-            *) shoes_print_warn "无效选项"; sleep 1 ;;
-        esac
-    done
-}
 
 MIHOMO_EXEC_PATH="/usr/local/bin/mihomo"
 MIHOMO_CONFIG_DIR="/etc/mihomo"
@@ -11883,7 +10355,6 @@ warpstack_menu() {
 
 reinstall_system_menu() { reinstall_menu; }
 reboot_system()         { echo "系统将在 3 秒后重新启动..."; sleep 3; reboot_vps; }
-configure_shoes()       { shoes_check_supported_os || { press_any_key_to_continue; return; }; shoes_menu; }
 configure_mihomo()      { mihomo_menu; }
 configure_singbox()     { singbox_menu; }
 configure_wireproxy() {
@@ -13131,7 +11602,7 @@ show_main_menu() {
     echo -e "${GREEN}  02.${PLAIN}系统清理"
     echo -e "${GREEN}  03.${PLAIN}重装系统"
     echo -e "${GREEN}  04.${PLAIN}设置时区"
-    echo -e "${GREEN}  05.${PLAIN}配置IP栈"
+    echo -e "${GREEN}  05.${PLAIN}IP连接优先级"
     echo -e "${GREEN}  06.${PLAIN}配置BBR"
     echo -e "${GREEN}  07.${PLAIN}配置DNS"
     echo -e "${GREEN}  08.${PLAIN}配置SSH"
@@ -13139,12 +11610,11 @@ show_main_menu() {
     echo -e "${GREEN}  10.${PLAIN}配置SWAP"
     echo -e "${GREEN}  11.${PLAIN}配置ACME"
     echo -e "${GREEN}  12.${PLAIN}配置Snell"
-    echo -e "${GREEN}  13.${PLAIN}配置Shoes"
-    echo -e "${GREEN}  14.${PLAIN}配置Mihomo"
-    echo -e "${GREEN}  15.${PLAIN}配置SingBox"
-    echo -e "${GREEN}  16.${PLAIN}配置FireWall"
-    echo -e "${GREEN}  17.${PLAIN}配置WireProxy"
-    echo -e "${GREEN}  18.${PLAIN}配置WarpStack"
+    echo -e "${GREEN}  13.${PLAIN}配置Mihomo"
+    echo -e "${GREEN}  14.${PLAIN}配置SingBox"
+    echo -e "${GREEN}  15.${PLAIN}配置FireWall"
+    echo -e "${GREEN}  16.${PLAIN}配置WireProxy"
+    echo -e "${GREEN}  17.${PLAIN}配置WarpStack"
     echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
 }
 
@@ -13162,12 +11632,11 @@ handle_main_menu_choice() {
         10) set_swap_menu ;;
         11) acme_menu ;;
         12) snell_menu ;;
-        13) configure_shoes ;;
-        14) configure_mihomo ;;
-        15) configure_singbox ;;
-        16) configure_firewall ;;
-        17) configure_wireproxy ;;
-        18) configure_warpstack ;;
+        13) configure_mihomo ;;
+        14) configure_singbox ;;
+        15) configure_firewall ;;
+        16) configure_wireproxy ;;
+        17) configure_warpstack ;;
         0)
             clear
             echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"
@@ -13188,7 +11657,7 @@ main_menu() {
 
     while true; do
         show_main_menu
-        choice=$(read_menu_choice "✦ Choice [0-18] ✦ : ")
+        choice=$(read_menu_choice "✦ Choice [0-17] ✦ : ")
         handle_main_menu_choice "$choice" || break
     done
 }
