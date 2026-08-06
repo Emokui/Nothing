@@ -11602,7 +11602,7 @@ show_main_menu() {
     echo -e "${GREEN}  02.${PLAIN}系统清理"
     echo -e "${GREEN}  03.${PLAIN}重装系统"
     echo -e "${GREEN}  04.${PLAIN}设置时区"
-    echo -e "${GREEN}  05.${PLAIN}IP连接优先级"
+    echo -e "${GREEN}  05.${PLAIN}IP优先级"
     echo -e "${GREEN}  06.${PLAIN}配置BBR"
     echo -e "${GREEN}  07.${PLAIN}配置DNS"
     echo -e "${GREEN}  08.${PLAIN}配置SSH"
