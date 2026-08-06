@@ -3376,9 +3376,20 @@ ACME_BIN="$ACME_HOME/acme.sh"
 ACME_CERT_PATH="/etc/cert"
 ACME_PORT80_OPEN_HOOK="/usr/local/bin/zero-acme-port80-open"
 ACME_PORT80_CLOSE_HOOK="/usr/local/bin/zero-acme-port80-close"
+ACME_CF_API="https://api.cloudflare.com/client/v4"
 
 ACME_PORT80_FIREWALL_BACKUP=""
 ACME_PORT80_FIREWALL_CHANGED=0
+ACME_CF_TOKEN=""
+ACME_CF_RESPONSE=""
+ACME_CF_HTTP_STATUS=""
+ACME_CF_ZONE_ID=""
+ACME_CF_ZONE_NAME=""
+ACME_CF_ZONE_STATUS=""
+ACME_CF_ACCOUNT_ID=""
+ACME_CF_EXPECTED_NS=""
+ACME_CF_CREDENTIAL_BACKUP=""
+ACME_CF_CREDENTIALS_REMOVED=0
 
 acme_exec() {
     [[ -f "$ACME_BIN" ]] || return 1
@@ -3404,6 +3415,7 @@ acme_install_dependencies() {
         socat
         openssl
         dnsutils
+        jq
         cron
         tar
         ca-certificates
@@ -3605,7 +3617,12 @@ acme_uninstall() {
     fi
 
     if acme_exec --uninstall; then
+        if [[ -x "$ACME_PORT80_CLOSE_HOOK" ]]; then
+            "$ACME_PORT80_CLOSE_HOOK" >/dev/null 2>&1 || true
+        fi
         rm -rf "$ACME_HOME"
+        rm -f "$ACME_PORT80_OPEN_HOOK" "$ACME_PORT80_CLOSE_HOOK"
+        rm -rf /run/zero-acme-port80
         echo -e "${GREEN}acme.sh 已卸载${PLAIN}"
     else
         echo -e "${RED}acme.sh 卸载失败，请手动检查${PLAIN}"
@@ -3645,7 +3662,7 @@ acme_port80_hooks_referenced() {
 }
 
 acme_get_cert_list() {
-    acme_exec --list 2>/dev/null | tail -n +2
+    acme_exec --list --listraw 2>/dev/null | tail -n +2
 }
 
 acme_display_cert_list() {
@@ -3657,7 +3674,7 @@ acme_display_cert_list() {
         return 1
     fi
 
-    printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | ${GREEN}%-15s${PLAIN}\n" "序号" "域名" "到期时间"
+    printf "${GREEN}%-4s${PLAIN} | ${GREEN}%-40s${PLAIN} | ${GREEN}%-15s${PLAIN}\n" "序号" "域名" "计划续期"
     echo -e "${BLUE}------------------------------------------------------------------${PLAIN}"
 
     local index=1
@@ -3665,8 +3682,11 @@ acme_display_cert_list() {
         [[ -z "$line" ]] && continue
 
         local main_domain expire_time
-        main_domain=$(echo "$line" | awk '{print $1}')
-        expire_time=$(echo "$line" | awk '{print $6}' | cut -d'T' -f1)
+        main_domain="${line%%|*}"
+        expire_time="${line##*|}"
+        expire_time="${expire_time%%T*}"
+        expire_time="${expire_time%$'\r'}"
+        [[ -n "$expire_time" ]] || expire_time="-"
 
         if [[ "$main_domain" == \** ]]; then
             printf "${YELLOW}%-4s${PLAIN} | ${YELLOW}%-40s${PLAIN} | %-15s\n" "$index" "$main_domain" "$expire_time"
@@ -3709,24 +3729,411 @@ acme_prompt_validated_domain() {
     return 0
 }
 
-acme_get_cf_credentials() {
-    local cfgak cfemail
+acme_cf_require_dependencies() {
+    local missing_packages=()
+    local command_name package
 
-    read -r -p "$(echo -e "${BLUE}请输入 CloudFlare Global API Key: ${PLAIN}")" cfgak
-    cfgak=$(trim_input "$cfgak")
-    if [[ -z "$cfgak" ]]; then
-        echo -e "${RED}未输入 CloudFlare Global API Key${PLAIN}"
+    for package in curl jq dnsutils openssl; do
+        case "$package" in
+            dnsutils) command_name="dig" ;;
+            *) command_name="$package" ;;
+        esac
+        command -v "$command_name" >/dev/null 2>&1 || missing_packages+=("$package")
+    done
+
+    [[ "${#missing_packages[@]}" -eq 0 ]] && return 0
+    echo -e "${YELLOW}正在安装 Cloudflare API 检查依赖: ${missing_packages[*]}${PLAIN}"
+    pkg_install "${missing_packages[@]}"
+}
+
+acme_prompt_cf_token() {
+    local token=""
+
+    ACME_CF_TOKEN=""
+    if ! read -r -s -p "$(echo -e "${BLUE}请输入 Cloudflare API Token: ${PLAIN}")" token; then
+        echo
+        echo -e "${RED}读取 Cloudflare API Token 失败${PLAIN}"
         return 1
     fi
-    export CF_Key="$cfgak"
-
-    read -r -p "$(echo -e "${BLUE}请输入 CloudFlare 登录邮箱: ${PLAIN}")" cfemail
-    cfemail=$(trim_input "$cfemail")
-    if [[ -z "$cfemail" ]]; then
-        echo -e "${RED}未输入 CloudFlare 登录邮箱${PLAIN}"
+    echo
+    token=$(trim_input "$token")
+    if [[ -z "$token" ]]; then
+        echo -e "${RED}未输入 Cloudflare API Token${PLAIN}"
         return 1
     fi
-    export CF_Email="$cfemail"
+    if [[ ! "$token" =~ ^[A-Za-z0-9._~-]+$ ]]; then
+        echo -e "${RED}Cloudflare API Token 包含非法字符${PLAIN}"
+        return 1
+    fi
+    ACME_CF_TOKEN="$token"
+}
+
+acme_cf_api() {
+    local method="$1"
+    local endpoint="$2"
+    local data="${3:-}"
+    local response_file header_file curl_rc
+    local -a curl_args
+
+    response_file=$(mktemp /tmp/zero-cf-api.XXXXXX) || return 1
+    header_file=$(mktemp /tmp/zero-cf-header.XXXXXX) || {
+        rm -f "$response_file"
+        return 1
+    }
+    chmod 600 "$response_file"
+    chmod 600 "$header_file"
+    {
+        printf 'Authorization: Bearer %s\n' "$ACME_CF_TOKEN"
+        printf 'Content-Type: application/json\n'
+    } > "$header_file"
+    curl_args=(
+        --silent --show-error
+        --connect-timeout 10 --max-time 30
+        --request "$method"
+        --header "@${header_file}"
+        --output "$response_file"
+        --write-out "%{http_code}"
+    )
+    [[ -n "$data" ]] && curl_args+=(--data "$data")
+
+    ACME_CF_HTTP_STATUS=$(curl "${curl_args[@]}" "${ACME_CF_API}/${endpoint}")
+    curl_rc=$?
+    ACME_CF_RESPONSE=$(<"$response_file")
+    rm -f "$response_file" "$header_file"
+
+    if (( curl_rc != 0 )); then
+        ACME_CF_HTTP_STATUS="000"
+        return 1
+    fi
+    return 0
+}
+
+acme_cf_response_success() {
+    [[ "$ACME_CF_HTTP_STATUS" =~ ^2[0-9][0-9]$ ]] &&
+        [[ $(jq -r '.success // false' <<<"$ACME_CF_RESPONSE" 2>/dev/null) == "true" ]]
+}
+
+acme_cf_print_errors() {
+    local summary
+
+    summary=$(jq -r '
+        if (.errors // [] | length) > 0 then
+            [.errors[] | "[\(.code // "unknown")] \(.message // "unknown error")"] | join("; ")
+        elif .message then .message
+        else "Cloudflare API 未返回具体错误"
+        end
+    ' <<<"$ACME_CF_RESPONSE" 2>/dev/null)
+    echo -e "${RED}${summary:-Cloudflare API 请求失败} (HTTP ${ACME_CF_HTTP_STATUS:-000})${PLAIN}"
+}
+
+acme_cf_verify_token() {
+    echo -e "${YELLOW}正在验证 Cloudflare API Token...${PLAIN}"
+    if ! acme_cf_api GET "user/tokens/verify" || ! acme_cf_response_success; then
+        acme_cf_print_errors
+        return 1
+    fi
+    if [[ $(jq -r '.result.status // empty' <<<"$ACME_CF_RESPONSE") != "active" ]]; then
+        echo -e "${RED}Cloudflare API Token 不是 active 状态${PLAIN}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ API Token 有效且处于 active 状态${PLAIN}"
+}
+
+acme_cf_find_zone() {
+    local domain="$1"
+    local candidate="$domain"
+    local count
+
+    echo -e "${YELLOW}正在确认 ${domain} 所属的 Cloudflare Zone...${PLAIN}"
+    while [[ "$candidate" == *.* ]]; do
+        if ! acme_cf_api GET "zones?name=${candidate}&per_page=1"; then
+            acme_cf_print_errors
+            return 1
+        fi
+        if ! acme_cf_response_success; then
+            acme_cf_print_errors
+            echo -e "${RED}Token 需要目标 Zone 的 Zone Read 权限${PLAIN}"
+            return 1
+        fi
+
+        count=$(jq -r '.result_info.total_count // (.result | length) // 0' <<<"$ACME_CF_RESPONSE")
+        if [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+            ACME_CF_ZONE_ID=$(jq -r '.result[0].id // empty' <<<"$ACME_CF_RESPONSE")
+            ACME_CF_ZONE_NAME=$(jq -r '.result[0].name // empty' <<<"$ACME_CF_RESPONSE")
+            ACME_CF_ZONE_STATUS=$(jq -r '.result[0].status // empty' <<<"$ACME_CF_RESPONSE")
+            ACME_CF_ACCOUNT_ID=$(jq -r '.result[0].account.id // empty' <<<"$ACME_CF_RESPONSE")
+            ACME_CF_EXPECTED_NS=$(jq -r '.result[0].name_servers[]? // empty' <<<"$ACME_CF_RESPONSE" \
+                | tr '[:upper:]' '[:lower:]' | sed 's/\.$//' | sort -u)
+            break
+        fi
+        candidate="${candidate#*.}"
+    done
+
+    if [[ -z "$ACME_CF_ZONE_ID" || -z "$ACME_CF_ZONE_NAME" ]]; then
+        echo -e "${RED}Token 无法读取目标域名对应的 Cloudflare Zone${PLAIN}"
+        echo -e "${YELLOW}请确认 Token 已包含目标 Zone，并拥有 Zone Read 权限${PLAIN}"
+        return 1
+    fi
+    if [[ "$ACME_CF_ZONE_STATUS" != "active" ]]; then
+        echo -e "${RED}Cloudflare Zone 状态为 ${ACME_CF_ZONE_STATUS:-unknown}，不是 active${PLAIN}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ Zone Read 验证通过: ${ACME_CF_ZONE_NAME}${PLAIN}"
+}
+
+acme_cf_public_authoritative_ns() {
+    local zone="$1"
+    local resolver result=""
+
+    for resolver in 1.1.1.1 8.8.8.8 ""; do
+        if [[ -n "$resolver" ]]; then
+            result=$(dig +short +time=4 +tries=1 NS "$zone" "@$resolver" 2>/dev/null)
+        else
+            result=$(dig +short +time=4 +tries=1 NS "$zone" 2>/dev/null)
+        fi
+        [[ -n "$result" ]] && break
+    done
+    printf '%s\n' "$result" | tr '[:upper:]' '[:lower:]' | sed '/^$/d; s/\.$//' | sort -u
+}
+
+acme_cf_check_authoritative_ns() {
+    local actual_ns
+
+    echo -e "${YELLOW}正在检查 ${ACME_CF_ZONE_NAME} 的公网权威 NS...${PLAIN}"
+    actual_ns=$(acme_cf_public_authoritative_ns "$ACME_CF_ZONE_NAME")
+    if [[ -z "$actual_ns" ]]; then
+        echo -e "${RED}无法从公共 DNS 查询权威 NS${PLAIN}"
+        return 1
+    fi
+    if [[ -z "$ACME_CF_EXPECTED_NS" ]]; then
+        echo -e "${RED}Cloudflare API 未返回 Zone 的预期 NS${PLAIN}"
+        return 1
+    fi
+    if [[ "$actual_ns" != "$ACME_CF_EXPECTED_NS" ]]; then
+        echo -e "${RED}域名当前的公网权威 NS 与 Cloudflare 分配的 NS 不一致${PLAIN}"
+        echo "Cloudflare 预期 NS: $(tr '\n' ' ' <<<"$ACME_CF_EXPECTED_NS")"
+        echo "公网实际 NS:      $(tr '\n' ' ' <<<"$actual_ns")"
+        return 1
+    fi
+    echo -e "${GREEN}✓ 权威 NS 检查通过: $(tr '\n' ' ' <<<"$actual_ns")${PLAIN}"
+}
+
+acme_cf_probe_dns_write() {
+    local probe_name probe_value payload record_id
+
+    probe_name="_zero-acme-permission-check.${ACME_CF_ZONE_NAME}"
+    probe_value="zero-acme-check-$(openssl rand -hex 12)"
+    payload=$(jq -nc \
+        --arg type "TXT" \
+        --arg name "$probe_name" \
+        --arg content "$probe_value" \
+        '{type:$type,name:$name,content:$content,ttl:120}')
+
+    echo -e "${YELLOW}正在通过临时 TXT 记录验证 DNS Write 权限...${PLAIN}"
+    if ! acme_cf_api POST "zones/${ACME_CF_ZONE_ID}/dns_records" "$payload" || ! acme_cf_response_success; then
+        acme_cf_print_errors
+        echo -e "${RED}Token 需要目标 Zone 的 DNS Write 权限${PLAIN}"
+        return 1
+    fi
+    record_id=$(jq -r '.result.id // empty' <<<"$ACME_CF_RESPONSE")
+    if [[ -z "$record_id" ]]; then
+        echo -e "${RED}临时 TXT 已提交，但 Cloudflare 未返回记录 ID，无法清理${PLAIN}"
+        echo -e "${YELLOW}请手动检查并删除可能残留的记录: ${probe_name}${PLAIN}"
+        return 1
+    fi
+
+    if ! acme_cf_api DELETE "zones/${ACME_CF_ZONE_ID}/dns_records/${record_id}" || ! acme_cf_response_success; then
+        acme_cf_print_errors
+        echo -e "${YELLOW}临时 TXT 可能残留，请手动删除: ${probe_name} (记录 ID: ${record_id})${PLAIN}"
+        return 1
+    fi
+    echo -e "${GREEN}✓ DNS Write/Delete 权限验证通过，临时 TXT 已删除${PLAIN}"
+}
+
+acme_cf_preflight() {
+    local domain="$1"
+
+    ACME_CF_RESPONSE=""
+    ACME_CF_HTTP_STATUS=""
+    ACME_CF_ZONE_ID=""
+    ACME_CF_ZONE_NAME=""
+    ACME_CF_ZONE_STATUS=""
+    ACME_CF_ACCOUNT_ID=""
+    ACME_CF_EXPECTED_NS=""
+
+    acme_cf_verify_token || return 1
+    acme_cf_find_zone "$domain" || return 1
+    acme_cf_check_authoritative_ns || return 1
+    acme_cf_probe_dns_write || return 1
+    echo -e "${GREEN}✓ Cloudflare Token、Zone 权限和权威 NS 前置检查全部通过${PLAIN}"
+}
+
+acme_cf_clean_old_credentials() {
+    local account_conf="$ACME_HOME/account.conf"
+    local backup_dir backup_file temp_file
+
+    ACME_CF_CREDENTIAL_BACKUP=""
+    ACME_CF_CREDENTIALS_REMOVED=0
+    [[ -f "$account_conf" ]] || return 0
+    if ! grep -Eq '^(SAVED_)?CF_(Token|Key|Email|Account_ID|Zone_ID)=' "$account_conf"; then
+        return 0
+    fi
+
+    backup_dir="$ACME_HOME/credential-backups"
+    mkdir -p "$backup_dir" || return 1
+    chmod 700 "$backup_dir"
+    backup_file=$(mktemp "$backup_dir/account.conf.bak.XXXXXX") || return 1
+    if ! cp -p "$account_conf" "$backup_file"; then
+        rm -f "$backup_file"
+        return 1
+    fi
+    temp_file=$(mktemp "$backup_dir/account.conf.clean.XXXXXX") || return 1
+    if ! awk '!/^(SAVED_)?CF_(Token|Key|Email|Account_ID|Zone_ID)=/' "$account_conf" > "$temp_file"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+    chmod 600 "$temp_file"
+    if ! mv -f "$temp_file" "$account_conf"; then
+        rm -f "$temp_file"
+        cp -p "$backup_file" "$account_conf" >/dev/null 2>&1 || true
+        return 1
+    fi
+    ACME_CF_CREDENTIAL_BACKUP="$backup_file"
+    ACME_CF_CREDENTIALS_REMOVED=1
+    echo -e "${GREEN}已临时清理账户级旧 Cloudflare 凭据${PLAIN}"
+    echo -e "${YELLOW}凭据备份: ${backup_file}${PLAIN}"
+}
+
+acme_cf_restore_old_credentials() {
+    local account_conf="$ACME_HOME/account.conf"
+
+    if (( ACME_CF_CREDENTIALS_REMOVED != 1 )); then
+        return 0
+    fi
+    if [[ -z "$ACME_CF_CREDENTIAL_BACKUP" || ! -f "$ACME_CF_CREDENTIAL_BACKUP" ]]; then
+        echo -e "${RED}找不到旧 Cloudflare 凭据备份，无法自动恢复${PLAIN}"
+        return 1
+    fi
+    if ! cp -p "$ACME_CF_CREDENTIAL_BACKUP" "$account_conf"; then
+        echo -e "${RED}恢复旧 Cloudflare 凭据失败${PLAIN}"
+        return 1
+    fi
+    chmod 600 "$account_conf"
+    ACME_CF_CREDENTIALS_REMOVED=0
+    echo -e "${YELLOW}已恢复申请前的账户级 Cloudflare 凭据${PLAIN}"
+}
+
+acme_cf_has_legacy_global_users() {
+    local domain_conf
+
+    while IFS= read -r domain_conf; do
+        grep -Eq '^Le_Webroot=.*dns_cf' "$domain_conf" 2>/dev/null || continue
+        grep -Eq '^CF_Token=' "$domain_conf" 2>/dev/null && continue
+        return 0
+    done < <(find "$ACME_HOME" -mindepth 2 -maxdepth 2 -type f -name '*.conf' -print 2>/dev/null)
+    return 1
+}
+
+acme_cf_finish_credentials_cleanup() {
+    if (( ACME_CF_CREDENTIALS_REMOVED != 1 )); then
+        return 0
+    fi
+
+    if acme_cf_has_legacy_global_users; then
+        echo -e "${YELLOW}检测到其他旧 dns_cf 证书仍依赖账户级凭据，为保证其续期将保留旧凭据${PLAIN}"
+        acme_cf_restore_old_credentials || return 1
+    else
+        ACME_CF_CREDENTIALS_REMOVED=0
+        echo -e "${GREEN}旧 Cloudflare 凭据已清理，新 Token 仅保存在当前域名配置中${PLAIN}"
+    fi
+}
+
+acme_cf_persist_domain_credentials() {
+    local domain="$1"
+    local domain_conf="$ACME_HOME/${domain}_ecc/${domain}.conf"
+    local backup_file temp_file
+
+    if [[ ! -f "$domain_conf" ]]; then
+        echo -e "${RED}找不到域名配置: ${domain_conf}${PLAIN}"
+        return 1
+    fi
+    if [[ ! "$ACME_CF_ZONE_ID" =~ ^[A-Za-z0-9_-]+$ ]] ||
+       [[ -n "$ACME_CF_ACCOUNT_ID" && ! "$ACME_CF_ACCOUNT_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo -e "${RED}Cloudflare Zone/Account ID 格式异常，拒绝写入证书配置${PLAIN}"
+        return 1
+    fi
+
+    backup_file=$(mktemp "${domain_conf}.zero-cf.bak.XXXXXX") || return 1
+    if ! cp -p "$domain_conf" "$backup_file"; then
+        rm -f "$backup_file"
+        return 1
+    fi
+    temp_file=$(mktemp "${domain_conf}.tmp.XXXXXX") || return 1
+    if ! awk '!/^(CF_Token|CF_Zone_ID|CF_Account_ID)=/' "$domain_conf" > "$temp_file"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+    {
+        printf "CF_Token='%s'\n" "$ACME_CF_TOKEN"
+        printf "CF_Zone_ID='%s'\n" "$ACME_CF_ZONE_ID"
+        if [[ -n "$ACME_CF_ACCOUNT_ID" ]]; then
+            printf "CF_Account_ID='%s'\n" "$ACME_CF_ACCOUNT_ID"
+        fi
+    } >> "$temp_file"
+    chmod 600 "$temp_file"
+    if ! mv -f "$temp_file" "$domain_conf"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+    echo -e "${GREEN}当前域名的 Cloudflare Token/Zone 凭据已保存，可用于自动续期${PLAIN}"
+    echo -e "${YELLOW}域名配置备份: ${backup_file}${PLAIN}"
+}
+
+acme_cf_issue_with_token() {
+    local -a issue_args=("$@")
+
+    (
+        unset CF_Key CF_Email
+        export CF_Token="$ACME_CF_TOKEN"
+        export CF_Zone_ID="$ACME_CF_ZONE_ID"
+        if [[ -n "$ACME_CF_ACCOUNT_ID" ]]; then
+            export CF_Account_ID="$ACME_CF_ACCOUNT_ID"
+        else
+            unset CF_Account_ID
+        fi
+        acme_exec --issue --server letsencrypt --dns dns_cf -k ec-256 "${issue_args[@]}"
+    )
+}
+
+acme_cf_prepare_and_issue() {
+    local domain="$1"
+    local issue_rc
+    shift
+
+    acme_cf_clean_old_credentials || return 1
+    acme_cf_issue_with_token "$@"
+    issue_rc=$?
+
+    case "$issue_rc" in
+        0)
+            ;;
+        2)
+            echo -e "${YELLOW}现有证书尚未到续期时间，将更新 Token 凭据并继续安装现有证书${PLAIN}"
+            ;;
+        *)
+            acme_cf_restore_old_credentials || true
+            return "$issue_rc"
+            ;;
+    esac
+
+    if ! acme_cf_persist_domain_credentials "$domain"; then
+        acme_cf_restore_old_credentials || true
+        return 1
+    fi
+    if ! acme_cf_finish_credentials_cleanup; then
+        acme_cf_restore_old_credentials || true
+        return 1
+    fi
     return 0
 }
 
@@ -3879,12 +4286,12 @@ acme_issue_standalone() {
 
     acme_ensure_cert_path
     if ! acme_has_ipv4; then
-        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --listen-v6 --insecure --pre-hook "$ACME_PORT80_OPEN_HOOK" --post-hook "$ACME_PORT80_CLOSE_HOOK"; then
+        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --listen-v6 --pre-hook "$ACME_PORT80_OPEN_HOOK" --post-hook "$ACME_PORT80_CLOSE_HOOK"; then
             acme_issue_failed_cleanup 1
             return
         fi
     else
-        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --insecure --pre-hook "$ACME_PORT80_OPEN_HOOK" --post-hook "$ACME_PORT80_CLOSE_HOOK"; then
+        if ! acme_exec --issue -d "$domain" --standalone -k ec-256 --pre-hook "$ACME_PORT80_OPEN_HOOK" --post-hook "$ACME_PORT80_CLOSE_HOOK"; then
             acme_issue_failed_cleanup 1
             return
         fi
@@ -3897,19 +4304,31 @@ acme_issue_cf_single() {
     local domain
 
     acme_require_installed || return
+    acme_cf_require_dependencies || {
+        echo -e "${RED}Cloudflare API 检查依赖安装失败${PLAIN}"
+        press_any_key_to_continue
+        return
+    }
 
     acme_prompt_validated_domain "请输入需要申请证书的域名: " || return
-    domain="$ACME_PROMPT_DOMAIN"
-    if ! acme_get_cf_credentials; then
+    domain=$(printf '%s' "$ACME_PROMPT_DOMAIN" | tr '[:upper:]' '[:lower:]')
+    if ! acme_prompt_cf_token; then
         press_any_key_to_continue
         return
     fi
-
+    if ! acme_cf_preflight "$domain"; then
+        ACME_CF_TOKEN=""
+        echo -e "${RED}Cloudflare 前置检查失败，已取消证书申请${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
     acme_ensure_cert_path
-    if ! acme_exec --issue --dns dns_cf -d "$domain" -k ec-256 --insecure; then
+    if ! acme_cf_prepare_and_issue "$domain" -d "$domain"; then
+        ACME_CF_TOKEN=""
         acme_issue_failed_cleanup
         return
     fi
+    ACME_CF_TOKEN=""
     acme_finalize_issue "$domain" "$domain"
 }
 
@@ -3917,20 +4336,32 @@ acme_issue_cf_wildcard() {
     local domain
 
     acme_require_installed || return
+    acme_cf_require_dependencies || {
+        echo -e "${RED}Cloudflare API 检查依赖安装失败${PLAIN}"
+        press_any_key_to_continue
+        return
+    }
 
     acme_prompt_validated_domain "请输入需要申请证书的泛域名根域名: " || return
-    domain="$ACME_PROMPT_DOMAIN"
-    if ! acme_get_cf_credentials; then
+    domain=$(printf '%s' "$ACME_PROMPT_DOMAIN" | tr '[:upper:]' '[:lower:]')
+    if ! acme_prompt_cf_token; then
         press_any_key_to_continue
         return
     fi
-
+    if ! acme_cf_preflight "$domain"; then
+        ACME_CF_TOKEN=""
+        echo -e "${RED}Cloudflare 前置检查失败，已取消证书申请${PLAIN}"
+        press_any_key_to_continue
+        return
+    fi
     acme_ensure_cert_path
-    if ! acme_exec --issue --dns dns_cf -d "*.${domain}" -d "$domain" -k ec-256 --insecure; then
+    if ! acme_cf_prepare_and_issue "$domain" -d "$domain" -d "*.${domain}"; then
+        ACME_CF_TOKEN=""
         acme_issue_failed_cleanup
         return
     fi
-    acme_finalize_issue "*.${domain}" "$domain"
+    ACME_CF_TOKEN=""
+    acme_finalize_issue "$domain" "$domain"
 }
 
 acme_revoke_cert() {
@@ -3949,7 +4380,7 @@ acme_revoke_cert() {
     cert_list=$(acme_get_cert_list)
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        domains+=("$(echo "$line" | awk '{print $1}')")
+        domains+=("${line%%|*}")
     done <<< "$cert_list"
     echo
 
@@ -4015,19 +4446,16 @@ acme_switch_provider() {
 
     clear
     echo -e "${BLUE}======== 证书CA ========${PLAIN}"
-    echo -e "${GREEN}1.LetsEncrypt${PLAIN}  ${GREEN}2.BuyPass${PLAIN}"
-    echo -e "${GREEN}3.ZeroSSL${PLAIN}     ${YELLOW}0.返回菜单${PLAIN}"
+    echo -e "${GREEN}1.LetsEncrypt${PLAIN}  ${GREEN}2.ZeroSSL${PLAIN}"
+    echo -e "${YELLOW}0.返回菜单${PLAIN}"
     echo -e "${BLUE}========================${PLAIN}"
-    provider=$(read_menu_choice "请输入选项 [0-3]: ")
+    provider=$(read_menu_choice "请输入选项 [0-2]: ")
 
     case "$provider" in
         1)
             acme_exec --set-default-ca --server letsencrypt && echo -e "${GREEN}已切换到 LetsEncrypt${PLAIN}" || echo -e "${RED}切换失败${PLAIN}"
             ;;
         2)
-            acme_exec --set-default-ca --server buypass && echo -e "${GREEN}已切换到 BuyPass${PLAIN}" || echo -e "${RED}切换失败${PLAIN}"
-            ;;
-        3)
             acme_exec --set-default-ca --server zerossl && echo -e "${GREEN}已切换到 ZeroSSL${PLAIN}" || echo -e "${RED}切换失败${PLAIN}"
             ;;
         0)
@@ -4088,8 +4516,8 @@ acme_show_menu() {
     echo -e " ${GREEN}2.${PLAIN}卸载Acme"
     echo -e "${BLUE}-------------${PLAIN}"
     echo -e " ${GREEN}3.${PLAIN}申请单域名证书 ${YELLOW}(80 端口申请)${PLAIN}"
-    echo -e " ${GREEN}4.${PLAIN}申请单域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
-    echo -e " ${GREEN}5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API 申请)${PLAIN}"
+    echo -e " ${GREEN}4.${PLAIN}申请单域名证书 ${YELLOW}(CF API Token)${PLAIN}"
+    echo -e " ${GREEN}5.${PLAIN}申请泛域名证书 ${YELLOW}(CF API Token)${PLAIN}"
     echo -e "${BLUE}-------------${PLAIN}"
     echo -e " ${GREEN}6.${PLAIN}撤销已申请的证书"
     echo -e " ${GREEN}7.${PLAIN}续期已申请的证书"
