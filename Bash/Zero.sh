@@ -364,83 +364,9 @@ pkg_clean() {
     apt autoremove -y && apt autoclean -y && apt clean
 }
 
-fix_gcp_debian_sources() {(
-    local product_name
-    product_name=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
-    [[ "$product_name" != *"Google"* ]] && return 0
-
-    [ ! -f /etc/os-release ] && return 0
-    . /etc/os-release
-    [[ "$ID" != "debian" ]] && return 0
-
-    local codename="$VERSION_CODENAME"
-    [[ -z "$codename" ]] && return 0
-
-    local components
-    case "$codename" in
-        bullseye)
-            components="main contrib non-free"
-            ;;
-        bookworm|trixie)
-            components="main contrib non-free non-free-firmware"
-            ;;
-        *)
-            return 0
-            ;;
-    esac
-
-    local source_file="/etc/apt/sources.list"
-    [ -f /etc/apt/sources.list.d/debian.sources ] && source_file="/etc/apt/sources.list.d/debian.sources"
-    if grep -q "mirrors.mit.edu" "$source_file" 2>/dev/null; then
-        return 0
-    fi
-
-    echo -e "${YELLOW}检测到 GCP Debian ${VERSION_ID} (${codename}),正在配置教育网源...${PLAIN}"
-
-    local format
-    if [ -f /etc/apt/sources.list.d/debian.sources ] || [ "$codename" = "trixie" ]; then
-        format="deb822"
-        source_file="/etc/apt/sources.list.d/debian.sources"
-        rm -f /etc/apt/sources.list
-    else
-        format="legacy"
-        source_file="/etc/apt/sources.list"
-        rm -f /etc/apt/sources.list.d/debian.sources
-    fi
-
-    if [ "$format" = "deb822" ]; then
-        cat > "$source_file" <<GCPEOF
-Types: deb
-URIs: http://mirrors.mit.edu/debian
-Suites: $codename ${codename}-updates ${codename}-backports
-Components: $components
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-
-Types: deb
-URIs: http://mirrors.ocf.berkeley.edu/debian-security
-Suites: ${codename}-security
-Components: $components
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-GCPEOF
-    else
-        cat > "$source_file" <<GCPEOF
-deb http://mirrors.mit.edu/debian $codename $components
-deb http://mirrors.mit.edu/debian ${codename}-updates $components
-deb http://mirrors.mit.edu/debian ${codename}-backports $components
-deb http://mirrors.ocf.berkeley.edu/debian-security ${codename}-security $components
-GCPEOF
-    fi
-
-    rm -rf /var/lib/apt/lists/*
-    apt clean 2>/dev/null
-    echo -e "${GREEN}GCP 源配置完成 (MIT + Berkeley)${PLAIN}"
-)}
-
 linux_update() {
     clear
     echo -e "${YELLOW}正在更新系统...${PLAIN}"
-
-    fix_gcp_debian_sources
 
     if ! pkg_update; then
         echo -e "${RED}未检测到可用的 apt!${PLAIN}"
