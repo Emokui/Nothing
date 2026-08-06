@@ -1,4 +1,3 @@
-```
 ## Serv00/CT8 Trojan/Hysteria2 BY Mihomo
 ```
 curl -sL -o serv00.sh https://raw.githubusercontent.com/Emokui/Steins/Gate/Bash/serv00.sh && chmod +x serv00.sh && ./serv00.sh
