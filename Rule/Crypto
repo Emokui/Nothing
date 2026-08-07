@@ -59,7 +59,3 @@ DOMAIN,api.ffbbbdc6d3c353211fe2ba39c9f744cd.com
 DOMAIN,sc-abtest.ffe390afd658c19dcbf707e0597b846d.de
 DOMAIN,sc-datasink.ffbbbdc6d3c353211fe2ba39c9f744cd.com
 DOMAIN,monitor-frontend-collector.ffbbbdc6d3c353211fe2ba39c9f744cd.com
-# Wise
-DOMAIN-SUFFIX,wise.com
-DOMAIN,skan.singular.net
-DOMAIN-SUFFIX,s3.eu-central-1.amazonaws.com
