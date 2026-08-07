@@ -1,10 +1,13 @@
 #!/bin/sh
 
+umask 077
+
 CURRENT_USER="${USER:-$(id -un 2>/dev/null || whoami 2>/dev/null)}"
 RELEASE_REPO="MetaCubeX/mihomo"
 RELEASE_API_URL="https://api.github.com/repos/${RELEASE_REPO}/releases/latest"
 RELEASE_ASSET="mihomo-freebsd.gz"
 MIHOMO_ASSET_PATTERN='mihomo-freebsd-amd64-compatible-[^"]*\.gz'
+ACME_SOURCE_URL="https://github.com/acmesh-official/acme.sh/archive/master.tar.gz"
 WS_PATH="/"
 
 detect_home_dir() {
@@ -31,12 +34,6 @@ detect_home_dir() {
         fi
     fi
 
-    dir="$(eval printf '%s' "~$CURRENT_USER" 2>/dev/null)"
-    if [ -n "$dir" ] && [ -d "$dir" ]; then
-        printf '%s\n' "$dir"
-        return 0
-    fi
-
     return 1
 }
 
@@ -51,11 +48,26 @@ BIN_PATH="${BIN_PATH:-$WORK_DIR/$BIN_NAME}"
 CONFIG_PATH="${CONFIG_PATH:-$WORK_DIR/config.yaml}"
 RESTART_LOG="${RESTART_LOG:-$WORK_DIR/blog.log}"
 ARCHIVE_PATH="${ARCHIVE_PATH:-$WORK_DIR/$RELEASE_ASSET}"
+ACME_HOME="${ACME_HOME:-$WORK_DIR/.acme.sh}"
+ACME_BIN="${ACME_BIN:-$ACME_HOME/acme.sh}"
+ACME_RELOAD_HOOK="${ACME_RELOAD_HOOK:-$WORK_DIR/acme-reload.sh}"
+
+case "$0" in
+    /*) SCRIPT_PATH="$0" ;;
+    */*) SCRIPT_PATH="$(cd "${0%/*}" 2>/dev/null && pwd -P)/${0##*/}" ;;
+    *)
+        SCRIPT_PATH="$(command -v "$0" 2>/dev/null || true)"
+        case "$SCRIPT_PATH" in
+            /*) ;;
+            *) SCRIPT_PATH="$(pwd -P)/$0" ;;
+        esac
+        ;;
+esac
 
 require_commands() {
     local missing=""
     local cmd
-    for cmd in awk kill nohup ps sed; do
+    for cmd in awk chmod date head kill mkdir mv nohup ps rm sed sleep stty tr; do
         command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
     done
 
@@ -66,29 +78,20 @@ require_commands() {
 }
 
 require_install_commands() {
-    require_commands
+    local missing=""
+    local cmd
 
-    if ! command -v gzip >/dev/null 2>&1; then
-        echo "[错误] 缺少依赖命令: gzip"
-        exit 1
-    fi
-
-    if ! command -v fetch >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
-        echo "[错误] 需要 fetch 或 curl 命令"
+    for cmd in curl gzip mktemp openssl tar; do
+        command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
+    done
+    if [ -n "$missing" ]; then
+        echo "[错误] 安装缺少依赖命令:$missing"
         exit 1
     fi
 }
 
 random_pass() {
-    if command -v openssl >/dev/null 2>&1; then
-        openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 16
-        return 0
-    fi
-    if [ -r /dev/urandom ]; then
-        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
-        return 0
-    fi
-    printf '%s\n' "ChangeMe12345678"
+    openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 16
 }
 
 is_interactive() {
@@ -116,9 +119,9 @@ prompt_input() {
         else
             printf ': ' >&2
         fi
-        stty -echo
+        stty -echo 2>/dev/null || true
         IFS= read -r value
-        stty echo
+        stty echo 2>/dev/null || true
         printf '\n' >&2
     else
         if [ -n "$default" ]; then
@@ -133,125 +136,198 @@ prompt_input() {
     printf '%s\n' "$value"
 }
 
-write_multiline_file() {
-    local target="$1"
-    local label="$2"
-    local line=""
-    local next_line=""
-
-    echo "[信息] 请粘贴 ${label} 内容。"
-    echo "[信息] 可用单独一行 EOF 结束输入。"
-    echo "[信息] 单个证书/密钥也可以在 END 那一行之后再按一次回车结束。"
-    : > "$target"
-
-    while IFS= read -r line; do
-        [ "$line" = "EOF" ] && break
-        printf '%s\n' "$line" >> "$target"
-
-        case "$line" in
-            "-----END CERTIFICATE-----"|"-----END PRIVATE KEY-----"|"-----END RSA PRIVATE KEY-----"|"-----END EC PRIVATE KEY-----"|"-----END OPENSSH PRIVATE KEY-----")
-                if ! IFS= read -r next_line; then
-                    break
-                fi
-                [ "$next_line" = "EOF" ] && break
-                [ -z "$next_line" ] && break
-                printf '%s\n' "$next_line" >> "$target"
-                ;;
-        esac
-    done
-}
-
-prompt_cert_mode() {
-    local mode=""
+prompt_port() {
+    local label="$1"
+    local default="$2"
+    local value=""
 
     while :; do
-        mode="$(prompt_input "请选择证书来源：1.自动生成自签证书  2.手动粘贴证书和私钥" "1")"
-        case "$mode" in
-            1)
-                printf '%s\n' "self"
-                return 0
-                ;;
-            2)
-                printf '%s\n' "manual"
-                return 0
-                ;;
+        value="$(prompt_input "$label" "$default")"
+        case "$value" in
+            *[!0-9]*|'') echo "[警告] 端口必须是数字" >&2 ;;
             *)
-                echo "[警告] 请输入 1 或 2" >&2
+                if [ "$value" -ge 1024 ] 2>/dev/null && [ "$value" -le 65535 ] 2>/dev/null; then
+                    printf '%s\n' "$value"
+                    return 0
+                fi
+                echo "[警告] 非 root 用户端口范围应为 1024-65535" >&2
                 ;;
         esac
     done
 }
 
-generate_self_signed_cert() {
-    local cert_path="$1"
-    local key_path="$2"
-    local cert_name="$3"
-    local conf_path="$WORK_DIR/.selfsigned-openssl.cnf"
-    local status=0
+prompt_protocol_mode() {
+    local choice=""
 
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo "[错误] 自动生成自签证书需要 openssl，请安装 openssl 后重试，或重新运行脚本选择手动输入证书"
-        return 1
-    fi
-
-    cat > "$conf_path" <<EOF
-[req]
-prompt = no
-distinguished_name = dn
-x509_extensions = v3_req
-
-[dn]
-CN = $cert_name
-
-[v3_req]
-basicConstraints = CA:FALSE
-keyUsage = digitalSignature, keyEncipherment
-extendedKeyUsage = serverAuth
-subjectAltName = @alt_names
-
-[alt_names]
-DNS.1 = $cert_name
-EOF
-
-    echo "[信息] 正在生成自签证书..."
-    openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 3650 \
-        -keyout "$key_path" -out "$cert_path" -config "$conf_path" >/dev/null 2>&1
-    status=$?
-    rm -f "$conf_path"
-
-    if [ "$status" != "0" ]; then
-        rm -f "$cert_path" "$key_path"
-        echo "[错误] 自签证书生成失败"
-        return 1
-    fi
-
-    echo "[成功] 自签证书已生成: $cert_path"
-    echo "[成功] 私钥已生成: $key_path"
+    while :; do
+        printf '\n请选择安装协议：\n' >&2
+        printf '1.trojan\n' >&2
+        printf '2.hysteria2\n' >&2
+        printf '3.trojan+hysteria2\n' >&2
+        choice="$(prompt_input "请输入选项 [1-3]" "3")"
+        case "$choice" in
+            1|2|3) printf '%s\n' "$choice"; return 0 ;;
+            *) echo "[警告] 请输入 1、2 或 3" >&2 ;;
+        esac
+    done
 }
 
-prepare_certificate() {
-    local cert_mode=""
-    local cert_name=""
+validate_certificate_domain() {
+    local domain="$1"
 
-    cert_mode="$(prompt_cert_mode)"
+    case "$domain" in
+        ''|*[!A-Za-z0-9.-]*|.*|*.|-*|*-|*..*|*-.*|*.-*) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
-    case "$cert_mode" in
-        self)
-            cert_name="$(prompt_input "请输入自签证书域名" "icloud.com.cn")"
-            PEM_NAME="${cert_name}.pem"
-            KEY_NAME="${cert_name}.key"
-            generate_self_signed_cert "$WORK_DIR/$PEM_NAME" "$WORK_DIR/$KEY_NAME" "$cert_name" || return 1
-            ;;
-        manual)
-            cert_name="$(prompt_input "请输入证书域名" "")"
-            PEM_NAME="${cert_name}.pem"
-            KEY_NAME="${cert_name}.key"
-            write_multiline_file "$WORK_DIR/$PEM_NAME" "$PEM_NAME"
-            write_multiline_file "$WORK_DIR/$KEY_NAME" "$KEY_NAME"
+acme_exec() {
+    "$ACME_BIN" --home "$ACME_HOME" --config-home "$ACME_HOME" "$@"
+}
+
+install_acme_client() {
+    local install_dir=""
+    local archive=""
+    local source_dir=""
+    local install_status=0
+
+    [ -x "$ACME_BIN" ] && return 0
+    case "$ACME_HOME" in
+        *' '*)
+            echo "[错误] acme.sh 安装路径不能包含空格: $ACME_HOME"
+            return 1
             ;;
     esac
 
-    chmod 600 "$WORK_DIR/$PEM_NAME" "$WORK_DIR/$KEY_NAME" 2>/dev/null || true
+    install_dir="$(mktemp -d "$WORK_DIR/.acme-install.XXXXXX")" || return 1
+    archive="$install_dir/acme.sh.tar.gz"
+    source_dir="$install_dir/acme.sh-master"
+
+    echo "[信息] 正在安装用户态 acme.sh..."
+    curl -fsSL --connect-timeout 10 --max-time 300 \
+        -o "$archive" "$ACME_SOURCE_URL" || {
+        echo "[错误] acme.sh 下载失败"
+        rm -rf "$install_dir"
+        return 1
+    }
+    tar -xzf "$archive" -C "$install_dir" || {
+        echo "[错误] acme.sh 解压失败"
+        rm -rf "$install_dir"
+        return 1
+    }
+    [ -x "$source_dir/acme.sh" ] || {
+        echo "[错误] acme.sh 安装文件不完整"
+        rm -rf "$install_dir"
+        return 1
+    }
+
+    if command -v crontab >/dev/null 2>&1; then
+        (cd "$source_dir" && ./acme.sh --install --home "$ACME_HOME" \
+            --config-home "$ACME_HOME" --noprofile)
+        install_status=$?
+    else
+        (cd "$source_dir" && ./acme.sh --install --home "$ACME_HOME" \
+            --config-home "$ACME_HOME" --nocron --noprofile)
+        install_status=$?
+        echo "[警告] 未检测到 crontab，请在 Serv00 面板添加定时任务: $ACME_BIN --home $ACME_HOME --config-home $ACME_HOME --cron"
+    fi
+    rm -rf "$install_dir"
+
+    [ "$install_status" -eq 0 ] && [ -x "$ACME_BIN" ] || {
+        echo "[错误] acme.sh 安装失败"
+        return 1
+    }
+}
+
+write_acme_reload_hook() {
+    case "$ACME_RELOAD_HOOK$SCRIPT_PATH" in
+        *' '*)
+            echo "[错误] 自动续期重启路径不能包含空格"
+            return 1
+            ;;
+    esac
+
+    cat > "$ACME_RELOAD_HOOK" <<EOF
+#!/bin/sh
+[ -x "$BIN_PATH" ] && [ -f "$CONFIG_PATH" ] || exit 0
+exec /bin/sh "$SCRIPT_PATH" restart
+EOF
+    chmod 700 "$ACME_RELOAD_HOOK"
+}
+
+prepare_certificate() {
+    local cert_name=""
+    local cf_token=""
+    local issue_status=0
+    local cert_path=""
+    local key_path=""
+
+    cert_name="$(prompt_input "请输入已托管在 Cloudflare 的证书域名" "")"
+    cert_name="$(printf '%s' "$cert_name" | tr '[:upper:]' '[:lower:]')"
+    validate_certificate_domain "$cert_name" || {
+        echo "[错误] 请输入有效的单域名，例如 node.example.com"
+        return 1
+    }
+
+    cf_token="$(prompt_input "请输入 Cloudflare API Token" "" 1)"
+    case "$cf_token" in
+        ''|*[!A-Za-z0-9._~-]*)
+            echo "[错误] Cloudflare API Token 为空或包含非法字符"
+            return 1
+            ;;
+    esac
+
+    install_acme_client || return 1
+
+    PEM_NAME="${cert_name}.pem"
+    KEY_NAME="${cert_name}.key"
+    CERT_NAME="$cert_name"
+    cert_path="$WORK_DIR/$PEM_NAME"
+    key_path="$WORK_DIR/$KEY_NAME"
+
+    echo "[信息] 正在通过 Cloudflare API 申请单域名证书: $cert_name"
+    (
+        unset CF_Key CF_Email CF_Account_ID CF_Zone_ID
+        export CF_Token="$cf_token"
+        acme_exec --issue --server letsencrypt --dns dns_cf \
+            --keylength ec-256 -d "$cert_name"
+    )
+    issue_status=$?
+    cf_token=""
+
+    case "$issue_status" in
+        0|2) ;;
+        *)
+            echo "[错误] Cloudflare API 证书申请失败"
+            echo "[提示] Token 需要目标区域的 Zone Read 与 DNS Edit 权限"
+            return 1
+            ;;
+    esac
+
+    write_acme_reload_hook || return 1
+    acme_exec --install-cert -d "$cert_name" --ecc \
+        --key-file "$key_path" \
+        --fullchain-file "$cert_path" \
+        --reloadcmd "/bin/sh $ACME_RELOAD_HOOK" || {
+        echo "[错误] 证书安装到 Mihomo 路径失败"
+        return 1
+    }
+
+    [ -s "$cert_path" ] && [ -s "$key_path" ] || {
+        echo "[错误] 证书或私钥文件为空"
+        return 1
+    }
+    openssl x509 -in "$cert_path" -noout >/dev/null 2>&1 || {
+        echo "[错误] 证书文件格式校验失败"
+        return 1
+    }
+    openssl pkey -in "$key_path" -noout >/dev/null 2>&1 || {
+        echo "[错误] 私钥文件格式校验失败"
+        return 1
+    }
+    chmod 600 "$cert_path" "$key_path" || return 1
+    echo "[成功] 单域名证书申请完成"
 }
 
 yaml_escape() {
@@ -273,11 +349,7 @@ normalize_ws_path() {
 }
 
 fetch_release_api() {
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$RELEASE_API_URL"
-    else
-        fetch -qo - "$RELEASE_API_URL"
-    fi
+    curl -fsSL --connect-timeout 10 --max-time 60 "$RELEASE_API_URL"
 }
 
 get_latest_release_info() {
@@ -334,11 +406,8 @@ download_url() {
 
     echo "[信息] 正在下载 mihomo FreeBSD ..."
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fL "$url" -o "$ARCHIVE_PATH" || return 1
-    else
-        fetch -o "$ARCHIVE_PATH" "$url" || return 1
-    fi
+    curl -fL --connect-timeout 10 --max-time 300 \
+        "$url" -o "$ARCHIVE_PATH" || return 1
 }
 
 download_release() {
@@ -474,7 +543,8 @@ dns:
 listeners:
 EOF
 
-    cat >> "$CONFIG_PATH" <<EOF
+    if [ "$PROTOCOL_MODE" = "1" ] || [ "$PROTOCOL_MODE" = "3" ]; then
+        cat >> "$CONFIG_PATH" <<EOF
   - name: trojan-ws-tls-in
     type: trojan
     port: ${TROJAN_PORT}
@@ -487,8 +557,10 @@ EOF
     private-key: "${key_path}"
 
 EOF
+    fi
 
-    cat >> "$CONFIG_PATH" <<EOF
+    if [ "$PROTOCOL_MODE" = "2" ] || [ "$PROTOCOL_MODE" = "3" ]; then
+        cat >> "$CONFIG_PATH" <<EOF
   - name: hysteria2-in
     type: hysteria2
     port: ${HY2_PORT}
@@ -502,6 +574,7 @@ EOF
     private-key: "${key_path}"
 
 EOF
+    fi
 
     cat >> "$CONFIG_PATH" <<EOF
 rules:
@@ -511,7 +584,7 @@ EOF
 }
 
 show_usage() {
-    echo "用法: $0 [restart|stop]"
+    echo "用法: $0 [restart|stop|delete]"
     echo "      $0 trojan PT 端口"
     echo "      $0 trojan PW 密码"
     echo "      $0 hysteria PT 端口"
@@ -539,11 +612,27 @@ update_config_item() {
             ;;
     esac
 
+    awk -v listener="$listener" '
+        $0 == "  - name: " listener { found = 1 }
+        END { exit(found ? 0 : 1) }
+    ' "$CONFIG_PATH" || {
+        echo "[错误] 当前配置未启用 $service"
+        return 1
+    }
+
     case "$item" in
         PT)
+            case "$value" in
+                *[!0-9]*|'') echo "[错误] 端口必须是数字"; return 1 ;;
+            esac
+            [ "$value" -ge 1024 ] 2>/dev/null && [ "$value" -le 65535 ] 2>/dev/null || {
+                echo "[错误] 端口范围必须是 1024-65535"
+                return 1
+            }
             escaped_value="$value"
             ;;
         PW)
+            [ -n "$value" ] || { echo "[错误] 密码不能为空"; return 1; }
             escaped_value="$(yaml_escape "$value")"
             ;;
         *)
@@ -574,11 +663,17 @@ update_config_item() {
         {
             print
         }
-    ' "$CONFIG_PATH" > "$tmp_path" && mv "$tmp_path" "$CONFIG_PATH" || {
+    ' "$CONFIG_PATH" > "$tmp_path" || {
         rm -f "$tmp_path"
         return 1
     }
-    chmod 600 "$CONFIG_PATH"
+    chmod 600 "$tmp_path" || { rm -f "$tmp_path"; return 1; }
+    "$BIN_PATH" -t -d "$WORK_DIR" -f "$tmp_path" >/dev/null 2>&1 || {
+        rm -f "$tmp_path"
+        echo "[错误] 修改后的配置校验失败"
+        return 1
+    }
+    mv "$tmp_path" "$CONFIG_PATH"
 }
 
 apply_config_change() {
@@ -587,7 +682,6 @@ apply_config_change() {
         return 1
     fi
 
-    require_commands
     if ! ensure_installed; then
         echo "[错误] 尚未安装，请先运行 $0 完成安装"
         return 1
@@ -713,13 +807,49 @@ show_status() {
     fi
 }
 
+delete_service() {
+    case "${WORK_DIR%/}" in
+        ''|'/'|"$HOME_DIR")
+            echo "[错误] 拒绝删除不安全的目录: $WORK_DIR"
+            return 1
+            ;;
+    esac
+
+    if ! ensure_installed && [ ! -x "$ACME_BIN" ]; then
+        echo "[错误] 未检测到 Mihomo 安装，拒绝删除目录: $WORK_DIR"
+        return 1
+    fi
+
+    stop_process || return 1
+    if [ -x "$ACME_BIN" ]; then
+        echo "[信息] 正在移除证书自动续期任务..."
+        acme_exec --uninstall >/dev/null 2>&1 || {
+            echo "[警告] 自动续期任务移除失败，请手动检查 crontab 或 Serv00 面板"
+        }
+    fi
+    if ! command -v crontab >/dev/null 2>&1; then
+        echo "[提示] 如果曾在 Serv00 面板添加续期任务，请同时手动删除"
+    fi
+    rm -rf "$WORK_DIR" || {
+        echo "[错误] 删除 Mihomo 服务失败: $WORK_DIR"
+        return 1
+    }
+
+    echo "[成功] Mihomo 服务、配置及证书已删除"
+}
+
 setup_install() {
+    [ -t 0 ] || {
+        echo "[错误] 首次安装需要交互式终端"
+        exit 1
+    }
     require_install_commands
     mkdir -p "$WORK_DIR" || {
         echo "[错误] 创建目录失败: $WORK_DIR"
         exit 1
     }
     cd "$WORK_DIR" || exit 1
+    PROTOCOL_MODE="$(prompt_protocol_mode)" || exit 1
 
     echo "[信息] 检测到首次运行，开始安装 mihomo 到: $WORK_DIR"
     download_release || {
@@ -733,14 +863,27 @@ setup_install() {
 
     prepare_certificate || exit 1
 
-    TROJAN_PORT="$(prompt_input "请输入 Trojan 监听端口" "24838")"
-    WS_PATH="$(normalize_ws_path "$(prompt_input "请输入 WebSocket 路径" "$WS_PATH")")"
-    TROJAN_PASSWORD="$(prompt_input "请输入 Trojan 密码" "$(random_pass)" 1)"
-    HY2_PORT="$(prompt_input "请输入 Hysteria2 监听端口" "24839")"
-    HY2_PASSWORD="$(prompt_input "请输入 Hysteria2 密码" "$(random_pass)" 1)"
+    if [ "$PROTOCOL_MODE" = "1" ] || [ "$PROTOCOL_MODE" = "3" ]; then
+        TROJAN_PORT="$(prompt_port "请输入 Trojan 监听端口" "24838")"
+        WS_PATH="$(normalize_ws_path "$(prompt_input "请输入 WebSocket 路径" "$WS_PATH")")"
+        TROJAN_PASSWORD="$(prompt_input "请输入 Trojan 密码" "$(random_pass)" 1)"
+    fi
+    if [ "$PROTOCOL_MODE" = "2" ] || [ "$PROTOCOL_MODE" = "3" ]; then
+        HY2_PORT="$(prompt_port "请输入 Hysteria2 监听端口" "24839")"
+        HY2_PASSWORD="$(prompt_input "请输入 Hysteria2 密码" "$(random_pass)" 1)"
+    fi
 
-    generate_config
+    generate_config || exit 1
     start_process || exit 1
+
+    echo "[成功] 安装完成"
+    echo "[信息] 配置文件: $CONFIG_PATH"
+    if [ "$PROTOCOL_MODE" = "1" ] || [ "$PROTOCOL_MODE" = "3" ]; then
+        echo "[信息] Trojan: TCP ${TROJAN_PORT}，WS 路径 ${WS_PATH}，SNI $CERT_NAME"
+    fi
+    if [ "$PROTOCOL_MODE" = "2" ] || [ "$PROTOCOL_MODE" = "3" ]; then
+        echo "[信息] Hysteria2: UDP ${HY2_PORT}，SNI $CERT_NAME"
+    fi
 }
 
 ensure_installed() {
@@ -748,6 +891,8 @@ ensure_installed() {
 }
 
 main() {
+    require_commands
+
     case "${1:-}" in
         restart)
             if ! ensure_installed; then
@@ -760,6 +905,9 @@ main() {
             ;;
         stop)
             stop_process
+            ;;
+        delete)
+            delete_service
             ;;
         trojan|hysteria)
             apply_config_change "$@" || exit 1
