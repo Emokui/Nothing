@@ -1337,8 +1337,8 @@ set_ip_priority() {
         echo -e "${BLUE}=== IP连接优先级 ===${PLAIN}"
         echo -e "${YELLOW}当前优先级: ${GREEN}${current_priority}${PLAIN}"
         echo -e "${BLUE}======================${PLAIN}"
-        echo -e "${GREEN}1.${PLAIN}IPv4优先"
-        echo -e "${GREEN}2.${PLAIN}IPv6优先"
+        echo -e "${GREEN}1.${PLAIN}IPv4 优先"
+        echo -e "${GREEN}2.${PLAIN}IPv6 优先"
         echo -e "${GREEN}3.${PLAIN}系统默认"
         echo -e "${YELLOW}0.${PLAIN}返回菜单"
         echo -e "${BLUE}======================${PLAIN}"
@@ -7813,10 +7813,12 @@ WIREPROXY_WG_WARP_CONF="/etc/wireproxy/wgcf-warp.conf"
 WIREPROXY_SERVICE_NAME="wireproxy-warp"
 WIREPROXY_SERVICE_FILE="/etc/systemd/system/${WIREPROXY_SERVICE_NAME}.service"
 
+WIREPROXY_REPO="windtf/wireproxy"
 WIREPROXY_WGCF_REPO="ViRb3/wgcf"
-WIREPROXY_BASE_URL="https://cdn-wireproxy.pages.dev/windtf/wireproxy"
+WIREPROXY_MIRROR_URL="https://cdn-wireproxy.pages.dev/windtf/wireproxy"
+WIREPROXY_WGCF_MIRROR_URL="https://cdn-wgcf.pages.dev/ViRb3/wgcf"
 
-WIREPROXY_WGCF_PATH="/usr/local/bin/wgcf"
+WIREPROXY_WGCF_PATH=""
 WIREPROXY_WGCF_TMP=""
 WIREPROXY_ARCH=""
 WIREPROXY_WGCF_ARCH=""
@@ -7827,6 +7829,72 @@ WIREPROXY_SOCKS_BIND="$WIREPROXY_DEFAULT_SOCKS_BIND"
 WIREPROXY_SOCKS_USER=""
 WIREPROXY_SOCKS_PASS=""
 
+warp_release_latest_tag() {
+    local repo="$1" mirror_url="$2" net_mode="$3" version=""
+
+    if [[ "$net_mode" != "v6_only" ]]; then
+        version="$(curl --connect-timeout 5 --max-time 20 -fsSI "https://github.com/${repo}/releases/latest" 2>/dev/null \
+            | awk 'tolower($1)=="location:" {print $2}' \
+            | tail -n1 \
+            | tr -d '\r' \
+            | awk -F/ '{print $NF}')"
+    fi
+
+    if [[ -z "$version" ]]; then
+        version="$(curl --connect-timeout 5 --max-time 20 -fsSL "${mirror_url}/releases/latest" 2>/dev/null \
+            | grep -oE '/releases/tag/v[0-9.]+' \
+            | sed 's#.*/##' \
+            | head -n1)"
+    fi
+
+    [[ -n "$version" ]] || return 1
+    printf '%s\n' "$version"
+}
+
+warp_download_verified_asset() {
+    local repo="$1" mirror_url="$2" version="$3" asset="$4" target="$5" net_mode="$6"
+    local official_url="https://github.com/${repo}" source_url checksum_file expected actual
+
+    source_url="$official_url"
+    [[ "$net_mode" == "v6_only" ]] && source_url="$mirror_url"
+
+    if ! curl --connect-timeout 5 --max-time 120 -fL \
+        "${source_url}/releases/download/${version}/${asset}" -o "$target"; then
+        rm -f "$target"
+        [[ "$source_url" == "$mirror_url" ]] && return 1
+        source_url="$mirror_url"
+        curl --connect-timeout 5 --max-time 120 -fL \
+            "${source_url}/releases/download/${version}/${asset}" -o "$target" || {
+            rm -f "$target"
+            return 1
+        }
+    fi
+
+    checksum_file="${target}.checksums"
+    if [[ "$net_mode" != "v6_only" ]]; then
+        curl --connect-timeout 5 --max-time 30 -fsSL \
+            "${official_url}/releases/download/${version}/checksums.txt" -o "$checksum_file" 2>/dev/null || true
+    fi
+    if [[ ! -s "$checksum_file" ]]; then
+        curl --connect-timeout 5 --max-time 30 -fsSL \
+            "${mirror_url}/releases/download/${version}/checksums.txt" -o "$checksum_file" 2>/dev/null || {
+            rm -f "$target" "$checksum_file"
+            return 1
+        }
+    fi
+
+    expected="$(awk -v wanted="$asset" '{file=$2; sub(/^\*/, "", file); if (file == wanted) {print $1; exit}}' "$checksum_file")"
+    actual="$(sha256sum "$target" 2>/dev/null | awk '{print $1}')"
+    rm -f "$checksum_file"
+
+    if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+        rm -f "$target"
+        return 1
+    fi
+
+    return 0
+}
+
 wireproxy_check_root() { [[ $EUID -ne 0 ]] && wireproxy_err "请使用 root 用户运行此脚本"; }
 
 wireproxy_require_apt() {
@@ -7836,7 +7904,7 @@ wireproxy_require_apt() {
 wireproxy_check_dependencies() {
     local cmd
     wireproxy_require_apt
-    for cmd in curl tar systemctl; do
+    for cmd in curl tar systemctl sha256sum; do
         command -v "$cmd" >/dev/null 2>&1 || wireproxy_err "缺少依赖: $cmd"
     done
 }
@@ -7894,40 +7962,46 @@ wireproxy_detect_network() {
     fi
 }
 
-wireproxy_latest_release_tag() {
-    local repo="$1"
-    curl --connect-timeout 5 --max-time 20 -fsSI "https://github.com/${repo}/releases/latest" \
-        | awk 'tolower($1)=="location:" {print $2}' \
-        | tail -n1 \
-        | tr -d '\r' \
-        | awk -F/ '{print $NF}'
+wireproxy_installed_version() {
+    [[ -x "$WIREPROXY_BIN" ]] || return 1
+    "$WIREPROXY_BIN" --version 2>/dev/null \
+        | grep -oE 'v?[0-9]+(\.[0-9]+){1,3}' \
+        | head -n1 \
+        | sed 's/^v//'
 }
 
 wireproxy_download_binary() {
-    local version asset url tmpdir bin_path
+    local version current_version asset tmpdir bin_path
 
-    if [[ -x "$WIREPROXY_BIN" ]]; then
-        wireproxy_ok "wireproxy 已安装"
+    wireproxy_detect_arch
+    wireproxy_detect_network
+    wireproxy_info "获取 wireproxy 最新版本 ..."
+    version="$(warp_release_latest_tag "$WIREPROXY_REPO" "$WIREPROXY_MIRROR_URL" "$WIREPROXY_NET_MODE" || true)"
+    if [[ -z "$version" ]]; then
+        [[ -x "$WIREPROXY_BIN" ]] && { wireproxy_warn "无法检查最新版本，继续使用现有 wireproxy"; return 0; }
+        wireproxy_err "无法获取 wireproxy 最新版本"
+    fi
+
+    current_version="$(wireproxy_installed_version || true)"
+    if [[ -n "$current_version" && "v${current_version}" == "$version" ]]; then
+        wireproxy_ok "wireproxy ${version} 已是最新版本"
         return 0
     fi
 
-    wireproxy_detect_arch
-    wireproxy_info "获取 wireproxy 最新版本 ..."
-    version="$(curl --connect-timeout 5 --max-time 20 -fsSL "${WIREPROXY_BASE_URL}/releases/latest" \
-        | grep -oE '/releases/tag/v[0-9.]+' \
-        | sed 's#.*/##' \
-        | head -n1)"
-    [[ -n "$version" ]] || wireproxy_err "无法获取 wireproxy 最新版本"
-
     asset="wireproxy_linux_${WIREPROXY_ARCH}.tar.gz"
-    url="${WIREPROXY_BASE_URL}/releases/download/${version}/${asset}"
     tmpdir="$(mktemp -d)" || wireproxy_err "创建临时目录失败"
 
-    wireproxy_info "下载 wireproxy ${version} ..."
-    if ! curl --connect-timeout 5 --max-time 120 -fL "$url" -o "${tmpdir}/wireproxy.tar.gz"; then
-        rm -rf "$tmpdir"
-        wireproxy_err "wireproxy 下载失败"
+    if [[ -n "$current_version" ]]; then
+        wireproxy_info "更新 wireproxy v${current_version} -> ${version} ..."
+    else
+        wireproxy_info "下载 wireproxy ${version} ..."
     fi
+    if ! warp_download_verified_asset "$WIREPROXY_REPO" "$WIREPROXY_MIRROR_URL" "$version" "$asset" \
+        "${tmpdir}/wireproxy.tar.gz" "$WIREPROXY_NET_MODE"; then
+        rm -rf "$tmpdir"
+        wireproxy_err "wireproxy 下载或 SHA256 校验失败"
+    fi
+    wireproxy_ok "wireproxy SHA256 校验通过"
 
     tar -xzf "${tmpdir}/wireproxy.tar.gz" -C "$tmpdir" || {
         rm -rf "$tmpdir"
@@ -7945,53 +8019,42 @@ wireproxy_download_binary() {
         wireproxy_err "安装 wireproxy 可执行文件失败"
     fi
     rm -rf "$tmpdir"
-    wireproxy_ok "wireproxy 已安装到 ${WIREPROXY_BIN}"
+    wireproxy_ok "wireproxy ${version} 已安装到 ${WIREPROXY_BIN}"
 }
 
 wireproxy_ensure_wgcf() {
-    local version url tmpdir wgcf_base_url
+    local version tmpdir asset
 
-    if [[ -x "$WIREPROXY_WGCF_PATH" ]]; then
-        return 0
-    fi
-
-    wireproxy_detect_arch
-    wireproxy_detect_network
-    wgcf_base_url="https://github.com/${WIREPROXY_WGCF_REPO}"
     wireproxy_info "获取 wgcf 最新版本 ..."
-    if [[ "$WIREPROXY_NET_MODE" == "v6_only" ]]; then
-        wgcf_base_url="https://cdn-wgcf.pages.dev/ViRb3/wgcf"
-        wireproxy_info "检测到纯 IPv6，wgcf 下载改用镜像: $wgcf_base_url"
-        version="$(curl --connect-timeout 5 --max-time 20 -fsSL "${wgcf_base_url}/releases/latest" \
-            | grep -oE '/releases/tag/v[0-9.]+' \
-            | sed 's#.*/##' \
-            | head -n1)"
-    else
-        version="$(wireproxy_latest_release_tag "$WIREPROXY_WGCF_REPO")"
-    fi
+    version="$(warp_release_latest_tag "$WIREPROXY_WGCF_REPO" "$WIREPROXY_WGCF_MIRROR_URL" "$WIREPROXY_NET_MODE" || true)"
     [[ -n "$version" ]] || wireproxy_err "无法获取 wgcf 最新版本"
 
-    url="${wgcf_base_url}/releases/download/${version}/wgcf_${version#v}_linux_${WIREPROXY_WGCF_ARCH}"
+    asset="wgcf_${version#v}_linux_${WIREPROXY_WGCF_ARCH}"
     tmpdir="$(mktemp -d)" || wireproxy_err "创建临时目录失败"
     WIREPROXY_WGCF_TMP="${tmpdir}/wgcf"
 
     wireproxy_info "下载 wgcf ${version} ..."
-    if ! curl --connect-timeout 5 --max-time 120 -fL "$url" -o "$WIREPROXY_WGCF_TMP"; then
+    if ! warp_download_verified_asset "$WIREPROXY_WGCF_REPO" "$WIREPROXY_WGCF_MIRROR_URL" "$version" "$asset" \
+        "$WIREPROXY_WGCF_TMP" "$WIREPROXY_NET_MODE"; then
         rm -rf "$tmpdir"
         WIREPROXY_WGCF_TMP=""
-        wireproxy_err "wgcf 下载失败"
+        wireproxy_err "wgcf 下载或 SHA256 校验失败"
     fi
 
-    chmod +x "$WIREPROXY_WGCF_TMP"
+    chmod +x "$WIREPROXY_WGCF_TMP" || {
+        rm -rf "$tmpdir"
+        WIREPROXY_WGCF_TMP=""
+        wireproxy_err "无法设置 wgcf 执行权限"
+    }
     WIREPROXY_WGCF_PATH="$WIREPROXY_WGCF_TMP"
-    wireproxy_ok "wgcf 已临时就绪"
+    wireproxy_ok "wgcf SHA256 校验通过，已临时就绪"
 }
 
 wireproxy_cleanup_wgcf() {
     if [[ -n "$WIREPROXY_WGCF_TMP" ]]; then
         rm -rf "$(dirname "$WIREPROXY_WGCF_TMP")"
         WIREPROXY_WGCF_TMP=""
-        WIREPROXY_WGCF_PATH="/usr/local/bin/wgcf"
+        WIREPROXY_WGCF_PATH=""
     fi
 }
 
@@ -8008,6 +8071,12 @@ wireproxy_is_valid_host_port() {
     fi
     (( port >= 1 && port <= 65535 )) || return 1
     return 0
+}
+
+wireproxy_is_local_bind() {
+    [[ "$1" =~ ^127\.([0-9]{1,3}\.){2}[0-9]{1,3}:[0-9]{1,5}$ ||
+       "$1" =~ ^localhost:[0-9]{1,5}$ ||
+       "$1" =~ ^\[::1\]:[0-9]{1,5}$ ]]
 }
 
 wireproxy_escape_sed_replacement() {
@@ -8129,7 +8198,7 @@ wireproxy_load_socks_settings() {
 }
 
 wireproxy_prompt_socks_settings() {
-    local input current_pass
+    local input current_pass confirm
 
     wireproxy_load_socks_settings
     current_pass="$WIREPROXY_SOCKS_PASS"
@@ -8156,14 +8225,31 @@ wireproxy_prompt_socks_settings() {
         else
             WIREPROXY_SOCKS_PASS="$current_pass"
         fi
+
+        if [[ -z "$WIREPROXY_SOCKS_PASS" ]]; then
+            wireproxy_warn "设置用户名时密码不能为空"
+            return 1
+        fi
+        if [[ "$WIREPROXY_SOCKS_USER" =~ [[:space:]] || "$WIREPROXY_SOCKS_PASS" =~ [[:space:]] ]]; then
+            wireproxy_warn "SOCKS 用户名和密码不能包含空白字符"
+            return 1
+        fi
     else
         WIREPROXY_SOCKS_USER=""
         WIREPROXY_SOCKS_PASS=""
     fi
+
+    if ! wireproxy_is_local_bind "$WIREPROXY_SOCKS_BIND" && [[ -z "$WIREPROXY_SOCKS_USER" ]]; then
+        wireproxy_warn "当前监听地址可能暴露到公网，且未设置 SOCKS 认证"
+        read -rp "确认继续 [y/N]: " confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || { wireproxy_warn "已取消"; return 1; }
+    fi
+
+    return 0
 }
 
 wireproxy_write_wg_conf() {
-    local priv="$1" v4="$2" v6="$3" pub="$4" endpoint="$5" account="$6"
+    local priv="$1" v4="$2" v6="$3" pub="$4" endpoint="$5"
 
     mkdir -p "$WIREPROXY_CONF_DIR"
     cat > "$WIREPROXY_WG_WARP_CONF" <<EOF
@@ -8224,19 +8310,27 @@ EOF
 }
 
 wireproxy_validate_config() {
-    "$WIREPROXY_BIN" -c "$WIREPROXY_CONF" -n >/tmp/wireproxy-configtest.log 2>&1
+    local log_file="$1"
+    "$WIREPROXY_BIN" -c "$WIREPROXY_CONF" -n >"$log_file" 2>&1
 }
 
 wireproxy_try_restart_service() {
-    local quiet="${1:-0}"
+    local quiet="${1:-0}" validation_log
 
-    if ! wireproxy_validate_config; then
+    validation_log="$(mktemp)" || {
+        (( quiet == 0 )) && wireproxy_warn "无法创建配置校验日志"
+        return 1
+    }
+
+    if ! wireproxy_validate_config "$validation_log"; then
         if (( quiet == 0 )); then
             wireproxy_warn "配置校验失败"
-            cat /tmp/wireproxy-configtest.log
+            cat "$validation_log"
         fi
+        rm -f "$validation_log"
         return 1
     fi
+    rm -f "$validation_log"
 
     wireproxy_create_service
     systemctl daemon-reload >/dev/null 2>&1 || return 1
@@ -8293,16 +8387,19 @@ wireproxy_restart_service_with_backup() {
 wireproxy_prepare_install() {
     local account_type="$1"
     wireproxy_check_dependencies
-    wireproxy_detect_arch
-    wireproxy_prompt_socks_settings
+    wireproxy_prompt_socks_settings || return 1
     wireproxy_download_binary
-    [[ "$account_type" == "free" ]] && wireproxy_ensure_wgcf || wireproxy_ensure_wireguard_tools
+    if [[ "$account_type" == "free" ]]; then
+        wireproxy_ensure_wgcf
+    else
+        wireproxy_ensure_wireguard_tools
+    fi
 }
 
 wireproxy_finish_install() {
-    local priv="$1" v4="$2" v6="$3" pub="$4" endpoint="$5" account="$6"
+    local priv="$1" v4="$2" v6="$3" pub="$4" endpoint="$5"
     wireproxy_info "Endpoint: $endpoint"
-    wireproxy_write_wg_conf "$priv" "$v4" "$v6" "$pub" "$endpoint" "$account"
+    wireproxy_write_wg_conf "$priv" "$v4" "$v6" "$pub" "$endpoint"
     wireproxy_write_conf
     wireproxy_restart_service
 }
@@ -8437,31 +8534,37 @@ wireproxy_merge_warp_status() {
     printf '%s\n' "$status"
 }
 
+wireproxy_cleanup_free_install() {
+    local tmpdir="$1"
+    cd / || true
+    rm -rf "$tmpdir"
+    wireproxy_cleanup_wgcf
+}
+
 wireproxy_install_free() {
-    local tmpdir priv pub addr endpoint warp_v4 warp_v6 version
+    local tmpdir priv pub addr endpoint warp_v4 warp_v6
 
     echo ""
     wireproxy_info "免费账户 SOCKS 安装"
     echo ""
 
-    wireproxy_prepare_install free
+    wireproxy_prepare_install free || return 1
 
     tmpdir="$(mktemp -d)" || wireproxy_err "创建临时目录失败"
-    cd "$tmpdir" || wireproxy_err "进入临时目录失败"
+    cd "$tmpdir" || {
+        wireproxy_cleanup_free_install "$tmpdir"
+        wireproxy_err "进入临时目录失败"
+    }
 
     wireproxy_info "注册 WARP 免费账户 ..."
     yes | "$WIREPROXY_WGCF_PATH" register >/dev/null 2>&1 || {
-        cd / || true
-        rm -rf "$tmpdir"
-        wireproxy_cleanup_wgcf
+        wireproxy_cleanup_free_install "$tmpdir"
         wireproxy_err "WARP 注册失败"
     }
 
     wireproxy_info "生成 WireGuard 配置 ..."
     "$WIREPROXY_WGCF_PATH" generate >/dev/null 2>&1 || {
-        cd / || true
-        rm -rf "$tmpdir"
-        wireproxy_cleanup_wgcf
+        wireproxy_cleanup_free_install "$tmpdir"
         wireproxy_err "配置生成失败"
     }
 
@@ -8473,19 +8576,15 @@ wireproxy_install_free() {
     warp_v6="$(printf '%s\n' "$addr" | grep -oE '2606:[0-9a-f:]+' | head -n1)"
 
     [[ -n "$priv" && -n "$pub" && -n "$warp_v4" && -n "$warp_v6" && -n "$endpoint" ]] || {
-        cd / || true
-        rm -rf "$tmpdir"
-        wireproxy_cleanup_wgcf
+        wireproxy_cleanup_free_install "$tmpdir"
         wireproxy_err "无法从 wgcf-profile.conf 提取 WARP 配置"
     }
 
     endpoint="$(wireproxy_select_endpoint_for_network "$endpoint" "" "" "")"
 
-    cd / || true
-    rm -rf "$tmpdir"
-    wireproxy_cleanup_wgcf
+    wireproxy_cleanup_free_install "$tmpdir"
 
-    wireproxy_finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$endpoint" "free"
+    wireproxy_finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$endpoint"
 
     echo ""
     wireproxy_ok "WARP SOCKS 配置完成"
@@ -8494,19 +8593,20 @@ wireproxy_install_free() {
 }
 
 wireproxy_install_team() {
-    local jwt_token priv pub response warp_v4 warp_v6 peer_pub endpoint ep_host ep_v4 ep_v6 ep_port org api_ports
+    local jwt_token priv pub response api_result http_code response_brief warp_v4 warp_v6 peer_pub endpoint ep_host ep_v4 ep_v6 ep_port org api_ports
 
     echo ""
     wireproxy_info "团队账户 SOCKS 安装"
     echo ""
 
-    wireproxy_prepare_install team
+    wireproxy_prepare_install team || return 1
 
     echo -e "${YELLOW}获取 Token：${NC}"
     echo -e "  打开 ${CYAN}https://<组织名>.cloudflareaccess.com/warp${NC}"
     echo -e "  登陆后按 F12 -> Console 输入:"
     echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
     echo -e "  ${YELLOW}Token 有效期较短，复制后请立即粘贴${NC}"
+    wireproxy_warn "团队账户使用兼容注册接口，可能因 Cloudflare 调整而失效"
     read -rsp "请粘贴 JWT Token（直接回车取消）: " jwt_token
     echo ""
     [[ -z "$jwt_token" ]] && { wireproxy_warn "已取消"; return; }
@@ -8516,7 +8616,7 @@ wireproxy_install_team() {
     pub="$(printf '%s' "$priv" | wg pubkey)"
 
     wireproxy_info "向 Cloudflare API 注册设备 ..."
-    response="$(curl -s -X POST "https://api.cloudflareclient.com/v0a2158/reg" \
+    api_result="$(curl -sS --connect-timeout 5 --max-time 30 -X POST "https://api.cloudflareclient.com/v0a2158/reg" \
         -H "Content-Type: application/json" \
         -H "Cf-Access-Jwt-Assertion: ${jwt_token}" \
         -d "{
@@ -8526,10 +8626,17 @@ wireproxy_install_team() {
             \"tos\": \"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",
             \"model\": \"Linux\",
             \"serial_number\": \"$(cat /proc/sys/kernel/random/uuid)\"
-        }" 2>/dev/null)"
+        }" -w $'\n%{http_code}' 2>/dev/null || true)"
 
-    [[ -n "$response" ]] || wireproxy_err "Cloudflare API 无响应，请检查网络后重试"
-    printf '%s' "$response" | grep -q '"account"' || wireproxy_err "团队设备注册失败，请检查 Token 是否过期"
+    http_code="${api_result##*$'\n'}"
+    response="${api_result%$'\n'*}"
+    [[ "$http_code" =~ ^2[0-9][0-9]$ && -n "$response" ]] || {
+        response_brief="$(printf '%s' "$response" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-240)"
+        [[ -n "$response_brief" ]] && wireproxy_warn "API 返回: ${response_brief}"
+        wireproxy_err "团队设备注册失败（HTTP ${http_code:-000}），请检查 Token 与注册权限"
+    }
+    printf '%s' "$response" | grep -q '"account"' || wireproxy_err "API 响应缺少账户信息，团队设备注册失败"
+    wireproxy_warn "该设备已登记到 Cloudflare，删除本机代理时需自行清理后台记录"
 
     warp_v4="$(printf '%s' "$response" | grep -oP '"addresses"\s*:\s*\{[^}]*"v4"\s*:\s*"\K[^"]+' | head -1)"
     warp_v6="$(printf '%s' "$response" | grep -oP '"addresses"\s*:\s*\{[^}]*"v6"\s*:\s*"\K[^"]+' | head -1)"
@@ -8560,7 +8667,7 @@ wireproxy_install_team() {
 
     endpoint="$(wireproxy_select_endpoint_for_network "$endpoint" "$ep_v4" "$ep_v6" "$ep_port")"
 
-    wireproxy_finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint" "team(${org:-unknown})"
+    wireproxy_finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint"
 
     echo ""
     wireproxy_ok "团队 WARP SOCKS 配置完成"
@@ -8570,7 +8677,7 @@ wireproxy_install_team() {
 }
 
 wireproxy_modify_config() {
-    local current_endpoint current_mtu new_ep new_bind new_mtu input escaped_value backup_file auth_label auth_color service_label service_color
+    local current_endpoint current_mtu new_ep new_bind new_mtu input confirm escaped_value backup_file auth_label auth_color service_label service_color
 
     clear
 
@@ -8637,6 +8744,11 @@ wireproxy_modify_config() {
             read -rp "新 SOCKS 监听地址: " new_bind
             if [[ -n "$new_bind" ]]; then
                 wireproxy_is_valid_host_port "$new_bind" || { wireproxy_warn "监听地址格式无效"; return; }
+                if ! wireproxy_is_local_bind "$new_bind" && [[ -z "$WIREPROXY_SOCKS_USER" ]]; then
+                    wireproxy_warn "该地址可能将未认证的 SOCKS 代理暴露到公网"
+                    read -rp "确认继续 [y/N]: " confirm
+                    [[ "$confirm" =~ ^[Yy]$ ]] || { wireproxy_warn "已取消"; return; }
+                fi
                 backup_file="$(wireproxy_make_backup "$WIREPROXY_CONF")"
                 escaped_value="$(wireproxy_escape_sed_replacement "$new_bind")"
                 sed -i "s|^BindAddress = .*|BindAddress = ${escaped_value}|" "$WIREPROXY_CONF"
@@ -8647,7 +8759,10 @@ wireproxy_modify_config() {
         4)
             echo -e "\n  当前认证: ${auth_label}\n"
             backup_file="$(wireproxy_make_backup "$WIREPROXY_CONF")"
-            wireproxy_prompt_socks_settings
+            if ! wireproxy_prompt_socks_settings; then
+                rm -f "$backup_file"
+                return
+            fi
             wireproxy_write_conf
             wireproxy_restart_service_with_backup "$backup_file" "$WIREPROXY_CONF"
             ;;
@@ -8711,7 +8826,7 @@ wireproxy_show_menu() {
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 修改配置   ${RED}4)${NC} 删除服务"
-    echo -e "  ${GREEN}5)${NC} 查看出口   ${RED}0)${NC} 退出脚本"
+    echo -e "  ${GREEN}5)${NC} 查看出口   ${RED}0)${NC} 返回上级"
 }
 
 wireproxy_pause() {
@@ -8748,9 +8863,14 @@ warpstack_warn()  { log_prefixed "$YELLOW" "[WARN]" "$*"; }
 warpstack_err()   { log_prefixed "$RED" "[ERROR]" "$*"; exit 1; }
 
 WARPSTACK_WG_CONF="/etc/wireguard/wg0.conf"
-WARPSTACK_WGCF_BIN="/usr/local/bin/wgcf"
+WARPSTACK_WGCF_REPO="ViRb3/wgcf"
+WARPSTACK_WGCF_MIRROR_URL="https://cdn-wgcf.pages.dev/ViRb3/wgcf"
 WARPSTACK_APT_UPDATED=0
 WARPSTACK_AUTOSTART_STATUS="未设置"
+WARPSTACK_V4_ADDR=false
+WARPSTACK_V6_ADDR=false
+WARPSTACK_V4_READY=false
+WARPSTACK_V6_READY=false
 
 warpstack_check_root() { [[ $EUID -ne 0 ]] && warpstack_err "请使用 root 用户运行此脚本"; }
 
@@ -8887,19 +9007,35 @@ warpstack_detect_arch() {
 }
 
 warpstack_detect_network() {
-    local has_v4=false has_v6=false
+    WARPSTACK_V4_ADDR=false
+    WARPSTACK_V6_ADDR=false
+    WARPSTACK_V4_READY=false
+    WARPSTACK_V6_READY=false
 
-    ip -4 addr show scope global 2>/dev/null | grep -q inet &&
-        curl -4 -s --max-time 2 http://1.1.1.1/cdn-cgi/trace &>/dev/null &&
-        has_v4=true
-    ip -6 addr show scope global 2>/dev/null | grep -q inet6 &&
-        curl -6 -g -s --max-time 2 "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null &&
-        has_v6=true
+    ip -4 addr show scope global 2>/dev/null | grep -q inet && WARPSTACK_V4_ADDR=true
+    ip -6 addr show scope global 2>/dev/null | grep -q inet6 && WARPSTACK_V6_ADDR=true
 
-    if $has_v4 && $has_v6; then WARPSTACK_NET_MODE="dual"
-    elif $has_v6; then WARPSTACK_NET_MODE="v6_only"
-    elif $has_v4; then WARPSTACK_NET_MODE="v4_only"
-    else WARPSTACK_NET_MODE="none"; fi
+    if $WARPSTACK_V4_ADDR; then
+        curl -4 -fsS --connect-timeout 3 --max-time 5 \
+            http://1.1.1.1/cdn-cgi/trace &>/dev/null && WARPSTACK_V4_READY=true
+    fi
+    if $WARPSTACK_V6_ADDR; then
+        curl -6 -g -fsS --connect-timeout 3 --max-time 5 \
+            "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && WARPSTACK_V6_READY=true
+    fi
+
+    if { $WARPSTACK_V4_ADDR && ! $WARPSTACK_V4_READY; } ||
+       { $WARPSTACK_V6_ADDR && ! $WARPSTACK_V6_READY; }; then
+        WARPSTACK_NET_MODE="uncertain"
+    elif $WARPSTACK_V4_READY && $WARPSTACK_V6_READY; then
+        WARPSTACK_NET_MODE="dual"
+    elif $WARPSTACK_V6_READY; then
+        WARPSTACK_NET_MODE="v6_only"
+    elif $WARPSTACK_V4_READY; then
+        WARPSTACK_NET_MODE="v4_only"
+    else
+        WARPSTACK_NET_MODE="none"
+    fi
 }
 
 warpstack_show_network_status() {
@@ -8908,6 +9044,7 @@ warpstack_show_network_status() {
         dual)    echo -e "  网络: ${GREEN}IPv4✓${NC} ${GREEN}IPv6✓${NC}" ;;
         v6_only) echo -e "  网络: ${RED}IPv4✗${NC} ${GREEN}IPv6✓${NC}" ;;
         v4_only) echo -e "  网络: ${GREEN}IPv4✓${NC} ${RED}IPv6✗${NC}" ;;
+        uncertain) echo -e "  网络: ${YELLOW}地址存在，但联网检测异常${NC}" ;;
         none)    echo -e "  网络: ${RED}IPv4✗${NC} ${RED}IPv6✗${NC}" ;;
     esac
     if ip link show wg0 &>/dev/null 2>&1; then
@@ -8930,15 +9067,23 @@ warpstack_check_dependencies() {
         warpstack_info "安装 curl ..."
         warpstack_install_pkg curl || warpstack_err "curl 安装失败"
     fi
+    if ! command -v ip &>/dev/null; then
+        warpstack_info "安装 iproute2 ..."
+        warpstack_install_pkg iproute2 || warpstack_err "iproute2 安装失败"
+    fi
     command -v curl &>/dev/null || warpstack_err "curl 不可用，无法继续"
+    command -v ip &>/dev/null || warpstack_err "ip 不可用，无法继续"
+    command -v sha256sum &>/dev/null || warpstack_err "缺少依赖: sha256sum"
 }
 
 warpstack_prepare_install() {
     local account_type="$1"
     warpstack_check_dependencies
-    warpstack_determine_install_mode || return 1
     warpstack_check_wg0_exists
-    [[ "$account_type" == "free" ]] && warpstack_detect_arch
+    warpstack_determine_install_mode || return 1
+    if [[ "$account_type" == "free" ]]; then
+        warpstack_detect_arch
+    fi
     warpstack_install_wireguard_tools
 }
 
@@ -8948,6 +9093,8 @@ warpstack_determine_install_mode() {
         dual)
             warpstack_warn "已是双栈，无需安装"
             return 1 ;;
+        uncertain)
+            warpstack_err "检测到 IP 地址但联网测试失败，为避免误改路由已停止安装" ;;
         v6_only) WARPSTACK_INSTALL_MODE="add_v4"; warpstack_info "检测到纯 IPv6，将添加 IPv4 出口" ;;
         v4_only) WARPSTACK_INSTALL_MODE="add_v6"; warpstack_info "检测到纯 IPv4，将添加 IPv6 出口" ;;
         none)    warpstack_err "当前服务器无任何网络连接，无法继续" ;;
@@ -8956,16 +9103,22 @@ warpstack_determine_install_mode() {
 }
 
 warpstack_check_wg0_exists() {
-    ip link show wg0 &>/dev/null 2>&1 && warpstack_err "检测到 wg0，请先删除后再安装"
+    ip link show wg0 &>/dev/null 2>&1 && warpstack_err "检测到 wg0 接口，请先处理后再安装"
+    [[ -e "$WARPSTACK_WG_CONF" || -L "$WARPSTACK_WG_CONF" ]] &&
+        warpstack_err "检测到已有 ${WARPSTACK_WG_CONF}，为避免覆盖已停止安装"
+    if command -v systemctl &>/dev/null && systemctl is-enabled --quiet wg-quick@wg0 2>/dev/null; then
+        warpstack_err "检测到 wg-quick@wg0 已启用，请先处理后再安装"
+    fi
 }
 
 warpstack_write_wg_conf() {
-    local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5" mode="$6" acct="$7"
+    local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5" mode="$6"
     mkdir -p /etc/wireguard
 
     if [[ "$mode" == "add_v4" ]]; then
         [[ -n "$v4" ]] || warpstack_err "缺少 WARP IPv4 地址，无法写入配置"
         cat > "$WARPSTACK_WG_CONF" << EOF
+# Managed by Zero.sh WarpStack
 [Interface]
 PrivateKey = ${priv}
 Address = ${v4}/32
@@ -8980,6 +9133,7 @@ EOF
     elif [[ "$mode" == "add_v6" ]]; then
         [[ -n "$v6" ]] || warpstack_err "缺少 WARP IPv6 地址，无法写入配置"
         cat > "$WARPSTACK_WG_CONF" << EOF
+# Managed by Zero.sh WarpStack
 [Interface]
 PrivateKey = ${priv}
 Address = ${v6}/128
@@ -8996,10 +9150,35 @@ EOF
     warpstack_ok "wg0.conf 已写入"
 }
 
+warpstack_verify_tunnel() {
+    local mode="$1" family trace attempt
+
+    [[ "$mode" == "add_v4" ]] && family="-4" || family="-6"
+    for attempt in 1 2 3; do
+        trace="$(warpstack_fetch_trace "$family" || true)"
+        warpstack_trace_is_warp "$trace" && return 0
+        sleep 1
+    done
+    return 1
+}
+
+warpstack_cleanup_failed_install() {
+    warpstack_down_wg || true
+    rm -f "$WARPSTACK_WG_CONF"
+}
+
 warpstack_start_and_enable() {
+    local mode="$1"
     warpstack_info "启动 wg0 隧道 ..."
-    wg-quick up wg0 || warpstack_err "wg0 启动失败，请检查配置"
-    warpstack_ok "wg0 隧道已启动"
+    if ! wg-quick up wg0; then
+        warpstack_cleanup_failed_install
+        warpstack_err "wg0 启动失败，本次配置已撤销"
+    fi
+    if ! warpstack_verify_tunnel "$mode"; then
+        warpstack_cleanup_failed_install
+        warpstack_err "未检测到可用的 WARP 出口，本次配置已撤销"
+    fi
+    warpstack_ok "wg0 隧道与 WARP 出口验证通过"
     if command -v systemctl &>/dev/null; then
         if systemctl enable wg-quick@wg0 &>/dev/null; then
             WARPSTACK_AUTOSTART_STATUS="已启用"
@@ -9036,10 +9215,10 @@ warpstack_show_result() {
 }
 
 warpstack_finish_install() {
-    local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5" acct="$6"
+    local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5"
     warpstack_info "Endpoint: $ep"
-    warpstack_write_wg_conf "$priv" "$v4" "$v6" "$pub" "$ep" "$WARPSTACK_INSTALL_MODE" "$acct"
-    warpstack_start_and_enable
+    warpstack_write_wg_conf "$priv" "$v4" "$v6" "$pub" "$ep" "$WARPSTACK_INSTALL_MODE"
+    warpstack_start_and_enable "$WARPSTACK_INSTALL_MODE"
     warpstack_show_result "$WARPSTACK_INSTALL_MODE"
 }
 
@@ -9097,71 +9276,47 @@ warpstack_trace_is_warp() {
 warpstack_install_free() {
     warpstack_prepare_install free || return 1
 
-    local wgcf_downloaded=false
-    if [[ ! -x "$WARPSTACK_WGCF_BIN" ]]; then
-        warpstack_info "获取 wgcf 最新版本 ..."
-        local wgcf_ver wgcf_host
-        wgcf_host="https://github.com/ViRb3/wgcf"
-        if [[ "$WARPSTACK_NET_MODE" == "v6_only" ]]; then
-            wgcf_host="https://cdn-wgcf.pages.dev/ViRb3/wgcf"
-            warpstack_info "检测到纯 IPv6，wgcf 下载改用镜像: $wgcf_host"
-            wgcf_ver=$(curl -fsSL "${wgcf_host}/releases/latest" | grep -oE '/releases/tag/v[0-9.]+' | sed 's#.*/##' | head -n1)
-        else
-            wgcf_ver=$(curl -fsSI "${wgcf_host}/releases/latest" | sed -nE 's/^[Ll]ocation:.*(v[0-9.]+).*/\1/p' | head -n1)
-        fi
-        [[ -z "$wgcf_ver" ]] && warpstack_err "无法获取 wgcf 最新版本号"
-        local url="${wgcf_host}/releases/download/${wgcf_ver}/wgcf_${wgcf_ver#v}_linux_${WARPSTACK_WGCF_ARCH}"
-        warpstack_info "下载 wgcf ${wgcf_ver} ..."
-        curl -fsSL -o "$WARPSTACK_WGCF_BIN" "$url" || warpstack_err "wgcf 下载失败"
-        chmod +x "$WARPSTACK_WGCF_BIN"; warpstack_ok "wgcf ${wgcf_ver} 已下载"
-        wgcf_downloaded=true
-    fi
+    local tmpdir wgcf_bin wgcf_ver asset priv pub addr ep warp_v4 warp_v6
+    tmpdir="$(mktemp -d)" || warpstack_err "创建临时目录失败"
+    wgcf_bin="${tmpdir}/wgcf"
 
-    local tmpdir; tmpdir=$(mktemp -d)
-    [[ -z "$tmpdir" ]] && warpstack_err "创建临时目录失败"
-    cd "$tmpdir" || {
-        rm -rf "$tmpdir"
-        if $wgcf_downloaded; then
-            rm -f "$WARPSTACK_WGCF_BIN"
-        fi
-        warpstack_err "进入临时目录失败: $tmpdir"
-    }
+    warpstack_info "获取 wgcf 最新版本 ..."
+    wgcf_ver="$(warp_release_latest_tag "$WARPSTACK_WGCF_REPO" "$WARPSTACK_WGCF_MIRROR_URL" "$WARPSTACK_NET_MODE" || true)"
+    [[ -n "$wgcf_ver" ]] || { rm -rf "$tmpdir"; warpstack_err "无法获取 wgcf 最新版本号"; }
+    asset="wgcf_${wgcf_ver#v}_linux_${WARPSTACK_WGCF_ARCH}"
+    warpstack_info "下载 wgcf ${wgcf_ver} ..."
+    warp_download_verified_asset "$WARPSTACK_WGCF_REPO" "$WARPSTACK_WGCF_MIRROR_URL" "$wgcf_ver" "$asset" \
+        "$wgcf_bin" "$WARPSTACK_NET_MODE" || { rm -rf "$tmpdir"; warpstack_err "wgcf 下载或 SHA256 校验失败"; }
+    chmod +x "$wgcf_bin" || { rm -rf "$tmpdir"; warpstack_err "无法设置 wgcf 执行权限"; }
+    warpstack_ok "wgcf ${wgcf_ver} SHA256 校验通过"
+
+    cd "$tmpdir" || { rm -rf "$tmpdir"; warpstack_err "进入临时目录失败: $tmpdir"; }
 
     warpstack_info "注册 WARP 免费账户 ..."
-    yes | "$WARPSTACK_WGCF_BIN" register || {
+    yes | "$wgcf_bin" register || {
         cd / || true
         rm -rf "$tmpdir"
-        if $wgcf_downloaded; then
-            rm -f "$WARPSTACK_WGCF_BIN"
-        fi
         warpstack_err "WARP 注册失败"
     }
     warpstack_ok "注册成功"
 
     warpstack_info "生成 WireGuard 配置 ..."
-    "$WARPSTACK_WGCF_BIN" generate || {
+    "$wgcf_bin" generate || {
         cd / || true
         rm -rf "$tmpdir"
-        if $wgcf_downloaded; then
-            rm -f "$WARPSTACK_WGCF_BIN"
-        fi
         warpstack_err "配置生成失败"
     }
 
-    local priv pub addr ep warp_v4 warp_v6
-    priv=$(grep 'PrivateKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    pub=$(grep 'PublicKey' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    addr=$(grep 'Address' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    ep=$(grep 'Endpoint' wgcf-profile.conf | awk -F' = ' '{print $2}')
-    warp_v4=$(echo "$addr" | grep -oP '\d+\.\d+\.\d+\.\d+')
-    warp_v6=$(echo "$addr" | grep -oP '2606:[0-9a-f:]+')
+    priv=$(awk -F' = ' '/^PrivateKey = /{print $2}' wgcf-profile.conf)
+    pub=$(awk -F' = ' '/^PublicKey = /{print $2}' wgcf-profile.conf)
+    addr=$(awk -F' = ' '/^Address = /{print $2}' wgcf-profile.conf)
+    ep=$(awk -F' = ' '/^Endpoint = /{print $2}' wgcf-profile.conf)
+    warp_v4=$(printf '%s\n' "$addr" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+    warp_v6=$(printf '%s\n' "$addr" | grep -oE '2606:[0-9a-f:]+' | head -n1)
 
     [[ -n "$priv" && -n "$pub" && -n "$warp_v4" && -n "$warp_v6" && -n "$ep" ]] || {
         cd / || true
         rm -rf "$tmpdir"
-        if $wgcf_downloaded; then
-            rm -f "$WARPSTACK_WGCF_BIN"
-        fi
         warpstack_err "无法从 wgcf-profile.conf 提取 WARP 配置"
     }
 
@@ -9169,19 +9324,14 @@ warpstack_install_free() {
 
     cd / || true
     rm -rf "$tmpdir"
-    if $wgcf_downloaded; then
-        rm -f "$WARPSTACK_WGCF_BIN"
-        warpstack_ok "wgcf 与临时文件已清理"
-    else
-        warpstack_ok "临时文件已清理"
-    fi
+    warpstack_ok "临时文件已清理"
 
     ep="$(warpstack_select_endpoint_for_network "$ep" "" "" "")"
-    warpstack_finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$ep" "free"
+    warpstack_finish_install "$priv" "$warp_v4" "$warp_v6" "$pub" "$ep"
 }
 
 warpstack_install_team() {
-    local jwt_token priv pub response warp_v4 warp_v6 peer_pub org ep_port api_ports ep_host ep_v4 ep_v6 endpoint response_brief
+    local jwt_token priv pub response api_result http_code warp_v4 warp_v6 peer_pub org ep_port api_ports ep_host ep_v4 ep_v6 endpoint response_brief
 
     warpstack_prepare_install team || return 1
     echo -e "${YELLOW}获取 Token：${NC}"
@@ -9189,6 +9339,7 @@ warpstack_install_team() {
     echo -e "  登陆后按 F12 → Console 输入:"
     echo -e "  ${CYAN}console.log(document.querySelector(\"meta[http-equiv='refresh']\").content.split(\"=\")[2])${NC}"
     echo -e "  ${YELLOW}⚠ Token 有效期 60 秒，复制后立即粘贴${NC}"
+    warpstack_warn "团队账户使用兼容注册接口，可能因 Cloudflare 调整而失效"
     read -rsp "请粘贴 JWT Token（直接回车取消）: " jwt_token
     printf '\n'
     [[ -z "$jwt_token" ]] && { warpstack_warn "已取消"; return; }
@@ -9197,7 +9348,7 @@ warpstack_install_team() {
     priv=$(wg genkey); pub=$(echo "$priv" | wg pubkey)
 
     warpstack_info "向 Cloudflare API 注册设备 ..."
-    response=$(curl -s -X POST "https://api.cloudflareclient.com/v0a2158/reg" \
+    api_result=$(curl -sS --connect-timeout 5 --max-time 30 -X POST "https://api.cloudflareclient.com/v0a2158/reg" \
         -H "Content-Type: application/json" \
         -H "Cf-Access-Jwt-Assertion: ${jwt_token}" \
         -d "{
@@ -9207,15 +9358,18 @@ warpstack_install_team() {
             \"tos\": \"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",
             \"model\": \"Linux\",
             \"serial_number\": \"$(cat /proc/sys/kernel/random/uuid)\"
-        }" 2>/dev/null)
+        }" -w $'\n%{http_code}' 2>/dev/null || true)
 
-    [[ -z "$response" ]] && warpstack_err "Cloudflare API 无响应，请检查网络后重试"
-    echo "$response" | grep -q '"account"' || {
-        response_brief=$(echo "$response" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-240)
-        warpstack_warn "API 返回摘要: ${response_brief}"
-        warpstack_err "注册失败，请检查 Token 是否过期"
+    http_code="${api_result##*$'\n'}"
+    response="${api_result%$'\n'*}"
+    [[ "$http_code" =~ ^2[0-9][0-9]$ && -n "$response" ]] || {
+        response_brief=$(printf '%s' "$response" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-240)
+        [[ -n "$response_brief" ]] && warpstack_warn "API 返回: ${response_brief}"
+        warpstack_err "团队设备注册失败（HTTP ${http_code:-000}），请检查 Token 与注册权限"
     }
+    printf '%s' "$response" | grep -q '"account"' || warpstack_err "API 响应缺少账户信息，团队设备注册失败"
     warpstack_ok "团队设备注册成功"
+    warpstack_warn "该设备已登记到 Cloudflare，删除本机配置时需自行清理后台记录"
 
     warp_v4=$(echo "$response" | grep -oP '"addresses"\s*:\s*\{[^}]*"v4"\s*:\s*"\K[^"]+' | head -1)
     warp_v6=$(echo "$response" | grep -oP '"addresses"\s*:\s*\{[^}]*"v6"\s*:\s*"\K[^"]+' | head -1)
@@ -9224,7 +9378,8 @@ warpstack_install_team() {
     peer_pub=$(echo "$response" | grep -oP '"public_key"\s*:\s*"\K[^"]+' | tail -1)
 
     [[ -z "$warp_v4" || -z "$warp_v6" || -z "$peer_pub" ]] && {
-        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+        response_brief=$(printf '%s' "$response" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-240)
+        [[ -n "$response_brief" ]] && warpstack_warn "API 返回: ${response_brief}"
         warpstack_err "无法从 API 响应中提取配置"
     }
 
@@ -9253,7 +9408,73 @@ warpstack_install_team() {
             warpstack_err "当前网络模式无法确定 Endpoint"
             ;;
     esac
-    warpstack_finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint" "team($org)"
+    warpstack_finish_install "$priv" "$warp_v4" "$warp_v6" "$peer_pub" "$endpoint"
+}
+
+warpstack_config_mode() {
+    local allowed
+    [[ -f "$WARPSTACK_WG_CONF" ]] || return 1
+    allowed="$(warpstack_conf_value "AllowedIPs")"
+    if [[ "$allowed" == *"0.0.0.0/0"* ]]; then
+        printf 'add_v4\n'
+    elif [[ "$allowed" == *"::/0"* ]]; then
+        printf 'add_v6\n'
+    else
+        return 1
+    fi
+}
+
+warpstack_make_backup() {
+    local backup
+    backup="$(mktemp)" || warpstack_err "创建配置备份失败"
+    cp "$WARPSTACK_WG_CONF" "$backup" || {
+        rm -f "$backup"
+        warpstack_err "备份配置失败"
+    }
+    printf '%s\n' "$backup"
+}
+
+warpstack_try_restart_wg() {
+    local mode
+    mode="$(warpstack_config_mode)" || return 1
+
+    if ip link show wg0 &>/dev/null 2>&1; then
+        warpstack_down_wg || return 1
+    fi
+    if ! wg-quick up wg0; then
+        warpstack_down_wg || true
+        return 1
+    fi
+    if ! warpstack_verify_tunnel "$mode"; then
+        warpstack_down_wg || true
+        return 1
+    fi
+    return 0
+}
+
+warpstack_restart_wg_with_backup() {
+    local backup="$1"
+
+    warpstack_info "应用配置并验证 WARP 出口 ..."
+    if warpstack_try_restart_wg; then
+        rm -f "$backup"
+        warpstack_ok "配置已生效，WARP 出口正常"
+        return 0
+    fi
+
+    cp "$backup" "$WARPSTACK_WG_CONF" || {
+        rm -f "$backup"
+        warpstack_warn "新配置启动失败，且无法恢复原配置"
+        return 1
+    }
+    rm -f "$backup"
+
+    if warpstack_try_restart_wg; then
+        warpstack_warn "新配置启动失败，已回滚到上一份可用配置"
+    else
+        warpstack_warn "新配置启动失败，回滚后隧道仍未启动"
+    fi
+    return 1
 }
 
 warpstack_modify_config() {
@@ -9261,7 +9482,7 @@ warpstack_modify_config() {
     warpstack_menu_divider
     [[ ! -f "$WARPSTACK_WG_CONF" ]] && { warpstack_warn "未找到 ${WARPSTACK_WG_CONF}，请先安装"; return; }
 
-    local current_ep current_mtu
+    local current_ep current_mtu sub new_ep escaped_ep backup_file mtu yn
     current_ep=$(warpstack_conf_value "Endpoint")
     current_mtu=$(warpstack_conf_value "MTU")
 
@@ -9281,11 +9502,10 @@ warpstack_modify_config() {
                 if ! warpstack_is_valid_endpoint "$new_ep"; then
                     warpstack_warn "Endpoint 格式无效，请使用 域名/IP:端口 或 [IPv6]:端口"
                 else
-                    local escaped_ep
+                    backup_file="$(warpstack_make_backup)"
                     escaped_ep=$(warpstack_escape_sed_replacement "$new_ep")
                     sed -i "s|^Endpoint = .*|Endpoint = ${escaped_ep}|" "$WARPSTACK_WG_CONF"
-                    warpstack_ok "已更新"
-                    warpstack_restart_wg
+                    warpstack_restart_wg_with_backup "$backup_file" || true
                 fi
             fi
             ;;
@@ -9293,15 +9513,24 @@ warpstack_modify_config() {
             echo -e "  ${CYAN}当前 MTU:${NC} ${current_mtu}  建议: 1280 或 1420"
             read -rp "新 MTU [1280-1500]: " mtu
             if [[ "$mtu" =~ ^[0-9]+$ ]] && [[ "$mtu" -ge 1280 ]] && [[ "$mtu" -le 1500 ]]; then
-                sed -i "s|^MTU = .*|MTU = ${mtu}|" "$WARPSTACK_WG_CONF"; warpstack_ok "已更新"; warpstack_restart_wg
+                backup_file="$(warpstack_make_backup)"
+                sed -i "s|^MTU = .*|MTU = ${mtu}|" "$WARPSTACK_WG_CONF"
+                warpstack_restart_wg_with_backup "$backup_file" || true
             else
                 warpstack_warn "无效的 MTU 值"
             fi
             ;;
         3)
+            backup_file="$(warpstack_make_backup)"
             ${EDITOR:-nano} "$WARPSTACK_WG_CONF"
-            read -rp "重启 wg0？[y/N]: " yn
-            [[ "$yn" =~ ^[Yy]$ ]] && warpstack_restart_wg
+            read -rp "保存并重启验证？[Y/n]: " yn
+            if [[ "$yn" =~ ^[Nn]$ ]]; then
+                cp "$backup_file" "$WARPSTACK_WG_CONF"
+                rm -f "$backup_file"
+                warpstack_warn "已取消，配置未更改"
+            else
+                warpstack_restart_wg_with_backup "$backup_file" || true
+            fi
             ;;
         0) return 1 ;;
         *) warpstack_warn "无效选择" ;;
@@ -9324,13 +9553,9 @@ warpstack_down_wg() {
 }
 
 warpstack_restart_wg() {
-    if ip link show wg0 &>/dev/null 2>&1; then
-        warpstack_info "重启 wg0 ..."
-        warpstack_down_wg || warpstack_err "wg0 停止失败"
-        wg-quick up wg0 || warpstack_err "wg0 重启失败"; warpstack_ok "wg0 已重启"
-    else
-        warpstack_info "启动 wg0 ..."; wg-quick up wg0 || warpstack_err "wg0 启动失败"; warpstack_ok "wg0 已启动"
-    fi
+    warpstack_info "启动 wg0 并验证 WARP 出口 ..."
+    warpstack_try_restart_wg || warpstack_err "wg0 启动或 WARP 出口验证失败，隧道已停止"
+    warpstack_ok "wg0 已启动，WARP 出口正常"
 }
 
 warpstack_manage_service() {
@@ -9408,10 +9633,17 @@ warpstack_show_ip() {
 }
 
 warpstack_uninstall() {
+    local yn
     clear
     warpstack_info "删除 WARP 服务"
     echo -e "  ${RED}将删除 wg0 与配置文件${NC}"
-    read -rp "确认删除 [y/N]: " yn
+    if { [[ -f "$WARPSTACK_WG_CONF" ]] || ip link show wg0 &>/dev/null 2>&1; } &&
+       ! grep -q '^# Managed by Zero.sh WarpStack$' "$WARPSTACK_WG_CONF" 2>/dev/null; then
+        warpstack_warn "当前 wg0 没有 Zero.sh 标记，可能属于其他 WireGuard 服务"
+        read -rp "仍要删除未标记的 wg0 [y/N]: " yn
+    else
+        read -rp "确认删除 [y/N]: " yn
+    fi
     [[ ! "$yn" =~ ^[Yy]$ ]] && return 1
 
     if ip link show wg0 &>/dev/null 2>&1; then
@@ -9437,7 +9669,7 @@ warpstack_show_menu() {
     echo -e "  ${BOLD}操作:${NC}"
     echo -e "  ${GREEN}1)${NC} 免费账户   ${CYAN}2)${NC} 团队账户"
     echo -e "  ${YELLOW}3)${NC} 管理服务   ${RED}4)${NC} 删除服务"
-    echo -e "  ${GREEN}5)${NC} 查看出口   ${RED}0)${NC} 退出脚本"
+    echo -e "  ${GREEN}5)${NC} 查看出口   ${RED}0)${NC} 返回上级"
 }
 
 warpstack_pause() {
