@@ -1592,7 +1592,7 @@ bbr_check_and_prepare_swap() {
     echo -e "文件Swap: ${GREEN}${managed_swap}MB${PLAIN} -> ${GREEN}${target_swapfile}MB${PLAIN}（仅管理 ${swapfile_path}）"
 
     if bbr_confirm "是否现在配置虚拟内存？(Y/N): "; then
-        set_swap "$target_swapfile" 0 || return 1
+        set_swap "$target_swapfile" || return 1
     else
         echo -e "${YELLOW}已跳过虚拟内存配置${PLAIN}"
     fi
@@ -3162,34 +3162,9 @@ reboot_vps() {
     reboot
 }
 
-swap_pause_if_needed() {
-    local show_pause="${1:-1}"
-    (( show_pause )) && press_any_key_to_continue
-}
-
 swap_is_valid_size_mb() {
     local value="$1"
     [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 128 ))
-}
-
-swap_is_valid_swappiness() {
-    local value="$1"
-    [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 0 && value <= 100 ))
-}
-
-swap_has_managed_state() {
-    local temp_swap_path="${swapfile_path}.zero.tmp"
-    local backup_swap_path="${swapfile_path}.zero.bak"
-
-    grep -q "$swapfile_path" /proc/swaps 2>/dev/null \
-        || grep -q "$temp_swap_path" /proc/swaps 2>/dev/null \
-        || [[ -f "$swapfile_path" ]] \
-        || [[ -f "$temp_swap_path" ]] \
-        || [[ -f "$backup_swap_path" ]]
-}
-
-swap_get_total_ram_mb() {
-    free -m | awk '/Mem:/ {print $2}'
 }
 
 swap_recommended_for_ram_mb() {
@@ -3230,27 +3205,6 @@ get_managed_swap_mb() {
     else
         echo 0
     fi
-}
-
-swap_get_current_swappiness() {
-    cat /proc/sys/vm/swappiness 2>/dev/null || echo "未知"
-}
-
-swap_read_menu_status() {
-    local total_ram current_swap managed_swap recommend_swap current_swappiness
-
-    total_ram=$(swap_get_total_ram_mb)
-    current_swap=$(get_current_swap_mb)
-    managed_swap=$(get_managed_swap_mb)
-    recommend_swap=$(swap_recommended_for_ram_mb "$total_ram")
-    current_swappiness=$(swap_get_current_swappiness)
-
-    printf '%s\n' \
-        "$current_swap" \
-        "$managed_swap" \
-        "$total_ram" \
-        "$recommend_swap" \
-        "$current_swappiness"
 }
 
 remove_swap_fstab_entries() {
@@ -3301,81 +3255,8 @@ create_swap_file() {
     mkswap "$path" >/dev/null || return 1
 }
 
-swap_show_menu() {
-    local current_swap="$1"
-    local managed_swap="$2"
-    local total_ram="$3"
-    local current_swappiness="$4"
-
-    clear
-    echo -e "${BLUE}========= SWAP =========${PLAIN}"
-    echo -e "${YELLOW}内存 ${total_ram}MB | 总Swap ${current_swap}MB${PLAIN}"
-    echo -e "${YELLOW}文件Swap ${managed_swap}MB | Swappiness ${current_swappiness}${PLAIN}"
-    echo -e "${BLUE}========================${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN}推荐大小    ${GREEN}2.${PLAIN}自定义"
-    echo -e "${GREEN}3.${PLAIN}Swappiness  ${RED}4.${PLAIN}关闭Swap"
-    echo -e "${YELLOW}0.${PLAIN}返回菜单"
-    echo -e "${BLUE}========================${PLAIN}"
-}
-
-handle_swap_menu_choice() {
-    local opt="$1"
-    local recommend_swap="$2"
-    local custom=""
-
-    case "$opt" in
-        1)
-            set_swap "$recommend_swap"
-            ;;
-        2)
-            read -rp "请输入 Swap 大小 (单位 MB,建议 >=128): " custom
-            custom=$(trim_input "$custom")
-            if swap_is_valid_size_mb "$custom"; then
-                set_swap "$custom"
-            else
-                echo -e "${RED}输入无效！${PLAIN}"
-                sleep 2
-            fi
-            ;;
-        3)
-            set_swappiness
-            ;;
-        4)
-            delete_swap
-            ;;
-        0)
-            return 1
-            ;;
-        *)
-            show_invalid_option "无效选项" "1"
-            ;;
-    esac
-
-    return 0
-}
-
-set_swap_menu() {
-    local current_swap managed_swap total_ram recommend_swap
-    local current_swappiness opt
-    local -a swap_status
-
-    while true; do
-        mapfile -t swap_status < <(swap_read_menu_status)
-        current_swap="${swap_status[0]}"
-        managed_swap="${swap_status[1]}"
-        total_ram="${swap_status[2]}"
-        recommend_swap="${swap_status[3]}"
-        current_swappiness="${swap_status[4]}"
-
-        swap_show_menu "$current_swap" "$managed_swap" "$total_ram" "$current_swappiness"
-        opt=$(read_menu_choice "请输入选项 [0-4]: ")
-        handle_swap_menu_choice "$opt" "$recommend_swap" || return
-    done
-}
-
 set_swap() {
     local size_mb="$1"
-    local show_pause="${2:-1}"
     local avail_kb avail_mb existing_swap_mb root_fstype
     local temp_swap_path="${swapfile_path}.zero.tmp"
     local backup_swap_path="${swapfile_path}.zero.bak"
@@ -3384,7 +3265,6 @@ set_swap() {
     echo -e "${YELLOW}正在检查环境...${PLAIN}"
     if ! swap_is_valid_size_mb "$size_mb"; then
         echo -e "${RED}无效的 Swap 大小${PLAIN}"
-        swap_pause_if_needed "$show_pause"
         return 1
     fi
 
@@ -3394,7 +3274,6 @@ set_swap() {
     
     if (( avail_mb < size_mb + 500 )); then
         echo -e "${RED}磁盘空间不足!当前可用: ${avail_mb}MB, 需要: ${size_mb}MB (+预留500MB)${PLAIN}"
-        swap_pause_if_needed "$show_pause"
         return 1
     fi
 
@@ -3412,7 +3291,6 @@ set_swap() {
     if ! create_swap_file "$temp_swap_path" "$size_mb" "$root_fstype"; then
         echo -e "${RED}Swap 文件创建失败${PLAIN}"
         rm -f "$temp_swap_path"
-        swap_pause_if_needed "$show_pause"
         return 1
     fi
 
@@ -3421,7 +3299,6 @@ set_swap() {
         if ! swapoff "$swapfile_path"; then
             echo -e "${RED}旧 Swap 卸载失败,已保留原配置${PLAIN}"
             rm -f "$temp_swap_path"
-            swap_pause_if_needed "$show_pause"
             return 1
         fi
     fi
@@ -3431,7 +3308,6 @@ set_swap() {
             echo -e "${RED}旧 Swap 备份失败,已保留原配置${PLAIN}"
             (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
             rm -f "$temp_swap_path"
-            swap_pause_if_needed "$show_pause"
             return 1
         fi
     fi
@@ -3443,7 +3319,6 @@ set_swap() {
             mv "$backup_swap_path" "$swapfile_path" 2>/dev/null || true
             (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
         fi
-        swap_pause_if_needed "$show_pause"
         return 1
     fi
 
@@ -3454,7 +3329,6 @@ set_swap() {
             mv "$backup_swap_path" "$swapfile_path" 2>/dev/null || true
             (( old_active )) && swapon "$swapfile_path" >/dev/null 2>&1 || true
         fi
-        swap_pause_if_needed "$show_pause"
         return 1
     fi
 
@@ -3467,56 +3341,7 @@ set_swap() {
 
     echo -e "${GREEN}✓ Swap 设置成功!${PLAIN}"
     free -h
-    swap_pause_if_needed "$show_pause"
     return 0
-}
-
-delete_swap() {
-    local temp_swap_path="${swapfile_path}.zero.tmp"
-    local backup_swap_path="${swapfile_path}.zero.bak"
-
-    if ! swap_has_managed_state; then
-        echo -e "${YELLOW}当前没有 Swap 文件,无需操作${PLAIN}"
-        press_any_key_to_continue
-        return 0
-    fi
-
-    echo -e "${YELLOW}正在删除 Swap...${PLAIN}"
-    swapoff "$swapfile_path" 2>/dev/null || true
-    swapoff "$temp_swap_path" 2>/dev/null || true
-    rm -f "$swapfile_path" "$temp_swap_path" "$backup_swap_path"
-    remove_swap_fstab_entries "$swapfile_path" "$temp_swap_path" "$backup_swap_path"
-    echo -e "${GREEN}✓ Swap 已删除并关闭${PLAIN}"
-    free -h
-    press_any_key_to_continue
-}
-
-set_swappiness() {
-    local current_val
-    current_val=$(swap_get_current_swappiness)
-    echo -e "当前 Swappiness: ${GREEN}${current_val}${PLAIN}"
-    echo -e "数值范围 0-100.数值越低,越倾向于使用物理内存;数值越高,越倾向于使用 Swap。"
-  
-    read -rp "请输入新的 Swappiness 值 (0-100): " new_val
-    new_val=$(trim_input "$new_val")
-    if swap_is_valid_swappiness "$new_val"; then
-        if ! sysctl vm.swappiness="$new_val"; then
-            echo -e "${RED}Swappiness 应用失败${PLAIN}"
-            press_any_key_to_continue
-            return 1
-        fi
-        
-        if grep -q "^vm.swappiness" /etc/sysctl.conf; then
-            sed -i "s/^vm.swappiness.*/vm.swappiness = $new_val/" /etc/sysctl.conf || echo -e "${YELLOW}写入 /etc/sysctl.conf 失败,重启后可能失效${PLAIN}"
-        else
-            echo "vm.swappiness = $new_val" | tee -a /etc/sysctl.conf >/dev/null || echo -e "${YELLOW}写入 /etc/sysctl.conf 失败,重启后可能失效${PLAIN}"
-        fi
-        
-        echo -e "${GREEN}✓ 设置成功！${PLAIN}"
-    else
-        echo -e "${RED}输入无效${PLAIN}"
-    fi
-    press_any_key_to_continue
 }
 
 ACME_HOME="$ROOT_HOME/.acme.sh"
@@ -10954,13 +10779,12 @@ show_main_menu() {
     echo -e "${GREEN}  07.${PLAIN}配置DNS"
     echo -e "${GREEN}  08.${PLAIN}配置SSH"
     echo -e "${GREEN}  09.${PLAIN}重启VPS"
-    echo -e "${GREEN}  10.${PLAIN}配置SWAP"
-    echo -e "${GREEN}  11.${PLAIN}配置ACME"
-    echo -e "${GREEN}  12.${PLAIN}配置Mihomo"
-    echo -e "${GREEN}  13.${PLAIN}配置SingBox"
-    echo -e "${GREEN}  14.${PLAIN}配置FireWall"
-    echo -e "${GREEN}  15.${PLAIN}配置WireProxy"
-    echo -e "${GREEN}  16.${PLAIN}配置WarpStack"
+    echo -e "${GREEN}  10.${PLAIN}配置ACME"
+    echo -e "${GREEN}  11.${PLAIN}配置Mihomo"
+    echo -e "${GREEN}  12.${PLAIN}配置SingBox"
+    echo -e "${GREEN}  13.${PLAIN}配置FireWall"
+    echo -e "${GREEN}  14.${PLAIN}配置WireProxy"
+    echo -e "${GREEN}  15.${PLAIN}配置WarpStack"
     echo -e "${GREEN}   0.${PLAIN}退出ByeBye"
 }
 
@@ -10975,13 +10799,12 @@ handle_main_menu_choice() {
         7)  dns_fix ;;
         8)  ssh_config_menu ;;
         9)  reboot_system ;;
-        10) set_swap_menu ;;
-        11) acme_menu ;;
-        12) configure_mihomo ;;
-        13) configure_singbox ;;
-        14) configure_firewall ;;
-        15) configure_wireproxy ;;
-        16) configure_warpstack ;;
+        10) acme_menu ;;
+        11) configure_mihomo ;;
+        12) configure_singbox ;;
+        13) configure_firewall ;;
+        14) configure_wireproxy ;;
+        15) configure_warpstack ;;
         0)
             clear
             echo -e "${BLUE}「命运石之扉の选择,El Psy Kongroo」${PLAIN}"
@@ -11002,7 +10825,7 @@ main_menu() {
 
     while true; do
         show_main_menu
-        choice=$(read_menu_choice "✦ Choice [0-16] ✦ : ")
+        choice=$(read_menu_choice "✦ Choice [0-15] ✦ : ")
         handle_main_menu_choice "$choice" || break
     done
 }
