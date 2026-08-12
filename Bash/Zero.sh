@@ -8831,6 +8831,10 @@ warpstack_detect_arch() {
     esac
 }
 
+warpstack_probe_network_family() {
+    warpstack_fetch_trace "$1" 3 6 >/dev/null
+}
+
 warpstack_detect_network() {
     WARPSTACK_V4_ADDR=false
     WARPSTACK_V6_ADDR=false
@@ -8840,14 +8844,8 @@ warpstack_detect_network() {
     ip -4 addr show scope global 2>/dev/null | grep -q inet && WARPSTACK_V4_ADDR=true
     ip -6 addr show scope global 2>/dev/null | grep -q inet6 && WARPSTACK_V6_ADDR=true
 
-    if $WARPSTACK_V4_ADDR; then
-        curl -4 -fsS --connect-timeout 3 --max-time 5 \
-            http://1.1.1.1/cdn-cgi/trace &>/dev/null && WARPSTACK_V4_READY=true
-    fi
-    if $WARPSTACK_V6_ADDR; then
-        curl -6 -g -fsS --connect-timeout 3 --max-time 5 \
-            "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && WARPSTACK_V6_READY=true
-    fi
+    $WARPSTACK_V4_ADDR && warpstack_probe_network_family -4 && WARPSTACK_V4_READY=true
+    $WARPSTACK_V6_ADDR && warpstack_probe_network_family -6 && WARPSTACK_V6_READY=true
 
     # 私网地址也属于 scope global；网络模式应优先依据已验证的公网连通性。
     if $WARPSTACK_V4_READY && $WARPSTACK_V6_READY; then
@@ -8864,15 +8862,28 @@ warpstack_detect_network() {
 }
 
 warpstack_show_network_status() {
+    local warp_running=false config_mode=""
     warpstack_detect_network
+    if ip link show wg0 &>/dev/null 2>&1; then
+        warp_running=true
+        config_mode="$(warpstack_config_mode 2>/dev/null || true)"
+    fi
     case "$WARPSTACK_NET_MODE" in
-        dual)    echo -e "  网络: ${GREEN}IPv4✓${NC} ${GREEN}IPv6✓${NC}" ;;
+        dual)
+            if $warp_running && [[ "$config_mode" == "add_v4" ]]; then
+                echo -e "  网络: ${GREEN}IPv4✓(WARP)${NC} ${GREEN}IPv6✓(原生)${NC}"
+            elif $warp_running && [[ "$config_mode" == "add_v6" ]]; then
+                echo -e "  网络: ${GREEN}IPv4✓(原生)${NC} ${GREEN}IPv6✓(WARP)${NC}"
+            else
+                echo -e "  网络: ${GREEN}IPv4✓${NC} ${GREEN}IPv6✓${NC}"
+            fi
+            ;;
         v6_only) echo -e "  网络: ${RED}IPv4✗${NC} ${GREEN}IPv6✓${NC}" ;;
         v4_only) echo -e "  网络: ${GREEN}IPv4✓${NC} ${RED}IPv6✗${NC}" ;;
         uncertain) echo -e "  网络: ${YELLOW}地址存在，但联网检测异常${NC}" ;;
         none)    echo -e "  网络: ${RED}IPv4✗${NC} ${RED}IPv6✗${NC}" ;;
     esac
-    if ip link show wg0 &>/dev/null 2>&1; then
+    if $warp_running; then
         echo -e "  WARP: ${GREEN}运行中${NC}"
     else
         echo -e "  WARP: ${YELLOW}未运行${NC}"
@@ -8938,53 +8949,65 @@ warpstack_check_wg0_exists() {
 
 warpstack_write_wg_conf() {
     local priv="$1" v4="$2" v6="$3" pub="$4" ep="$5" mode="$6"
-    mkdir -p /etc/wireguard
+    local address allowed_ips conf_dir
 
-    if [[ "$mode" == "add_v4" ]]; then
-        [[ -n "$v4" ]] || warpstack_err "缺少 WARP IPv4 地址，无法写入配置"
-        cat > "$WARPSTACK_WG_CONF" << EOF
+    case "$mode" in
+        add_v4)
+            [[ -n "$v4" ]] || warpstack_err "缺少 WARP IPv4 地址，无法写入配置"
+            address="${v4}/32"
+            allowed_ips="0.0.0.0/0"
+            ;;
+        add_v6)
+            [[ -n "$v6" ]] || warpstack_err "缺少 WARP IPv6 地址，无法写入配置"
+            address="${v6}/128"
+            allowed_ips="::/0"
+            ;;
+        *)
+            warpstack_err "未知的 WARP 安装模式: ${mode}"
+            ;;
+    esac
+
+    conf_dir="$(dirname "$WARPSTACK_WG_CONF")"
+    mkdir -p "$conf_dir" || warpstack_err "无法创建 WireGuard 配置目录: ${conf_dir}"
+    if ! cat > "$WARPSTACK_WG_CONF" << EOF
 # Managed by Zero.sh WarpStack
 [Interface]
 PrivateKey = ${priv}
-Address = ${v4}/32
-MTU = 1408
-
-[Peer]
-PublicKey = ${pub}
-AllowedIPs = 0.0.0.0/0
-Endpoint = ${ep}
-PersistentKeepalive = 25
-EOF
-    elif [[ "$mode" == "add_v6" ]]; then
-        [[ -n "$v6" ]] || warpstack_err "缺少 WARP IPv6 地址，无法写入配置"
-        cat > "$WARPSTACK_WG_CONF" << EOF
-# Managed by Zero.sh WarpStack
-[Interface]
-PrivateKey = ${priv}
-Address = ${v6}/128
+Address = ${address}
 MTU = 1280
 
 [Peer]
 PublicKey = ${pub}
-AllowedIPs = ::/0
+AllowedIPs = ${allowed_ips}
 Endpoint = ${ep}
 PersistentKeepalive = 25
 EOF
+    then
+        rm -f "$WARPSTACK_WG_CONF"
+        warpstack_err "写入 WireGuard 配置失败: ${WARPSTACK_WG_CONF}"
     fi
-    chmod 600 "$WARPSTACK_WG_CONF"
+    if ! chmod 600 "$WARPSTACK_WG_CONF"; then
+        rm -f "$WARPSTACK_WG_CONF"
+        warpstack_err "设置 WireGuard 配置权限失败: ${WARPSTACK_WG_CONF}"
+    fi
     warpstack_ok "wg0.conf 已写入"
 }
 
 warpstack_verify_tunnel() {
-    local mode="$1" family trace attempt
+    local mode="$1" attempts="${2:-3}" family trace attempt
 
     [[ "$mode" == "add_v4" ]] && family="-4" || family="-6"
-    for attempt in 1 2 3; do
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
         trace="$(warpstack_fetch_trace "$family" || true)"
         warpstack_trace_is_warp "$trace" && return 0
-        sleep 1
+        (( attempt < attempts )) && sleep 1
     done
     return 1
+}
+
+warpstack_latest_handshake() {
+    wg show wg0 latest-handshakes 2>/dev/null |
+        awk '$2 ~ /^[0-9]+$/ && $2 > latest { latest=$2 } END { print latest+0 }'
 }
 
 warpstack_cleanup_failed_install() {
@@ -8993,15 +9016,23 @@ warpstack_cleanup_failed_install() {
 }
 
 warpstack_start_and_enable() {
-    local mode="$1"
+    local mode="$1" handshake endpoint failure_reason
     warpstack_info "启动 wg0 隧道 ..."
     if ! wg-quick up wg0; then
         warpstack_cleanup_failed_install
         warpstack_err "wg0 启动失败，本次配置已撤销"
     fi
     if ! warpstack_verify_tunnel "$mode"; then
+        handshake="$(warpstack_latest_handshake)"
+        endpoint="$(wg show wg0 endpoints 2>/dev/null | awk 'NF { print $2; exit }')"
+        if [[ "$handshake" == "0" ]]; then
+            failure_reason="WireGuard 未完成握手，请检查 Endpoint 与上游 UDP 放行"
+        else
+            failure_reason="WireGuard 已完成握手，但隧道内 WARP 出口验证失败，请检查路由或 MTU"
+        fi
+        [[ -n "$endpoint" ]] && failure_reason="${failure_reason}；Endpoint: ${endpoint}"
         warpstack_cleanup_failed_install
-        warpstack_err "未检测到可用的 WARP 出口，本次配置已撤销"
+        warpstack_err "${failure_reason}；本次配置已撤销"
     fi
     warpstack_ok "wg0 隧道与 WARP 出口验证通过"
     if command -v systemctl &>/dev/null; then
@@ -9054,14 +9085,16 @@ warpstack_conf_value() {
 
 warpstack_public_ip() {
     local family="$1" fallback="$2" ip
-    ip=$(curl -s "$family" --max-time 5 ip.gs 2>/dev/null || true)
+    ip=$(curl -s "$family" --noproxy '*' --max-time 5 ip.gs 2>/dev/null || true)
     [[ -n "$ip" ]] && printf '%s' "$ip" || printf '%s' "$fallback"
 }
 
 warpstack_fetch_trace() {
-    local family="$1" trace=""
-    trace="$(curl -s "$family" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
-    [[ -n "$trace" && "$trace" == *"warp="* ]] || return 1
+    local family="$1" connect_timeout="${2:-5}" max_time="${3:-10}" trace=""
+    trace="$(curl -fsS "$family" --noproxy '*' --connect-timeout "$connect_timeout" --max-time "$max_time" \
+        https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    printf '%s\n' "$trace" | grep -q '^ip=' || return 1
+    printf '%s\n' "$trace" | grep -q '^warp=' || return 1
     printf '%s\n' "$trace"
 }
 
