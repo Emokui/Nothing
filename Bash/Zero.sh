@@ -8849,15 +8849,15 @@ warpstack_detect_network() {
             "http://[2606:4700:4700::1111]/cdn-cgi/trace" &>/dev/null && WARPSTACK_V6_READY=true
     fi
 
-    if { $WARPSTACK_V4_ADDR && ! $WARPSTACK_V4_READY; } ||
-       { $WARPSTACK_V6_ADDR && ! $WARPSTACK_V6_READY; }; then
-        WARPSTACK_NET_MODE="uncertain"
-    elif $WARPSTACK_V4_READY && $WARPSTACK_V6_READY; then
+    # 私网地址也属于 scope global；网络模式应优先依据已验证的公网连通性。
+    if $WARPSTACK_V4_READY && $WARPSTACK_V6_READY; then
         WARPSTACK_NET_MODE="dual"
     elif $WARPSTACK_V6_READY; then
         WARPSTACK_NET_MODE="v6_only"
     elif $WARPSTACK_V4_READY; then
         WARPSTACK_NET_MODE="v4_only"
+    elif $WARPSTACK_V4_ADDR || $WARPSTACK_V6_ADDR; then
+        WARPSTACK_NET_MODE="uncertain"
     else
         WARPSTACK_NET_MODE="none"
     fi
