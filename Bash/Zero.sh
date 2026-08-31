@@ -5999,8 +5999,9 @@ singbox_install_dependencies() {
 
 singbox_random_password() {
     local password
-    password=$(openssl rand -hex 16 2>/dev/null | tr -d '\r\n') || return 1
-    [[ "$password" =~ ^[0-9a-f]{32}$ ]] || return 1
+    password=$(openssl rand -base64 24 2>/dev/null | tr -dc 'A-Za-z0-9') || return 1
+    password="${password:0:16}"
+    [[ "$password" =~ ^[A-Za-z0-9]{16}$ ]] || return 1
     printf '%s' "$password"
 }
 
@@ -6194,11 +6195,12 @@ singbox_stage_release() {
 }
 
 singbox_version_is_newer() {
-    local candidate="${1#v}" current="${2#v}"
+    local candidate="${1#v}" current="${2#v}" dpkg_prerelease='~'
 
     # dpkg 的 ~ 会把 alpha/beta/rc 正确视为正式版之前的预发行版本。
-    candidate="${candidate/-/~}"
-    current="${current/-/~}"
+    # 通过变量传入字面量 ~，避免 Bash 在参数替换中将其展开为运行用户的家目录。
+    candidate="${candidate/-/$dpkg_prerelease}"
+    current="${current/-/$dpkg_prerelease}"
     dpkg --compare-versions "$candidate" gt "$current"
 }
 
@@ -6274,7 +6276,7 @@ singbox_label_for_type() {
         shadowsocks) echo "Shadowsocks 2022" ;;
         tuic) echo "TUIC v5" ;;
         hysteria2) echo "Hysteria2" ;;
-        snell) echo "Snell" ;;
+        snell) echo "Snell v6" ;;
         *) echo "$1" ;;
     esac
 }
@@ -6335,7 +6337,7 @@ singbox_prompt_password() {
     # 本函数通过命令替换返回凭据。交互换行必须写入 stderr，否则会被
     # $(singbox_prompt_password ...) 一并捕获并成为密码/PSK 的首字符。
     printf '\n' >&2
-    [[ -n "$value" ]] || value=$(singbox_random_password)
+    [[ -n "$value" ]] || value=$(singbox_random_password) || return 1
     value="${value//$'\r'/}"
     value="${value//$'\n'/}"
     printf '%s' "$value"
@@ -6446,21 +6448,10 @@ singbox_prompt_shadowsocks() {
 }
 
 singbox_prompt_snell() {
-    local config_file="$1" port version psk option obfs_mode mode
+    local config_file="$1" port psk option mode
 
     clear
-    echo -e "${BLUE}===== Snell 配置 (Sing-box 1.14+) =====${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN}Snell v5 (兼容 v4 协议,支持 HTTP 混淆)"
-    echo -e "${GREEN}2.${PLAIN}Snell v6 (支持流量整形)"
-    read -r -p "$(echo -e "${BLUE}协议版本 [1-2,默认1]: ${PLAIN}")" option
-    case "${option:-1}" in
-        1) version=5 ;;
-        2) version=6 ;;
-        *)
-            echo -e "${RED}无效选项${PLAIN}"
-            return 1
-            ;;
-    esac
+    echo -e "${BLUE}===== Snell v6 配置 (Sing-box 1.14+) =====${PLAIN}"
 
     port=$(singbox_prompt_port "Snell " 10815 "$config_file") || return 1
     while true; do
@@ -6471,32 +6462,23 @@ singbox_prompt_snell() {
         echo -e "${RED}Snell PSK 必须为 12-255 字节${PLAIN}"
     done
 
-    if (( version == 5 )); then
-        read -r -p "$(echo -e "${BLUE}开启 HTTP 混淆? [y/N]: ${PLAIN}")" option
-        [[ "$option" =~ ^[Yy]$ ]] && obfs_mode="http" || obfs_mode="none"
-        SINGBOX_NEW_INBOUND=$(jq -n \
-            --argjson port "$port" --arg psk "$psk" --arg obfs "$obfs_mode" \
-            '{type:"snell",tag:"snell-in",listen:"::",listen_port:$port,version:5,psk:$psk,obfs_mode:$obfs}')
-        SINGBOX_NEW_SUMMARY="Snell v5 端口: ${port}\nPSK: ${psk}\n混淆: ${obfs_mode}"
-    else
-        echo -e "${GREEN}1.${PLAIN}default (推荐)"
-        echo -e "${GREEN}2.${PLAIN}unshaped"
-        echo -e "${RED}3.${PLAIN}unsafe-raw"
-        read -r -p "$(echo -e "${BLUE}流量整形模式 [1-3,默认1]: ${PLAIN}")" option
-        case "${option:-1}" in
-            1) mode="default" ;;
-            2) mode="unshaped" ;;
-            3) mode="unsafe-raw" ;;
-            *)
-                echo -e "${RED}无效选项${PLAIN}"
-                return 1
-                ;;
-        esac
-        SINGBOX_NEW_INBOUND=$(jq -n \
-            --argjson port "$port" --arg psk "$psk" --arg mode "$mode" \
-            '{type:"snell",tag:"snell-in",listen:"::",listen_port:$port,version:6,psk:$psk,mode:$mode}')
-        SINGBOX_NEW_SUMMARY="Snell v6 端口: ${port}\nPSK: ${psk}\n整形模式: ${mode}"
-    fi
+    echo -e "${GREEN}1.${PLAIN}default (推荐)"
+    echo -e "${GREEN}2.${PLAIN}unshaped"
+    echo -e "${RED}3.${PLAIN}unsafe-raw"
+    read -r -p "$(echo -e "${BLUE}流量整形模式 [1-3,默认1]: ${PLAIN}")" option
+    case "${option:-1}" in
+        1) mode="default" ;;
+        2) mode="unshaped" ;;
+        3) mode="unsafe-raw" ;;
+        *)
+            echo -e "${RED}无效选项${PLAIN}"
+            return 1
+            ;;
+    esac
+    SINGBOX_NEW_INBOUND=$(jq -n \
+        --argjson port "$port" --arg psk "$psk" --arg mode "$mode" \
+        '{type:"snell",tag:"snell-in",listen:"::",listen_port:$port,version:6,psk:$psk,mode:$mode}')
+    SINGBOX_NEW_SUMMARY="Snell v6 端口: ${port}\nPSK: ${psk}\n整形模式: ${mode}"
 }
 
 singbox_prompt_tls_inbound() {
@@ -6581,8 +6563,11 @@ singbox_append_inbound() {
         rm -f "$output_file"
         return 1
     fi
-    mv "$output_file" "$config_file"
-    chmod 600 "$config_file"
+    if ! mv "$output_file" "$config_file"; then
+        rm -f "$output_file"
+        return 1
+    fi
+    chmod 600 "$config_file" || return 1
 }
 
 singbox_check_config_with() {
@@ -6679,7 +6664,7 @@ singbox_apply_and_cleanup() {
 
 singbox_install() {
     local enable_anytls enable_trojan enable_ss enable_tuic enable_hy2 enable_snell="n"
-    local candidate summary="" type install_channel channel_choice snell_available=0
+    local candidate summary="" type install_channel channel_choice
 
     clear
     if singbox_is_managed; then
@@ -6718,7 +6703,6 @@ singbox_install() {
         singbox_pause_and_return
         return 1
     }
-    singbox_version_supports_snell "$SINGBOX_STAGE_VERSION" && snell_available=1
 
     clear
     echo -e "${BLUE}选择要启用的 Sing-box 入站:${PLAIN}"
@@ -6727,9 +6711,7 @@ singbox_install() {
     read -r -p "启用 Shadowsocks 2022?[y/N]: " enable_ss
     read -r -p "启用 TUIC v5?         [y/N]: " enable_tuic
     read -r -p "启用 Hysteria2?       [y/N]: " enable_hy2
-    if (( snell_available == 1 )); then
-        read -r -p "启用 Snell v5/v6?     [y/N]: " enable_snell
-    fi
+    read -r -p "启用 Snell v6?        [y/N]: " enable_snell
     [[ "$enable_anytls" =~ ^[Yy]$ ]] && enable_anytls="y" || enable_anytls="n"
     [[ "$enable_trojan" =~ ^[Yy]$ ]] && enable_trojan="y" || enable_trojan="n"
     [[ "$enable_ss" =~ ^[Yy]$ ]] && enable_ss="y" || enable_ss="n"
@@ -6860,7 +6842,7 @@ singbox_add_inbound() {
     label=$(singbox_label_for_type "$type")
     if [[ "$type" == "snell" ]] && ! singbox_supports_snell; then
         echo -e "${RED}当前 Sing-box 内核不支持 Snell 入站${PLAIN}"
-        echo -e "${YELLOW}请先在“更新内核”中切换到测试版 1.14+${PLAIN}"
+        echo -e "${YELLOW}请先将 Sing-box 内核更新到 1.14.0 或更高版本${PLAIN}"
         return 1
     fi
     candidate=$(mktemp) || return 1
@@ -7039,24 +7021,19 @@ singbox_modify_trojan_ws_path() {
 }
 
 singbox_modify_snell_mode() {
-    local tag="snell-in" current_version option version mode candidate description
-    current_version=$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag == $tag) | .version' "$SINGBOX_CONFIG_PATH")
+    local tag="snell-in" option mode candidate description
 
     clear
-    echo -e "${BLUE}当前 Snell 版本: v${current_version}${PLAIN}"
-    echo -e "${GREEN}1.${PLAIN}v5 / 无混淆"
-    echo -e "${GREEN}2.${PLAIN}v5 / HTTP 混淆"
-    echo -e "${GREEN}3.${PLAIN}v6 / default 整形"
-    echo -e "${GREEN}4.${PLAIN}v6 / unshaped"
-    echo -e "${RED}5.${PLAIN}v6 / unsafe-raw"
+    echo -e "${BLUE}===== Snell v6 流量整形 =====${PLAIN}"
+    echo -e "${GREEN}1.${PLAIN}v6 / default 整形"
+    echo -e "${GREEN}2.${PLAIN}v6 / unshaped"
+    echo -e "${RED}3.${PLAIN}v6 / unsafe-raw"
     echo -e "${YELLOW}0.${PLAIN}取消"
-    read -r -p "$(echo -e "${BLUE}请选择 [0-5]: ${PLAIN}")" option
+    read -r -p "$(echo -e "${BLUE}请选择 [0-3]: ${PLAIN}")" option
     case "$option" in
-        1) version=5; mode="none"; description="v5 / 无混淆" ;;
-        2) version=5; mode="http"; description="v5 / HTTP 混淆" ;;
-        3) version=6; mode="default"; description="v6 / default" ;;
-        4) version=6; mode="unshaped"; description="v6 / unshaped" ;;
-        5) version=6; mode="unsafe-raw"; description="v6 / unsafe-raw" ;;
+        1) mode="default"; description="v6 / default" ;;
+        2) mode="unshaped"; description="v6 / unshaped" ;;
+        3) mode="unsafe-raw"; description="v6 / unsafe-raw" ;;
         0) return ;;
         *)
             echo -e "${RED}无效选项${PLAIN}"
@@ -7066,21 +7043,12 @@ singbox_modify_snell_mode() {
 
     candidate=$(mktemp) || return 1
     chmod 600 "$candidate"
-    if (( version == 5 )); then
-        jq --arg tag "$tag" --arg mode "$mode" \
-            '(.inbounds[] | select(.tag == $tag)) |= (.version = 5 | .obfs_mode = $mode | del(.mode))' \
-            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
-            rm -f "$candidate"
-            return 1
-        }
-    else
-        jq --arg tag "$tag" --arg mode "$mode" \
-            '(.inbounds[] | select(.tag == $tag)) |= (.version = 6 | .mode = $mode | del(.obfs_mode))' \
-            "$SINGBOX_CONFIG_PATH" > "$candidate" || {
-            rm -f "$candidate"
-            return 1
-        }
-    fi
+    jq --arg tag "$tag" --arg mode "$mode" \
+        '(.inbounds[] | select(.tag == $tag) | .mode) = $mode' \
+        "$SINGBOX_CONFIG_PATH" > "$candidate" || {
+        rm -f "$candidate"
+        return 1
+    }
 
     singbox_apply_and_cleanup "$candidate" "Snell 已切换为 ${description}" "Snell 模式切换后启动失败"
 }
@@ -7172,7 +7140,7 @@ singbox_manage_protocol() {
     if ! singbox_config_has_tag "$SINGBOX_CONFIG_PATH" "$tag"; then
         if [[ "$type" == "snell" ]] && ! singbox_supports_snell; then
             echo -e "${RED}当前内核不支持 Snell 入站${PLAIN}"
-            echo -e "${YELLOW}请先更新到测试版 Sing-box 1.14+${PLAIN}"
+            echo -e "${YELLOW}请先更新到 Sing-box 1.14.0 或更高版本${PLAIN}"
             sleep 2
             return 1
         fi
@@ -7189,7 +7157,7 @@ singbox_manage_protocol() {
         if singbox_type_uses_tls "$type"; then
             echo -e "${GREEN}3.${PLAIN}修改证书"
         elif [[ "$type" == "snell" ]]; then
-            echo -e "${GREEN}3.${PLAIN}修改版本/模式"
+            echo -e "${GREEN}3.${PLAIN}修改 v6 流量整形模式"
         elif [[ "$type" == "shadowsocks" ]] && singbox_shadowsocks_uses_shadowtls "$SINGBOX_CONFIG_PATH"; then
             echo -e "${GREEN}3.${PLAIN}修改 ShadowTLS v3"
         fi
@@ -7267,13 +7235,10 @@ singbox_enable_warp() {
         --arg server "$SINGBOX_WARP_SERVER" \
         --argjson port "$SINGBOX_WARP_PORT" \
         --arg public_key "$SINGBOX_WARP_PUBLIC_KEY" '
-        def is_plain_sniff:
-            .action == "sniff" and (keys_unsorted | length) == 1;
         def is_warp_resolve:
             .action == "resolve" and
-            (((.domain // []) == ["challenges.cloudflare.com"]) or
-             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]) or
-             ((.domain_suffix // []) == ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"]));
+            .strategy == "ipv6_only" and
+            ((.domain_suffix // []) == ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"]);
         def is_warp_rule:
             (.outbound // "") == $tag or is_warp_resolve;
 
@@ -7295,8 +7260,8 @@ singbox_enable_warp() {
         }] |
         .route = (.route // {}) |
         .route.rules = ((.route.rules // []) |
-            map(select(((is_warp_rule or is_plain_sniff) | not)))) |
-        .route.rules = [{action: "sniff"}] + [
+            map(select((is_warp_rule | not)))) |
+        .route.rules = [
             {
                 domain_suffix: ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"],
                 action: "resolve",
@@ -7323,13 +7288,10 @@ singbox_disable_warp() {
     candidate=$(mktemp) || return 1
     chmod 600 "$candidate"
     if ! jq --arg tag "$SINGBOX_WARP_TAG" '
-        def is_plain_sniff:
-            .action == "sniff" and (keys_unsorted | length) == 1;
         def is_warp_resolve:
             .action == "resolve" and
-            (((.domain // []) == ["challenges.cloudflare.com"]) or
-             ((.domain_suffix // []) == ["googlevideo.com", "youtube.com"]) or
-             ((.domain_suffix // []) == ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"]));
+            .strategy == "ipv6_only" and
+            ((.domain_suffix // []) == ["challenges.cloudflare.com", "googlevideo.com", "youtube.com"]);
         def is_warp_rule:
             (.outbound // "") == $tag or is_warp_resolve;
 
@@ -7337,7 +7299,7 @@ singbox_disable_warp() {
         if (.endpoints | length) == 0 then del(.endpoints) else . end |
         .route = (.route // {}) |
         .route.rules = ((.route.rules // []) |
-            map(select(((is_warp_rule or is_plain_sniff) | not)))) |
+            map(select((is_warp_rule | not)))) |
         if (.route.rules | length) == 0 then del(.route.rules) else . end
         ' "$SINGBOX_CONFIG_PATH" > "$candidate"; then
         rm -f "$candidate"
@@ -7364,7 +7326,7 @@ singbox_modify_config() {
     while true; do
         snell_status=$(singbox_protocol_status snell)
         if [[ "$snell_status" == "未启用" ]] && ! singbox_supports_snell; then
-            snell_status="需测试版1.14+"
+            snell_status="需 Sing-box 1.14+"
         fi
         clear
         echo -e "${BLUE}===== Sing-box 配置管理 =====${PLAIN}"
@@ -7373,7 +7335,7 @@ singbox_modify_config() {
         echo -e "${GREEN}3.${PLAIN}Shadowsocks 2022[${YELLOW}$(singbox_protocol_status shadowsocks)${PLAIN}]"
         echo -e "${GREEN}4.${PLAIN}TUIC v5         [${YELLOW}$(singbox_protocol_status tuic)${PLAIN}]"
         echo -e "${GREEN}5.${PLAIN}Hysteria2       [${YELLOW}$(singbox_protocol_status hysteria2)${PLAIN}]"
-        echo -e "${GREEN}6.${PLAIN}Snell v5/v6     [${YELLOW}${snell_status}${PLAIN}]"
+        echo -e "${GREEN}6.${PLAIN}Snell v6        [${YELLOW}${snell_status}${PLAIN}]"
         echo -e "${GREEN}7.${PLAIN}WARP 分流       [${YELLOW}$(singbox_warp_status)${PLAIN}]"
         echo -e "${YELLOW}0.${PLAIN}返回上级"
         read -r -p "$(echo -e "${BLUE}请输入选项 [0-7]: ${PLAIN}")" option
