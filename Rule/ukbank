@@ -37,3 +37,17 @@ DOMAIN-SUFFIX,sumup.com
 DOMAIN,api.eu.iterable.com
 DOMAIN,pod-31-sunco-ws.zendesk.com
 DOMAIN,sumup-92784.zendesk.com
+# Krak
+DOMAIN,u.expo.dev
+DOMAIN-KEYWORD,krak
+DOMAIN-KEYWORD,kraken
+DOMAIN-SUFFIX,krak.app
+DOMAIN-SUFFIX,sardine.ai
+DOMAIN-SUFFIX,kraken.com
+DOMAIN-SUFFIX,stripe.com
+DOMAIN,kraken.zendesk.com
+DOMAIN-SUFFIX,nsureapi.com
+DOMAIN,sdk.iad-05.braze.com
+DOMAIN-SUFFIX,launchdarkly.com
+DOMAIN-SUFFIX,appsflyersdk.com
+DOMAIN,cdn-settings.segment.com
