@@ -1,12 +1,3 @@
-# LemFi
-DOMAIN,api.ipify.org
-DOMAIN-SUFFIX,lemfi.com
-DOMAIN-SUFFIX,branch.io
-DOMAIN,cdp-eu.customer.io
-DOMAIN-SUFFIX,de.sentry.io
-DOMAIN-SUFFIX,lemonade.finance
-DOMAIN,consumer.inapp.customer.io
-DOMAIN,mobile-collector.newrelic.com
 # Krak
 DOMAIN,u.expo.dev
 DOMAIN-KEYWORD,krak
