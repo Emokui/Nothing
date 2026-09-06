@@ -12,7 +12,6 @@ IP-CIDR,46.68.0.0/17,no-resolve
 IP-CIDR,31.94.0.0/16,no-resolve
 IP-CIDR,87.194.0.0/16,no-resolve
 IP-CIDR,185.153.236.0/22,no-resolve
-IP-CIDR,185.153.237.0/24,no-resolve
 IP-CIDR,148.252.160.0/19,no-resolve
 # Apple
 DOMAIN,gspe1-ssl.ls.apple.com
@@ -20,11 +19,11 @@ DOMAIN,gspe1-ssl.ls.apple.com
 DOMAIN-KEYWORD,zopa
 DOMAIN-SUFFIX,zopa.com
 # Trading212
+DOMAIN,ticketshack.com
 DOMAIN-KEYWORD,trading212
+DOMAIN,content.ethoca.com
 DOMAIN-SUFFIX,amplitude.com
 DOMAIN-SUFFIX,trading212.com
-DOMAIN,ticketshack.com
-DOMAIN,content.ethoca.com
 DOMAIN,eu1.clevertap-prod.com
 DOMAIN,d1o59w04t0rrym.cloudfront.net
 DOMAIN,d14vqntc8kjril.cloudfront.net
@@ -35,12 +34,11 @@ DOMAIN-SUFFIX,sumup.io
 DOMAIN-SUFFIX,sumup.net
 DOMAIN-SUFFIX,sumup.com
 DOMAIN,api.eu.iterable.com
-DOMAIN,pod-31-sunco-ws.zendesk.com
 DOMAIN,sumup-92784.zendesk.com
+DOMAIN,pod-31-sunco-ws.zendesk.com
 # Uphold
-DOMAIN-SUFFIX,uphold.com
-DOMAIN-SUFFIX,onetrust.io
 DOMAIN,cdp.customer.io
+DOMAIN-SUFFIX,uphold.com
 DOMAIN,uphold.zendesk.com
 DOMAIN,images.cryptocompare.com
 DOMAIN,consumer.inapp.customer.io
