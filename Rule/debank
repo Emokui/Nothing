@@ -1,11 +1,13 @@
+# Nerverless
+DOMAIN-SUFFIX,neverless.com
 # Bunq
 DOMAIN-KEYWORD,bunq
 DOMAIN-SUFFIX,bunq.com
 DOMAIN,ota.lokalise.com
 DOMAIN-SUFFIX,eu.sardine.ai
-DOMAIN,ota-bundles.lokalise.com
 DOMAIN-SUFFIX,ingest.sentry.io
 DOMAIN-SUFFIX,eu.amplitude.com
+DOMAIN,ota-bundles.lokalise.com
 DOMAIN-SUFFIX,app-ads-services.com
 DOMAIN,bunq-prod-model-storage-public.s3.eu-central-1.amazonaws.com
 # N26
@@ -42,19 +44,15 @@ DOMAIN,sc-abtest.ffe390afd658c19dcbf707e0597b846d.de
 DOMAIN,sc-datasink.ffbbbdc6d3c353211fe2ba39c9f744cd.com
 DOMAIN,monitor-frontend-collector.ffbbbdc6d3c353211fe2ba39c9f744cd.com
 # Coinbase
-DOMAIN-SUFFIX,sardine.ai
-DOMAIN-SUFFIX,coinbase.com
-DOMAIN-SUFFIX,riskified.com
 DOMAIN,api.sprig.com
 DOMAIN,icanhazip.com
-DOMAIN,d1dwhf283nul1c.cloudfront.net
-DOMAIN-SUFFIX,cloudinary.com
 DOMAIN,ocsp.godaddy.com
+DOMAIN-SUFFIX,sardine.ai
 DOMAIN,use1-turn.fpjs.io
-DOMAIN,use1-turn.fpjs.io
-DOMAIN-SUFFIX,launches.appsflyersdk.com
-DOMAIN-SUFFIX,datadog.pool.ntp.org
+DOMAIN-SUFFIX,coinbase.com
 DOMAIN,widgets.marqeta.com
-DOMAIN-SUFFIX,skadsdkless.appsflyersdk.com
-DOMAIN-SUFFIX,cdn-settings.appsflyersdk.com
+DOMAIN-SUFFIX,riskified.com
+DOMAIN-SUFFIX,cloudinary.com
+DOMAIN-SUFFIX,datadog.pool.ntp.org
+DOMAIN,d1dwhf283nul1c.cloudfront.net
 DOMAIN,asset-metadata-service-production.s3.amazonaws.com
