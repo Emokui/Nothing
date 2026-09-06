@@ -37,3 +37,13 @@ DOMAIN-SUFFIX,sumup.com
 DOMAIN,api.eu.iterable.com
 DOMAIN,pod-31-sunco-ws.zendesk.com
 DOMAIN,sumup-92784.zendesk.com
+# Uphold
+DOMAIN-SUFFIX,uphold.com
+DOMAIN-SUFFIX,onetrust.io
+DOMAIN,cdp.customer.io
+DOMAIN,uphold.zendesk.com
+DOMAIN,images.cryptocompare.com
+DOMAIN,consumer.inapp.customer.io
+DOMAIN,ios.us-east2.aws.oscilar.com
+DOMAIN,browser-http-intake.logs.datadoghq.com
+DOMAIN,uphold-reports-production.s3.us-east-1.amazonaws.com
