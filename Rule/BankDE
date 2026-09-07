@@ -68,3 +68,18 @@ DOMAIN-SUFFIX,cloudinary.com
 DOMAIN-SUFFIX,datadog.pool.ntp.org
 DOMAIN,d1dwhf283nul1c.cloudfront.net
 DOMAIN,asset-metadata-service-production.s3.amazonaws.com
+# Ether
+IP-CIDR,198.18.0.1/32,no-resolve
+DOMAIN-SUFFIX,daimo.com
+DOMAIN-SUFFIX,de.sentry.io
+DOMAIN-SUFFIX,ether.fi
+DOMAIN-SUFFIX,intercom.io
+DOMAIN,api.turnkey.com
+DOMAIN,api.onesignal.com
+DOMAIN-SUFFIX,walletconnect.org
+DOMAIN-SUFFIX,walletconnect.com
+DOMAIN,api.web3modal.org
+DOMAIN,api.web3modal.com
+DOMAIN,assets.coingecko.com
+DOMAIN,mpp.prd.meawallet.app
+DOMAIN-SUFFIX,s3.eu-west-1.amazonaws.com
