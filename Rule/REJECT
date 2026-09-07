@@ -1,6 +1,7 @@
 DOMAIN,api.segment.io
 DOMAIN,ep2.facebook.com
 DOMAIN,graph.facebook.com
+DOMAIN,connect.facebook.net
 DOMAIN,analytics.adjust.io
 DOMAIN,analytics.adjust.com
 DOMAIN,inapps.appsflyer.com
